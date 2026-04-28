@@ -331,15 +331,26 @@ def plot_2d_marginals_grid(
         nt, _, _ = np.histogram2d(x_train, y_train, bins=[xedges, yedges])
         ns, _, _ = np.histogram2d(x_samp, y_samp, bins=[xedges, yedges])
 
-        nt_show = nt.T
-        ns_show = ns.T
+        # Normalize to density so train/sample are comparable regardless of
+        # sample count.  bin_area makes the values interpretable as density.
+        n_train = max(len(x_train), 1)
+        n_samp = max(len(x_samp), 1)
+        dx = xedges[1] - xedges[0]
+        dy = yedges[1] - yedges[0]
+        bin_area = dx * dy
+        nt_density = nt / (n_train * bin_area)
+        ns_density = ns / (n_samp * bin_area)
+
+        nt_show = nt_density.T
+        ns_show = ns_density.T
 
         main_vmax = np.nanpercentile(np.concatenate([nt_show.ravel(), ns_show.ravel()]), 99.5)
-        main_vmax = max(float(main_vmax), 1.0)
+        main_vmax = max(float(main_vmax), 1.0e-12)
         if logscale:
-            main_norm = LogNorm(vmin=1.0, vmax=main_vmax)
-            nt_plot = np.maximum(nt_show, 1.0)
-            ns_plot = np.maximum(ns_show, 1.0)
+            main_vmin = main_vmax * 1e-4
+            main_norm = LogNorm(vmin=main_vmin, vmax=main_vmax)
+            nt_plot = np.maximum(nt_show, main_vmin)
+            ns_plot = np.maximum(ns_show, main_vmin)
         else:
             main_norm = Normalize(vmin=0.0, vmax=main_vmax)
             nt_plot = nt_show
@@ -395,7 +406,7 @@ def plot_2d_marginals_grid(
             ax_d.set_title("Poisson significance ($sigma$)")
 
         cb_main = fig.colorbar(im_s, ax=[ax_t, ax_s], location="top", fraction=0.06, pad=0.02)
-        cb_main.set_label("counts" if not logscale else "counts (log)")
+        cb_main.set_label("density" if not logscale else "density (log)")
 
         cb_diff = fig.colorbar(im_d, ax=ax_d, location="top", fraction=0.06, pad=0.02)
         cb_diff.set_label(r"\$\\Delta\$ (sigma-like)")

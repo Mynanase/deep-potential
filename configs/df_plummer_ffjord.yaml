@@ -11,7 +11,10 @@ flow:
   type: ffjord
   dim: 6
   ffjord:
-    hidden_sizes: [128, 128, 128]
+    hidden_sizes:
+    - 256
+    - 256
+    - 256
     n_blocks: 3
     solver: tsit5
     rtol: 1.0e-5
@@ -20,15 +23,15 @@ flow:
     dt0: 0.01
     max_steps: 4096
     # Finlay et al. (2020) regularisation — prevents ODE complexity explosion
-    kin_reg: 2.0e-4
-    jac_reg: 2.0e-4
+    kin_reg: 0.0001
+    jac_reg: 0.0001
 
 train:
-  batch_size: 4096
-  epochs: 96
+  batch_size: 8192
+  epochs: 32
   lr:
     max: 0.003
-    final: 0.0002
+    final: 0.0001
     warmup_frac: 0.1
   grad_clip: 1.0
   log_every: 50
