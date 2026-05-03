@@ -159,8 +159,28 @@ register_flow(
 # ── Public helpers ────────────────────────────────────────────────────
 
 def _resolve_type(flow_cfg: dict) -> str:
-    """Return the flow backend name from a config dict (default ``realnvp``)."""
-    return str(flow_cfg.get("type", "realnvp")).lower()
+    """Return the flow backend name from a config dict.
+
+    ``flow.type`` is now required.  Omitting it raises ``ValueError``.
+    Explicitly selecting ``realnvp`` emits a ``FutureWarning`` because
+    RealNVP is scheduled for removal in a future release.
+    """
+    if "type" not in flow_cfg:
+        raise ValueError(
+            "flow.type is required. "
+            "Choose 'ffjord' (recommended) or 'realnvp' (legacy)."
+        )
+    name = str(flow_cfg["type"]).lower()
+    if name == "realnvp":
+        import warnings
+        warnings.warn(
+            "RealNVP is deprecated and will be removed in a future release. "
+            "Migrate to FFJORD by setting flow.type='ffjord'. "
+            "See configs/df_plummer_ffjord.yaml for an example.",
+            FutureWarning,
+            stacklevel=4,
+        )
+    return name
 
 
 def _backend(flow_cfg: dict) -> Dict[str, Any]:

@@ -8,11 +8,13 @@
 
 ### 双后端 DF 支持
 
-项目同时支持两种归一化流后端：
-- **RealNVP**（离散耦合层）— 默认，训练快
-- **FFJORD**（连续归一化流 / Neural ODE）— 需 `diffrax`，理论表达力更强
+项目支持两种归一化流后端：
+- **FFJORD**（连续归一化流 / Neural ODE）— 推荐，需 `diffrax`，理论表达力更强
+- **RealNVP**（离散耦合层）— 已弃用，仅保留用于兼容旧检查点
 
-通过 `flow.type` 配置项切换（默认 `realnvp`）。所有下游脚本（`train_phi`、`finetune_joint`、`eval_*`）自动适配。
+通过 `flow.type` 配置项切换（必填，`"ffjord"` 或 `"realnvp"`）。所有下游脚本（`train_phi`、`finetune_joint`、`eval_*`）自动适配。
+
+> 注意：`flow.type` 现在是必填项。缺失会抛出 `ValueError`。选择 `realnvp` 会触发 `FutureWarning`。
 
 ## 环境（GPU, CUDA 12）
 建议单独建环境：
@@ -76,16 +78,18 @@ eta = plummer_gendata.sample_df(131072)
 plummer_gendata.save_data(eta, "data/plummer_n131072.h5")
 ```
 
-## 训练 DF（RealNVP，默认）
-```bash
-python experiments/train_df.py --config configs/df_plummer.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df
-```
-
-## 训练 DF（FFJORD）
+## 训练 DF（FFJORD，推荐）
 ```bash
 pip install diffrax   # 首次使用 FFJORD 需安装
 python experiments/train_df.py --config configs/df_plummer_ffjord.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df_ffjord
 ```
+
+## 训练 DF（RealNVP，已弃用）
+```bash
+python experiments/train_df.py --config configs/df_plummer.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df
+```
+
+> 该命令会触发 `FutureWarning`，提示 RealNVP 即将被移除。
 
 FFJORD 关键超参（在 `configs/df_plummer_ffjord.yaml` 中调整）：
 - `flow.ffjord.hidden_sizes` — 速度场 MLP 宽度（默认 `[128,128,128]`）

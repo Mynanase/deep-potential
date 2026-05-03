@@ -8,6 +8,21 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [2026-05-04] RealNVP → FFJORD Migration `[AI-assisted]`
+
+> **Session intent**: 将 FFJORD 确立为默认 DF 后端，使 `flow.type` 成为必填项，同时保留 RealNVP 作为 legacy 兼容后端并发出弃用警告。修复 `train_phi.py` 非 resume 运行时追加覆盖 `metrics.csv` 的 bug。
+
+### Added
+- `configs/df_plummer.yaml` 显式声明 `type: realnvp` — 保留 legacy 配置
+- `experiments/smoke_dpjax.py` — 新增 FFJORD 默认测试 + RealNVP FutureWarning 验证 + missing type ValueError 验证
+
+### Changed
+- `dpjax/flows/api.py` — `_resolve_type()` 现在要求 `flow.type` 必填，缺失时抛出 `ValueError`；明确选择 `realnvp` 时触发 `FutureWarning`
+- `experiments/train_phi.py` — 非 resume 运行时以 `"w"` 模式重写 `metrics.csv`（之前是 `"a"` 追加，可能导致重复 header）
+- `PROJECT_STRUCTURE.md` — 更新 DF 网络描述，将 FFJORD 标为推荐/默认，RealNVP 标为已弃用
+
+---
+
 ## [2026-04-22] DF 训练 v2 + 数据生成修复 `[AI-assisted]`
 
 > **Session intent**: 使用当前 FFJORD 配置从头训练 DF（解决 v1 因 resume 不匹配导致的 ODE max_steps 崩溃），修复数据生成脚本的过采样问题，并生成 2^19 / 2^20 规模的 train/test 数据集用于正式复现实验。

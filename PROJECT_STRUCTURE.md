@@ -32,13 +32,15 @@
 
 项目使用 `flax.linen` 进行面向对象的网络定义。
 
-### 分布函数 (DF) 网络：统一后端（RealNVP / FFJORD）
-*   **位置**: `dpjax/flows/api.py`（统一入口），后端实现位于 `dpjax/flows/realnvp.py` 和 `dpjax/flows/ffjord.py`。
+### 分布函数 (DF) 网络：统一后端（FFJORD / RealNVP Legacy）
+*   **位置**: `dpjax/flows/api.py`（统一入口），后端实现位于 `dpjax/flows/ffjord.py` 和 `dpjax/flows/realnvp.py`。
 *   **架构描述**:
-    *   **RealNVP**：基于 Affine Coupling 的离散流，适合作为快速基线；
-    *   **FFJORD**：连续归一化流（Neural ODE），当前默认参数与论文设定对齐为 **3 blocks × (3 hidden layers, 每层 128 神经元, tanh)**。
+    *   **FFJORD**（默认，推荐）：连续归一化流（Neural ODE），当前默认参数与论文设定对齐为 **3 blocks × (3 hidden layers, 每层 128 神经元, tanh)**。`flow.type` 必须显式设置为 `"ffjord"`。
+    *   **RealNVP**（已弃用）：基于 Affine Coupling 的离散流，仅保留用于兼容旧检查点；显式使用时会触发 `FutureWarning`。
 *   **输入维度**: 6D 相空间数据坐标 $(x, y, z, v_x, v_y, v_z)$。
-*   **切换方式**: 通过配置项 `flow.type` 选择后端（`realnvp` / `ffjord`）。
+*   **切换方式**: 通过配置项 `flow.type` 选择后端（必填， `"ffjord"` 或 `"realnvp"`）。
+    *   缺失 `flow.type` 会抛出 `ValueError`。
+    *   `flow.type: realnvp` 会触发弃用警告。
 
 ### 引力势能 ($\Phi$) 网络
 *   **位置**: `dpjax/models/potential.py`

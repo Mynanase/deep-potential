@@ -281,7 +281,8 @@ def run_phi_training(
 
     metrics_path = run_dir / "metrics.csv"
     write_header = not metrics_path.exists() or not resume
-    with metrics_path.open("a", newline="") as f:
+    open_mode = "a" if resume else "w"
+    with metrics_path.open(open_mode, newline="") as f:
         writer = csv.writer(f)
         if write_header:
             writer.writerow(["step", "epoch", "loss", "residual_mean", "residual_std", "residual_p99_abs"])
