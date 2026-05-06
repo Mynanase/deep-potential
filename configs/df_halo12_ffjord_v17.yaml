@@ -1,0 +1,59 @@
+# Halo12 FFJORD v17 — Lower LR prevents collapse at constant-lr phase
+# v16 analysis: training stable during warmup (step 0-475), but collapsed at step 575
+# (75 steps after lr reached 0.0005). lr=5e-4 too aggressive for constant phase.
+# v15 "succeeded" only because 3 epochs = 474 steps ≈ warmup length — never entered
+# the constant-lr phase!
+#
+# Strategy: Reduce peak lr to 1e-4, keep warmup 10%, allow plateau to decay further.
+# Also try larger warmup (20%) to make the transition smoother.
+seed: 42
+
+data:
+  dataset: eta
+  val_frac: 0.1
+  clip_sigma: 4.5
+  jitter_std: 0.01
+  transform:
+    type: asinh
+    dims: [0, 1, 2]
+    scale: auto
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    hidden_sizes: [192, 192, 192, 192, 192, 192]
+    n_blocks: 3
+    solver: dopri5
+    stepsize_controller: pid
+    dt0: 0.001
+    max_steps: 16384
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    kin_reg: 1.0e-3
+    jac_reg: 1.0e-3
+
+train:
+  batch_size: 8192
+  epochs: 30
+  lr:
+    schedule: plateau
+    max: 1.0e-4
+    final: 1.0e-6
+    warmup_frac: 0.2
+    plateau:
+      factor: 0.5
+      patience: 500
+      min_delta: 0.005
+      min_lr: 1.0e-6
+  grad_clip: 1.0
+  log_every: 25
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true
+  stop_score_p99: 200.0
+  stop_score_max_abs: 5000.0

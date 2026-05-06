@@ -81,7 +81,7 @@ def run_phi_training(
 
     (run_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
-    df_model, df_params, normalizer, df_cfg = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
     flow_cfg = df_cfg.get("flow", {})
 
     eta = load_eta_h5(data_path, dataset=config.get("data", {}).get("dataset", "eta"))

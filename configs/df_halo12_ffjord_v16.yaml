@@ -1,0 +1,59 @@
+# Halo12 FFJORD v16 — Paper-scale architecture, 30 epochs
+# Based on v15 success (clip_sigma=4.5 + jitter_std=0.01 solved score explosion).
+# Changes from v15:
+#   1. n_blocks: 2 → 3 (paper scale)
+#   2. epochs: 3 → 30 (proper training length)
+#   3. lr plateau patience: 200 → 500 (more patience for longer training)
+#   4. Keep all v15 data fixes: clip_sigma=4.5, jitter_std=0.01, asinh dims [0,1,2]
+#   5. Keep reg=1e-3, rtol/atol=1e-5, lr=5e-4 from v15
+seed: 42
+
+data:
+  dataset: eta
+  val_frac: 0.1
+  clip_sigma: 4.5
+  jitter_std: 0.01
+  transform:
+    type: asinh
+    dims: [0, 1, 2]
+    scale: auto
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    hidden_sizes: [192, 192, 192, 192, 192, 192]
+    n_blocks: 3
+    solver: dopri5
+    stepsize_controller: pid
+    dt0: 0.001
+    max_steps: 16384
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    kin_reg: 1.0e-3
+    jac_reg: 1.0e-3
+
+train:
+  batch_size: 8192
+  epochs: 30
+  lr:
+    schedule: plateau
+    max: 5.0e-4
+    final: 5.0e-6
+    warmup_frac: 0.1
+    plateau:
+      factor: 0.5
+      patience: 500
+      min_delta: 0.01
+      min_lr: 5.0e-6
+  grad_clip: 1.0
+  log_every: 25
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true
+  stop_score_p99: 200.0
+  stop_score_max_abs: 5000.0

@@ -27,7 +27,7 @@ class _CSVBackend:
     """Append-only CSV log – always available."""
 
     def __init__(self, run_dir: Path, fieldnames: Sequence[str] = ()):
-        self._path = run_dir / "metrics.csv"
+        self._path = run_dir / "logger_metrics.csv"
         self._fieldnames = list(fieldnames)
         self._file = None
         self._writer = None

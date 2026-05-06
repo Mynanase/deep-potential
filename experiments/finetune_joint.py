@@ -85,7 +85,7 @@ def run_joint_finetuning(
     (df_out / "ckpt").mkdir(parents=True, exist_ok=True)
     (phi_out / "ckpt").mkdir(parents=True, exist_ok=True)
 
-    df_model, df_params_init, normalizer, df_cfg = load_df(df_run_dir)
+    df_model, df_params_init, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
     flow_cfg = df_cfg.get("flow", {})
     phi_model, phi_params_init, phi_cfg = load_phi(phi_run_dir)
 

@@ -7,5 +7,7 @@ from .diagnostics import (
     plot_rv_comparison,
     plot_phi_rho_slice,
     plot_density_profile,
+    plot_plummer_figure3,
+    plot_potential_density_overview,
     plot_residual_spatial,
 )

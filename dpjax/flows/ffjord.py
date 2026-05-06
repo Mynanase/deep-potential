@@ -38,6 +38,7 @@ class FFJORDConfig:
     trace_type: str = "exact"   # "exact" or "hutchinson"
     dt0: float = 0.01
     max_steps: int = 4096
+    stepsize_controller: str = "pid"  # "pid" or "constant"
     # Finlay et al. (2020) regularisation — 0 disables
     kin_reg: float = 0.0   # kinetic energy  ||f(t,x)||^2
     jac_reg: float = 0.0   # Jacobian Frobenius  ||∂f/∂x||_F^2
@@ -233,7 +234,13 @@ class FFJORD(nn.Module):
 
         term = diffrax.ODETerm(dynamics)
         solver = _get_solver(self.cfg.solver)
-        sc = diffrax.PIDController(rtol=self.cfg.rtol, atol=self.cfg.atol)
+        
+        # Stepsize controller: "pid" (default) or "constant"
+        sc_name = getattr(self.cfg, "stepsize_controller", "pid")
+        if sc_name == "constant":
+            sc = diffrax.ConstantStepSize()
+        else:
+            sc = diffrax.PIDController(rtol=self.cfg.rtol, atol=self.cfg.atol)
 
         dt0_val = self.cfg.dt0 if t1 > t0 else -self.cfg.dt0
 

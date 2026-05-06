@@ -19,7 +19,7 @@ import jax.numpy as jnp
 import yaml
 from flax import linen as nn
 
-from dpjax.data import Normalizer
+from dpjax.data import Normalizer, CoordinateTransform
 from dpjax.utils.ckpt import create_manager, restore_latest
 
 
@@ -114,6 +114,7 @@ def _ffjord_build(flow_cfg: dict) -> nn.Module:
             max_steps=int(ffjord_sub.get("max_steps", 4096)),
             kin_reg=float(ffjord_sub.get("kin_reg", 0.0)),
             jac_reg=float(ffjord_sub.get("jac_reg", 0.0)),
+            stepsize_controller=str(ffjord_sub.get("stepsize_controller", "pid")),
         )
     )
 
@@ -305,12 +306,13 @@ def sample_apply(
     return _REGISTRY[name]["sample"](model, params, rng_key, n_samples)
 
 
-# ── Unified loader ────────────────────────────────────────────────────
+# ── Unified loader ───────────────────────────────────────────────────────
 
-def load_df(df_run_dir: str | Path) -> Tuple[nn.Module, dict, Normalizer, dict]:
+def load_df(df_run_dir: str | Path) -> Tuple[nn.Module, dict, Normalizer, dict, CoordinateTransform | None]:
     """Load a trained DF from *df_run_dir* (backend-agnostic).
 
-    Returns ``(model, params, normalizer, full_config_dict)``.
+    Returns ``(model, params, normalizer, full_config_dict, coord_transform)``.
+    ``coord_transform`` is ``None`` when no coordinate preprocessing was used.
     """
     df_run_dir = Path(df_run_dir)
     cfg_path = df_run_dir / "config.yaml"
@@ -331,4 +333,10 @@ def load_df(df_run_dir: str | Path) -> Tuple[nn.Module, dict, Normalizer, dict]:
     restored = restore_latest(ckpt_mgr)
     params = restored["params"]
 
-    return model, params, norm, cfg
+    ct_path = df_run_dir / "coord_transform.npz"
+    if ct_path.exists():
+        coord_transform = CoordinateTransform.load_npz(ct_path)
+    else:
+        coord_transform = None
+
+    return model, params, norm, cfg, coord_transform

@@ -491,6 +491,308 @@ def plot_density_profile(
     return fig
 
 
+def plot_plummer_figure3(
+    r: np.ndarray,
+    phi_true: np.ndarray,
+    phi_learned_shift: np.ndarray,
+    rho_analytic: np.ndarray,
+    rho_learned: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    phi_slice: np.ndarray,
+    rho_slice: np.ndarray,
+    *,
+    fig_dir: Optional[str | Path] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+    filename: str = "plummer_figure3",
+):
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+    from matplotlib.gridspec import GridSpec
+
+    r = np.asarray(r)
+    phi_true = np.asarray(phi_true)
+    phi_learned_shift = np.asarray(phi_learned_shift)
+    rho_analytic = np.asarray(rho_analytic)
+    rho_learned = np.asarray(rho_learned)
+    x = np.asarray(x)
+    y = np.asarray(y)
+    phi_slice = np.asarray(phi_slice)
+    rho_slice = np.asarray(rho_slice)
+
+    rho0 = float(3.0 / (4.0 * np.pi))
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    R = np.sqrt(X**2 + Y**2)
+    rho_true_slice = rho0 * (1.0 + R**2) ** (-2.5)
+
+    phi_display = phi_slice - np.nanmax(phi_slice)
+    phi_display = phi_display - np.nanmin(phi_display) + np.nanmin(phi_true)
+    phi_display = phi_display + (float(phi_true[0]) - float(np.nanmin(phi_display)))
+    rho_ratio = rho_slice / rho0
+
+    extent = [float(x[0]), float(x[-1]), float(y[0]), float(y[-1])]
+
+    fig = plt.figure(figsize=(10.4, 5.2), dpi=dpi)
+    gs = GridSpec(
+        3,
+        4,
+        figure=fig,
+        width_ratios=[1.45, 0.08, 1.0, 1.0],
+        height_ratios=[1.0, 1.0, 0.9],
+        wspace=0.32,
+        hspace=0.18,
+    )
+
+    ax_phi_r = fig.add_subplot(gs[0, 0])
+    ax_rho_r = fig.add_subplot(gs[1, 0], sharex=ax_phi_r)
+    ax_resid = fig.add_subplot(gs[2, 0], sharex=ax_phi_r)
+    ax_phi = fig.add_subplot(gs[:, 2])
+    ax_rho = fig.add_subplot(gs[:, 3])
+
+    ax_phi_r.plot(r, phi_true, color="orange", lw=2.0, label="Truth")
+    ax_phi_r.scatter(r, phi_learned_shift, s=5, color="tab:blue", alpha=0.55, label="Estimate", edgecolors="none")
+    ax_phi_r.set_xscale("log")
+    ax_phi_r.set_ylabel(r"$\Phi$")
+    ax_phi_r.legend(loc="upper left", fontsize=8, frameon=True)
+
+    ax_rho_r.plot(r, rho_analytic, color="orange", lw=2.0)
+    ax_rho_r.scatter(r, rho_learned, s=5, color="tab:blue", alpha=0.45, edgecolors="none")
+    ax_rho_r.set_xscale("log")
+    ax_rho_r.set_ylabel(r"$\rho$")
+
+    ax_resid.scatter(r, rho_learned - rho_analytic, s=5, color="tab:green", alpha=0.25, edgecolors="none")
+    ax_resid.axhline(0.0, color="0.4", lw=0.8, alpha=0.7)
+    ax_resid.set_xscale("log")
+    ax_resid.set_xlabel(r"$r$")
+    ax_resid.set_ylabel(r"$\rho^*-\rho$")
+
+    for ax in (ax_phi_r, ax_rho_r):
+        ax.tick_params(labelbottom=False)
+    for ax in (ax_phi_r, ax_rho_r, ax_resid):
+        ax.grid(True, alpha=0.12)
+
+    phi_vmin, phi_vmax = np.nanpercentile(phi_display, [1.0, 99.0])
+    im_phi = ax_phi.imshow(
+        phi_display,
+        extent=extent,
+        origin="lower",
+        cmap="inferno",
+        vmin=float(phi_vmin),
+        vmax=float(phi_vmax),
+        interpolation="nearest",
+    )
+    ax_phi.set_xlabel(r"$x$")
+    ax_phi.set_ylabel(r"$y$")
+    ax_phi.set_aspect("equal")
+
+    rho_pos = np.clip(rho_ratio, 1.0e-6, np.inf)
+    positive = rho_pos[np.isfinite(rho_pos) & (rho_pos > 0.0)]
+    rho_vmin, rho_vmax = np.nanpercentile(positive, [2.0, 99.5])
+    im_rho = ax_rho.imshow(
+        rho_pos,
+        extent=extent,
+        origin="lower",
+        cmap="viridis",
+        norm=colors.LogNorm(vmin=max(float(rho_vmin), 1.0e-6), vmax=max(float(rho_vmax), 1.0e-5)),
+        interpolation="nearest",
+    )
+    levels = [1.0e-3, 1.0e-2, 1.0e-1]
+    contour_values = [rho0 * level for level in levels]
+    ax_rho.contour(X, Y, rho_true_slice, levels=contour_values, colors="0.25", linewidths=0.7, alpha=0.65)
+    ax_rho.set_xlabel(r"$x$")
+    ax_rho.tick_params(labelleft=False)
+    ax_rho.set_aspect("equal")
+
+    cbar_phi = fig.colorbar(im_phi, ax=ax_phi, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
+    cbar_phi.set_label(r"$\Phi^*$")
+    cbar_rho = fig.colorbar(im_rho, ax=ax_rho, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
+    cbar_rho.set_label(r"$\rho^*/\rho(r=0)$")
+
+    if fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in fig_fmt:
+            fig.savefig(fig_dir / f"{filename}.{fmt}", dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return None
+    return fig
+
+
+def plot_potential_density_overview(
+    r: np.ndarray,
+    phi_learned: np.ndarray,
+    rho_learned: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    phi_slice: np.ndarray,
+    rho_slice: np.ndarray,
+    *,
+    ar_learned: Optional[np.ndarray] = None,
+    phi_true: Optional[np.ndarray] = None,
+    rho_true: Optional[np.ndarray] = None,
+    ar_true: Optional[np.ndarray] = None,
+    data_xy: Optional[np.ndarray] = None,
+    title: str = "Potential / Density Overview",
+    fig_dir: Optional[str | Path] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+    filename: str = "potential_density_overview",
+):
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+    from matplotlib.gridspec import GridSpec
+
+    r = np.asarray(r)
+    phi_learned = np.asarray(phi_learned)
+    rho_learned = np.asarray(rho_learned)
+    x = np.asarray(x)
+    y = np.asarray(y)
+    phi_slice = np.asarray(phi_slice)
+    rho_slice = np.asarray(rho_slice)
+    ar_learned = None if ar_learned is None else np.asarray(ar_learned)
+    phi_true = None if phi_true is None else np.asarray(phi_true)
+    rho_true = None if rho_true is None else np.asarray(rho_true)
+    ar_true = None if ar_true is None else np.asarray(ar_true)
+    data_xy = None if data_xy is None else np.asarray(data_xy)
+
+    extent = [float(x[0]), float(x[-1]), float(y[0]), float(y[-1])]
+    fig = plt.figure(figsize=(10.8, 5.3), dpi=dpi)
+    gs = GridSpec(
+        3,
+        4,
+        figure=fig,
+        width_ratios=[1.55, 0.08, 1.0, 1.0],
+        height_ratios=[1.0, 1.0, 0.9],
+        wspace=0.34,
+        hspace=0.18,
+    )
+
+    ax_phi_r = fig.add_subplot(gs[0, 0])
+    ax_rho_r = fig.add_subplot(gs[1, 0], sharex=ax_phi_r)
+    ax_aux = fig.add_subplot(gs[2, 0], sharex=ax_phi_r)
+    ax_phi = fig.add_subplot(gs[:, 2])
+    ax_rho = fig.add_subplot(gs[:, 3])
+
+    if phi_true is not None:
+        ax_phi_r.plot(r, phi_true, color="orange", lw=2.0, label="Truth")
+        ax_phi_r.scatter(r, phi_learned, s=5, color="tab:blue", alpha=0.55, label="Estimate", edgecolors="none")
+    else:
+        ax_phi_r.plot(r, phi_learned, color="tab:blue", lw=1.7, label="Estimate")
+    ax_phi_r.set_xscale("log")
+    ax_phi_r.set_ylabel(r"$\Phi^*$")
+    ax_phi_r.legend(loc="best", fontsize=8, frameon=True)
+
+    if rho_true is not None:
+        ax_rho_r.plot(r, rho_true, color="orange", lw=2.0)
+        ax_rho_r.scatter(r, rho_learned, s=5, color="tab:blue", alpha=0.45, edgecolors="none")
+    else:
+        ax_rho_r.plot(r, rho_learned, color="tab:blue", lw=1.4)
+    ax_rho_r.set_xscale("log")
+    ax_rho_r.set_ylabel(r"$\rho^*$")
+
+    if rho_true is not None:
+        ax_aux.scatter(r, rho_learned - rho_true, s=5, color="tab:green", alpha=0.25, edgecolors="none")
+        ax_aux.axhline(0.0, color="0.4", lw=0.8, alpha=0.7)
+        ax_aux.set_ylabel(r"$\rho^*-\rho$")
+    elif ar_learned is not None:
+        if ar_true is not None:
+            ax_aux.plot(r, ar_true, color="orange", lw=2.0, label="Truth")
+            ax_aux.scatter(r, ar_learned, s=5, color="tab:blue", alpha=0.45, label="Estimate", edgecolors="none")
+            ax_aux.legend(loc="best", fontsize=8, frameon=True)
+        else:
+            ax_aux.plot(r, ar_learned, color="tab:purple", lw=1.4)
+        ax_aux.set_ylabel(r"$a_r^*$")
+    else:
+        ax_aux.plot(r, np.zeros_like(r), color="0.5", lw=0.8)
+        ax_aux.set_ylabel("aux")
+    ax_aux.set_xscale("log")
+    ax_aux.set_xlabel(r"$r$")
+
+    for ax in (ax_phi_r, ax_rho_r):
+        ax.tick_params(labelbottom=False)
+    for ax in (ax_phi_r, ax_rho_r, ax_aux):
+        ax.grid(True, alpha=0.12)
+
+    phi_display = phi_slice - np.nanmedian(phi_slice)
+    phi_vmin, phi_vmax = np.nanpercentile(phi_display, [1.0, 99.0])
+    if phi_vmin < 0.0 < phi_vmax:
+        phi_norm = colors.TwoSlopeNorm(vcenter=0.0, vmin=float(phi_vmin), vmax=float(phi_vmax))
+        im_phi = ax_phi.imshow(phi_display, extent=extent, origin="lower", cmap="seismic", norm=phi_norm, interpolation="nearest")
+    else:
+        im_phi = ax_phi.imshow(
+            phi_display,
+            extent=extent,
+            origin="lower",
+            cmap="viridis",
+            vmin=float(phi_vmin),
+            vmax=float(phi_vmax),
+            interpolation="nearest",
+        )
+    ax_phi.set_xlabel(r"$x$")
+    ax_phi.set_ylabel(r"$y$")
+    ax_phi.set_aspect("equal")
+
+    finite_rho = rho_slice[np.isfinite(rho_slice)]
+    has_negative = finite_rho.size > 0 and float(np.nanpercentile(finite_rho, 1.0)) < 0.0
+    if has_negative:
+        rho_v = float(max(np.nanpercentile(np.abs(finite_rho), 99.0), 1.0e-12))
+        rho_linthresh = float(max(np.nanpercentile(np.abs(finite_rho), 20.0), rho_v * 1.0e-4, 1.0e-12))
+        im_rho = ax_rho.imshow(
+            rho_slice,
+            extent=extent,
+            origin="lower",
+            cmap="coolwarm",
+            norm=colors.SymLogNorm(linthresh=rho_linthresh, vmin=-rho_v, vmax=rho_v),
+            interpolation="nearest",
+        )
+    else:
+        rho_pos = np.clip(rho_slice, 1.0e-12, np.inf)
+        rho_vmin, rho_vmax = np.nanpercentile(rho_pos, [2.0, 99.5])
+        im_rho = ax_rho.imshow(
+            rho_pos,
+            extent=extent,
+            origin="lower",
+            cmap="viridis",
+            norm=colors.LogNorm(vmin=max(float(rho_vmin), 1.0e-12), vmax=max(float(rho_vmax), 1.0e-11)),
+            interpolation="nearest",
+        )
+    if data_xy is not None and data_xy.size > 0:
+        counts, x_edges, y_edges = np.histogram2d(data_xy[:, 0], data_xy[:, 1], bins=80, range=[[extent[0], extent[1]], [extent[2], extent[3]]])
+        positive_counts = counts[counts > 0]
+        if positive_counts.size > 0:
+            levels = np.percentile(positive_counts, [50.0, 80.0, 95.0])
+            levels = np.unique(levels)
+            if levels.size > 0:
+                ax_rho.contour(
+                    0.5 * (x_edges[:-1] + x_edges[1:]),
+                    0.5 * (y_edges[:-1] + y_edges[1:]),
+                    counts.T,
+                    levels=levels,
+                    colors="0.15",
+                    linewidths=0.65,
+                    alpha=0.7,
+                )
+    ax_rho.set_xlabel(r"$x$")
+    ax_rho.tick_params(labelleft=False)
+    ax_rho.set_aspect("equal")
+
+    cbar_phi = fig.colorbar(im_phi, ax=ax_phi, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
+    cbar_phi.set_label(r"$\Phi^*-\mathrm{median}(\Phi^*)$")
+    cbar_rho = fig.colorbar(im_rho, ax=ax_rho, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
+    cbar_rho.set_label(r"$\rho^*=\nabla^2\Phi^*/(4\pi)$")
+    fig.suptitle(title, fontsize=13)
+
+    if fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in fig_fmt:
+            fig.savefig(fig_dir / f"{filename}.{fmt}", dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return None
+    return fig
+
+
 # ── 7. CBE residual spatial map ──────────────────────────────────────────
 
 def plot_residual_spatial(

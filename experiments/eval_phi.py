@@ -15,6 +15,7 @@ from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.analytic import plummer_ar, plummer_phi
 from dpjax.physics.cbe import residual_A
+from dpjax.plotting.diagnostics import plot_potential_density_overview
 
 
 # ---------------------------------------------------------------------------
@@ -34,8 +35,14 @@ def run_eval_phi(
     r_max: float = 10.0,
     n_r: int = 256,
     r_ref: float = 1.0,
+    system: str = "generic",
+    plot_overview: bool = True,
+    slice_grid: int = 128,
+    slice_rmax: Optional[float] = None,
+    fig_fmt: tuple[str, ...] = ("png", "pdf"),
+    dpi: int = 180,
 ) -> Dict[str, Any]:
-    """Evaluate trained Phi/DF on residual stats and Plummer radial curves.
+    """Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.
 
     Returns
     -------
@@ -46,7 +53,7 @@ def run_eval_phi(
     df_run_dir = resolve_path(df_run_dir)
     phi_run_dir = resolve_path(phi_run_dir)
 
-    df_model, df_params, normalizer, df_cfg = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
     flow_cfg = df_cfg.get("flow", {})
     phi_model, phi_params, _ = load_phi(phi_run_dir)
 
@@ -116,15 +123,9 @@ def run_eval_phi(
     # Along x-axis, radial acceleration equals -dPhi/dx
     ar_learned = -grad_phi_phys[:, 0]
 
-    phi_true = plummer_phi(r)
-    ar_true = plummer_ar(r)
-
-    # Align potential by constant offset at r_ref
     r_ref = float(r_ref)
-    phi_true_ref = float(plummer_phi(np.array([r_ref], dtype=np.float32))[0])
-    # Nearest grid point
     i_ref = int(np.argmin(np.abs(r - r_ref)))
-    phi_learned_shift = phi_learned - phi_learned[i_ref] + phi_true_ref
+    phi_learned_shift = phi_learned - phi_learned[i_ref]
 
     # Density profile: rho = Laplacian(Phi) / (4 pi)
     std_x_j = jnp.asarray(std_x)
@@ -133,45 +134,113 @@ def run_eval_phi(
         dtype=np.float32,
     )
     rho_learned = lap_phys / (4.0 * np.pi)
-    rho_analytic = (3.0 / (4.0 * np.pi)) * (1.0 + r ** 2) ** (-2.5)
 
     np.savez(
-        out_dir / "radial_curves_plummer.npz",
+        out_dir / "radial_curves.npz",
         r=r,
         phi_learned=phi_learned,
         phi_learned_shift=phi_learned_shift,
-        phi_true=phi_true,
         ar_learned=ar_learned,
-        ar_true=ar_true,
         rho_learned=rho_learned,
-        rho_analytic=rho_analytic,
     )
+
+    system = str(system).lower()
+    phi_true = None
+    ar_true = None
+    rho_analytic = None
+    if system == "plummer":
+        phi_true = plummer_phi(r)
+        ar_true = plummer_ar(r)
+        phi_true_ref = float(plummer_phi(np.array([r_ref], dtype=np.float32))[0])
+        phi_learned_shift = phi_learned - phi_learned[i_ref] + phi_true_ref
+        rho_analytic = (3.0 / (4.0 * np.pi)) * (1.0 + r ** 2) ** (-2.5)
+        np.savez(
+            out_dir / "radial_curves_plummer.npz",
+            r=r,
+            phi_learned=phi_learned,
+            phi_learned_shift=phi_learned_shift,
+            phi_true=phi_true,
+            ar_learned=ar_learned,
+            ar_true=ar_true,
+            rho_learned=rho_learned,
+            rho_analytic=rho_analytic,
+        )
+
+    slice_data: Optional[Dict[str, np.ndarray]] = None
+    if plot_overview:
+        r_xy = np.sqrt(eta_eval_phys[:, 0] ** 2 + eta_eval_phys[:, 1] ** 2)
+        rmax_slice = float(slice_rmax) if slice_rmax is not None else float(max(np.percentile(r_xy, 99.0), 1.0e-6))
+        grid = int(slice_grid)
+        xs = np.linspace(-rmax_slice, rmax_slice, grid, dtype=np.float32)
+        ys = np.linspace(-rmax_slice, rmax_slice, grid, dtype=np.float32)
+        X, Y = np.meshgrid(xs, ys, indexing="xy")
+        xyz = np.stack([X.ravel(), Y.ravel(), np.zeros(X.size, dtype=np.float32)], axis=-1)
+        xyz_std = (xyz - mean_x[None, :]) / std_x[None, :]
+        phi_slices: list[np.ndarray] = []
+        rho_slices: list[np.ndarray] = []
+        acc_slices: list[np.ndarray] = []
+        for i in range(0, xyz_std.shape[0], int(batch_size)):
+            sl = slice(i, min(i + int(batch_size), xyz_std.shape[0]))
+            x_batch = jnp.asarray(xyz_std[sl])
+            phi_b = np.asarray(phi_apply(phi_model, phi_params, x_batch), dtype=np.float32)
+            grad_b = np.asarray(grad_phi_apply(phi_model, phi_params, x_batch), dtype=np.float32)
+            grad_phys_b = grad_b / std_x[None, :]
+            lap_b = np.asarray(laplacian_phi_apply(phi_model, phi_params, x_batch, std_x=std_x_j), dtype=np.float32)
+            phi_slices.append(phi_b)
+            rho_slices.append(lap_b / (4.0 * np.pi))
+            acc_slices.append(np.linalg.norm(-grad_phys_b, axis=-1))
+        phi_img = np.concatenate(phi_slices).reshape(X.shape)
+        rho_img = np.concatenate(rho_slices).reshape(X.shape)
+        acc_img = np.concatenate(acc_slices).reshape(X.shape)
+        np.savez(plots_dir / "phi_slice_xy.npz", x=xs, y=ys, phi=phi_img, rho=rho_img, acc_mag=acc_img)
+        slice_data = {"x": xs, "y": ys, "phi": phi_img, "rho": rho_img, "acc_mag": acc_img}
+        plot_potential_density_overview(
+            r,
+            phi_learned_shift,
+            rho_learned,
+            xs,
+            ys,
+            phi_img,
+            rho_img,
+            ar_learned=ar_learned,
+            phi_true=phi_true,
+            rho_true=rho_analytic,
+            ar_true=ar_true,
+            data_xy=eta_eval_phys[:, :2] if system != "plummer" else None,
+            title="Plummer Potential / Density Overview" if system == "plummer" else "Halo Potential / Density Overview",
+            fig_dir=plots_dir,
+            fig_fmt=fig_fmt,
+            dpi=int(dpi),
+            filename="potential_density_overview",
+        )
+        print(f"Wrote potential density overview to {plots_dir}")
 
     # Optional plotting
     try:
         import matplotlib.pyplot as plt
 
-        plt.figure()
-        plt.plot(r, phi_true, label="Plummer analytic")
-        plt.plot(r, phi_learned_shift, label="Learned (shifted)")
-        plt.xscale("log")
-        plt.xlabel("r")
-        plt.ylabel("Phi(r)")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plots_dir / "phi_r_plummer.png", dpi=150)
-        plt.close()
+        if system == "plummer" and phi_true is not None and ar_true is not None:
+            plt.figure()
+            plt.plot(r, phi_true, label="Plummer analytic")
+            plt.plot(r, phi_learned_shift, label="Learned (shifted)")
+            plt.xscale("log")
+            plt.xlabel("r")
+            plt.ylabel("Phi(r)")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(plots_dir / "phi_r_plummer.png", dpi=150)
+            plt.close()
 
-        plt.figure()
-        plt.plot(r, ar_true, label="Plummer analytic")
-        plt.plot(r, ar_learned, label="Learned")
-        plt.xscale("log")
-        plt.xlabel("r")
-        plt.ylabel("a_r(r)")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(plots_dir / "ar_r_plummer.png", dpi=150)
-        plt.close()
+            plt.figure()
+            plt.plot(r, ar_true, label="Plummer analytic")
+            plt.plot(r, ar_learned, label="Learned")
+            plt.xscale("log")
+            plt.xlabel("r")
+            plt.ylabel("a_r(r)")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(plots_dir / "ar_r_plummer.png", dpi=150)
+            plt.close()
 
         print(f"Wrote plots to {plots_dir}")
     except Exception as e:  # noqa: BLE001
@@ -183,6 +252,7 @@ def run_eval_phi(
             "r": r, "phi_learned": phi_learned, "phi_learned_shift": phi_learned_shift,
             "phi_true": phi_true, "ar_learned": ar_learned, "ar_true": ar_true,
         },
+        "slice": slice_data,
         "out_dir": out_dir,
         "plots_dir": plots_dir,
     }
@@ -193,7 +263,7 @@ def run_eval_phi(
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Evaluate trained Phi/DF on residual stats and Plummer radial curves.")
+    parser = argparse.ArgumentParser(description="Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.")
     parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--df-run-dir", type=str, required=True)
     parser.add_argument("--phi-run-dir", type=str, required=True)
@@ -205,13 +275,21 @@ def main() -> int:
     parser.add_argument("--r-max", type=float, default=10.0)
     parser.add_argument("--n-r", type=int, default=256)
     parser.add_argument("--r-ref", type=float, default=1.0)
+    parser.add_argument("--system", choices=["generic", "plummer", "halo"], default="generic")
+    parser.add_argument("--no-overview", action="store_true")
+    parser.add_argument("--slice-grid", type=int, default=128)
+    parser.add_argument("--slice-rmax", type=float, default=None)
+    parser.add_argument("--fig-formats", nargs="+", default=["png", "pdf"])
+    parser.add_argument("--dpi", type=int, default=180)
     args = parser.parse_args()
 
     run_eval_phi(
         args.data, args.df_run_dir, args.phi_run_dir,
         out_dir=args.out_dir, n_eval=args.n_eval, batch_size=args.batch_size,
         seed=args.seed, r_min=args.r_min, r_max=args.r_max,
-        n_r=args.n_r, r_ref=args.r_ref,
+        n_r=args.n_r, r_ref=args.r_ref, system=args.system,
+        plot_overview=not args.no_overview, slice_grid=args.slice_grid,
+        slice_rmax=args.slice_rmax, fig_fmt=tuple(args.fig_formats), dpi=args.dpi,
     )
     return 0
 

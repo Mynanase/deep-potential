@@ -33,7 +33,7 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    df_model, df_params, normalizer, _ = load_df(args.df_run_dir)
+    df_model, df_params, normalizer, _, _coord_transform = load_df(args.df_run_dir)
     phi_model, _, _ = load_phi(args.phi_run_dir)
 
     ckpt_dir = Path(args.phi_run_dir) / "ckpt"

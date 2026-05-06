@@ -54,7 +54,7 @@ def run_eval_df(
     data_path = resolve_path(data_path)
     df_run_dir = resolve_path(df_run_dir)
 
-    df_model, df_params, normalizer, df_cfg = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
     flow_cfg = df_cfg.get("flow", {})
 
     out_dir = ensure_dir(out_dir or (Path(df_run_dir) / "plots"))
