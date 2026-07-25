@@ -169,7 +169,8 @@ def plot_2d_marginal(
 ):
     """2D marginal comparison (train vs sample) + signed significance-like difference.
 
-    This is a lightweight, TF-free analogue of `scripts/plot_flow_projections.plot_2d_marginal`.
+    This is the active JAX/NumPy replacement for the archived TensorFlow
+    projection utilities.
     Passing `fig_fmt=[]` returns the matplotlib figure.
     """
 

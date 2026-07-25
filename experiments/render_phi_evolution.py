@@ -6,7 +6,10 @@ from pathlib import Path
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.flows.api import load_df
+from dpjax.data import (
+    load_run_preprocessing,
+    require_physics_compatible_transform,
+)
 from dpjax.models.potential import grad_phi_apply, load_phi, phi_apply
 from dpjax.physics.analytic import plummer_ar, plummer_phi
 from dpjax.utils.ckpt import create_manager, restore_step
@@ -33,7 +36,11 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    df_model, df_params, normalizer, _, _coord_transform = load_df(args.df_run_dir)
+    normalizer, coordinate_transform = load_run_preprocessing(args.df_run_dir)
+    require_physics_compatible_transform(
+        coordinate_transform,
+        operation="Phi evolution rendering",
+    )
     phi_model, _, _ = load_phi(args.phi_run_dir)
 
     ckpt_dir = Path(args.phi_run_dir) / "ckpt"

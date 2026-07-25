@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import h5py
 import matplotlib
 
 matplotlib.use("Agg")
@@ -14,10 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
 
-
-def load_data(path: str | Path, dataset: str = "eta") -> np.ndarray:
-    with h5py.File(path, "r") as f:
-        return np.asarray(f[dataset], dtype=np.float64)
+from dpjax.data import load_eta_h5
 
 
 def corner_plot(
@@ -130,7 +126,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    data = load_data(args.data, args.dataset)
+    data = load_eta_h5(args.data, args.dataset)
     print(f"Loaded {data.shape[0]:,} rows, {data.shape[1]} dims from {args.data}")
 
     if args.n_samples > 0 and args.n_samples < data.shape[0]:

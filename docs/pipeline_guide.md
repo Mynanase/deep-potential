@@ -81,7 +81,7 @@ JAX（和 PyTorch/TensorFlow 一样）使用 **GPU 显存池**：
 ```bash
 # 基础配置: phi_plummer.yaml 里 epochs=1024, hidden_sizes=[512,512,512,512]
 # 用 --override 临时改为 epochs=32, hidden_sizes=[128,128]
-python experiments/train_phi.py \
+python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --override '{"train": {"epochs": 32}, "potential": {"hidden_sizes": [128, 128]}}'
 ```
@@ -132,8 +132,9 @@ ExperimentLogger(backend="wandb+tb")
 # 激活环境
 conda activate dp-jax
 
-# 安装实验追踪依赖（可选，但推荐）
-pip install wandb tensorboard
+# 若创建环境时未安装可选依赖，可按锁文件补齐开发与实验追踪工具
+UV_PROJECT_ENVIRONMENT="$CONDA_PREFIX" \
+  uv sync --extra dev --extra tracking --locked
 
 # 首次使用 W&B 需要登录（会给你一个 API key）
 wandb login
@@ -150,7 +151,7 @@ wandb login
 ```bash
 conda activate dp-jax
 
-python experiments/gendata_plummer.py \
+python -m experiments.gendata_plummer \
   --total-n 524288 \
   --test-frac 0.1 \
   --max-dist 10.0 \
@@ -172,7 +173,7 @@ python experiments/gendata_plummer.py \
 ### Step 2: 训练 DF（Density Field / 归一化流）
 
 ```bash
-python experiments/train_df.py \
+python -m experiments.train_df \
   --config configs/df_plummer_ffjord.yaml \
   --data data/plummer_train.h5 \
   --run-dir runs/plummer/df_full \
@@ -203,7 +204,7 @@ runs/plummer/df_full/
 ### Step 3: 评估 DF
 
 ```bash
-python experiments/eval_df.py \
+python -m experiments.eval_df \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
   --plummer-diag
@@ -219,7 +220,7 @@ python experiments/eval_df.py \
 ### Step 4: 训练 Phi（势能网络）
 
 ```bash
-python experiments/train_phi.py \
+python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
@@ -232,7 +233,7 @@ python experiments/train_phi.py \
 ### Step 5: 评估 Phi
 
 ```bash
-python experiments/eval_phi.py \
+python -m experiments.eval_phi \
   --data data/plummer_test.h5 \
   --df-run-dir runs/plummer/df_full \
   --phi-run-dir runs/plummer/phi_full
@@ -255,7 +256,7 @@ runs/plummer/phi_full/
 ### 快速验证用（小网络、少 epoch）
 
 ```bash
-python experiments/train_phi.py \
+python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
@@ -269,7 +270,7 @@ python experiments/train_phi.py \
 ### 正式训练用（大网络、多 epoch）
 
 ```bash
-python experiments/train_phi.py \
+python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
@@ -289,7 +290,7 @@ python experiments/train_phi.py \
 
 ```bash
 # 训练时加 --logger wandb（或 wandb+tb）
-python experiments/train_df.py --config ... --logger wandb --project dp-plummer --run-name df-full-v1
+python -m experiments.train_df --config ... --logger wandb --project dp-plummer --run-name df-full-v1
 
 # 打开浏览器访问 https://wandb.ai/<你的用户名>/dp-plummer 即可实时看曲线
 ```
@@ -298,7 +299,7 @@ python experiments/train_df.py --config ... --logger wandb --project dp-plummer 
 
 ```bash
 # 训练时加 --logger tensorboard
-python experiments/train_df.py --config ... --logger tensorboard
+python -m experiments.train_df --config ... --logger tensorboard
 
 # 另开终端启动 TensorBoard
 conda activate dp-jax
@@ -320,7 +321,7 @@ ssh -L 6006:localhost:6006 your-server
 ### 方法 A: nohup（最简单）
 
 ```bash
-nohup python experiments/train_phi.py \
+nohup python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
@@ -343,7 +344,7 @@ tmux new -s train
 
 # 在 tmux 里运行训练
 conda activate dp-jax
-python experiments/train_phi.py --config ... --logger wandb+tb
+python -m experiments.train_phi --config ... --logger wandb+tb
 
 # 断开（不会终止训练）：按 Ctrl+B 然后按 D
 
@@ -356,7 +357,7 @@ tmux attach -t train
 如果训练被中断了（无论什么原因），用 `--resume` 从最近的 checkpoint 继续：
 
 ```bash
-python experiments/train_phi.py \
+python -m experiments.train_phi \
   --config configs/phi_plummer.yaml \
   --data data/plummer_train.h5 \
   --df-run-dir runs/plummer/df_full \
@@ -404,7 +405,7 @@ notebooks/07_analysis.ipynb
 | `experiments/train_df.py` | 新增 `--override`、`--logger`、`--project`、`--run-name` 参数；训练循环集成 logger |
 | `experiments/train_phi.py` | 同上 |
 | `experiments/eval_df.py` | 新增 `--plummer-diag` 参数；迁移 Notebook 中的梯度对比、r-v 分布、残差直方图 |
-| `pyproject.toml` | 新增 `tracking` 可选依赖组（wandb, tensorboard） |
+| `pyproject.toml` | 新增 `tracking` 可选依赖组（wandb、tensorboard、tensorboardX） |
 
 ### 删除文件
 

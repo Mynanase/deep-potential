@@ -19,7 +19,11 @@ import jax.numpy as jnp
 import yaml
 from flax import linen as nn
 
-from dpjax.data import Normalizer, CoordinateTransform
+from dpjax.data import (
+    CoordinateTransform,
+    Normalizer,
+    load_run_preprocessing,
+)
 from dpjax.utils.ckpt import create_manager, restore_latest
 
 
@@ -324,19 +328,10 @@ def load_df(df_run_dir: str | Path) -> Tuple[nn.Module, dict, Normalizer, dict, 
 
     model = build_flow(flow_cfg)
 
-    norm_path = df_run_dir / "normalizer.npz"
-    if not norm_path.exists():
-        raise FileNotFoundError(f"Missing {norm_path}")
-    norm = Normalizer.load_npz(norm_path)
+    norm, coord_transform = load_run_preprocessing(df_run_dir)
 
     ckpt_mgr = create_manager(df_run_dir / "ckpt")
     restored = restore_latest(ckpt_mgr)
     params = restored["params"]
-
-    ct_path = df_run_dir / "coord_transform.npz"
-    if ct_path.exists():
-        coord_transform = CoordinateTransform.load_npz(ct_path)
-    else:
-        coord_transform = None
 
     return model, params, norm, cfg, coord_transform

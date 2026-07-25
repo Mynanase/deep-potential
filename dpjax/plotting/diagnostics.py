@@ -25,7 +25,7 @@ def plot_phase_space_grid(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """3×3 phase-space overview inspired by ``plummer_sphere_example`` cell 9.
+    """Render a 3×3 phase-space overview.
 
     Row 0: spatial projections (x-y, x-z, y-z)
     Row 1: velocity projections (vx-vy, vx-vz, vy-vz)
@@ -127,10 +127,7 @@ def plot_score_comparison(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """2×3 scatter: true vs learned score per dimension, with slope/R² annotations.
-
-    Inspired by ``plummer_sphere_example`` cell 33 and ``eval_df._plummer_diagnostics``.
-    """
+    """Compare true and learned scores per dimension with slope/R² annotations."""
     import matplotlib.pyplot as plt
 
     score_true = np.asarray(score_true)
@@ -194,10 +191,7 @@ def plot_score_residual_hist(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """2×3 histograms of score residuals per dimension with σ and kurtosis.
-
-    Inspired by ``plummer_sphere_example`` cell 35.
-    """
+    """Plot score residuals per dimension with σ and kurtosis."""
     import matplotlib.pyplot as plt
 
     score_true = np.asarray(score_true)
@@ -252,9 +246,7 @@ def plot_rv_comparison(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """3×2 r-v comparison: ideal / flow samples / residuals × linear / log.
-
-    Inspired by ``plummer_sphere_example`` cell 13.
+    """Compare ideal and sampled r-v distributions on linear and log scales.
 
     Parameters
     ----------
@@ -350,9 +342,7 @@ def plot_phi_rho_slice(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """Three-panel 2D slice plot: Φ(x,y), ρ(x,y), |a|(x,y).
-
-    Inspired by ``harmonic_blob_example`` cells 25-26 and ``plot_phi_slice.py``.
+    """Plot three 2D slices: Φ(x,y), ρ(x,y), and |a|(x,y).
 
     Parameters
     ----------

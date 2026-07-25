@@ -137,6 +137,8 @@ misc/
 
 # Data files
 *.json
+*.h5
+*.hdf5
 
 # Checkpoints
 checkpoints/
@@ -152,3 +154,8 @@ references/
 data/
 paper_barmodel_202306/
 runs/
+
+# ARC research workflow caches; keep only curated top-level Markdown reports.
+2205.02244_x_2507.03742/domain/
+2205.02244_x_2507.03742/ideas/
+2205.02244_x_2507.03742/*.html

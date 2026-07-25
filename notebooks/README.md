@@ -15,12 +15,10 @@ This ensures `dpjax` is importable from any working directory, including `notebo
 
 | Notebook | Description |
 |----------|-------------|
-| `01_data_generation.ipynb` | Generate Plummer mock data, load HDF5, visualize phase-space distributions |
-| `02_train_df.ipynb` | Train the distribution function (RealNVP normalizing flow) |
-| `03_train_phi.ipynb` | Train the gravitational potential network with frozen DF |
-| `04_joint_finetuning.ipynb` | Joint fine-tuning of DF + Phi |
-| `05_visualization.ipynb` | Visualize trained models: potential slices, radial curves, training metrics |
-| `06_full_pipeline.ipynb` | End-to-end pipeline: data generation -> training -> evaluation |
+| `07_analysis.ipynb` | Post-training analysis of saved DF and potential runs |
+
+Training and evaluation live in the importable CLI modules under
+`experiments/`; notebooks do not duplicate the training pipeline.
 
 ## Tips
 

@@ -9,18 +9,15 @@ Compares data vs model:
 """
 import argparse
 import os
-import sys
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from dpjax.flows.api import load_df, sample_apply
+from dpjax.data import inverse_preprocess_eta, load_eta_h5
 
 
 def spherical_coords(pos, vel):
@@ -62,9 +59,7 @@ def main():
         print(f"Coord transform: {coord_transform.type!r} on dims {coord_transform.dims.tolist()}")
 
     # Load raw data
-    import h5py
-    with h5py.File(args.data, "r") as f:
-        raw_data = np.asarray(f["eta"], dtype=np.float32)
+    raw_data = load_eta_h5(args.data)
     print(f"Raw data shape: {raw_data.shape}")
 
     # Sample from model
@@ -75,9 +70,11 @@ def main():
     samples_norm = np.asarray(samples_norm)
 
     # Inverse transform: normalizer → coord_transform
-    samples = normalizer.inverse(samples_norm)
-    if coord_transform is not None:
-        samples = coord_transform.inverse(samples)
+    samples = inverse_preprocess_eta(
+        samples_norm,
+        normalizer,
+        coord_transform,
+    )
 
     pos_data = raw_data[:, :3]
     vel_data = raw_data[:, 3:]

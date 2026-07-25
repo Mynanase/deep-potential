@@ -14,7 +14,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from dpjax.data import load_eta_h5
+from dpjax.data import inverse_preprocess_eta, load_eta_h5, preprocess_eta
+from dpjax.datasets.plummer import sample_plummer
 from dpjax.flows.api import load_df, score_apply, sample_apply
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.analytic import plummer_score_std_batch, plummer_rv_ideal_grid
@@ -54,7 +55,7 @@ def run_eval_df(
     data_path = resolve_path(data_path)
     df_run_dir = resolve_path(df_run_dir)
 
-    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, coord_transform = load_df(df_run_dir)
     flow_cfg = df_cfg.get("flow", {})
 
     out_dir = ensure_dir(out_dir or (Path(df_run_dir) / "plots"))
@@ -65,7 +66,11 @@ def run_eval_df(
     # Sample from flow in standardized coordinates, then inverse-transform to physical
     rng = jax.random.key(int(seed))
     x_std = sample_apply(df_model, df_params, rng, n_samples, flow_cfg)
-    eta_samp = np.asarray(normalizer.inverse(np.asarray(x_std)))
+    eta_samp = inverse_preprocess_eta(
+        np.asarray(x_std),
+        normalizer,
+        coord_transform,
+    )
     samp_coords = calc_coords(eta_samp)
 
     plot_1d_marginals(eta_coords, samp_coords, fig_dir=str(out_dir), coordsys=coordsys, fig_fmt=("png",))
@@ -98,6 +103,7 @@ def run_eval_df(
     if plummer_diag:
         diag = _plummer_diagnostics(
             df_model, df_params, normalizer, flow_cfg,
+            coordinate_transform=coord_transform,
             n_points=n_diag_points, n_rv_samples=n_samples, seed=seed, out_dir=out_dir,
         )
         result["plummer_diag"] = diag
@@ -147,6 +153,7 @@ def _plummer_diagnostics(
     normalizer,
     flow_cfg: dict,
     *,
+    coordinate_transform=None,
     n_points: int = 16384,
     n_rv_samples: int = 262144,
     seed: int = 0,
@@ -156,17 +163,25 @@ def _plummer_diagnostics(
 
     Returns dict with slope/R² per dimension and residual stats.
     """
-    import sys
-    _repo = Path(__file__).resolve().parents[1]
-    if str(_repo / "scripts") not in sys.path:
-        sys.path.insert(0, str(_repo / "scripts"))
-    from plummer.plummer_gendata import sample_df
+    if coordinate_transform is not None and coordinate_transform.type != "none":
+        raise ValueError(
+            "Plummer score diagnostics require physical/linearly standardized "
+            "coordinates and cannot be combined with a nonlinear transform."
+        )
 
     out_dir = ensure_dir(out_dir or Path("."))
 
     # ---- 1. Gradient comparison: flow score vs analytic Plummer score ----
-    eta_phys = np.asarray(sample_df(n_points, max_dist=10.0), dtype=np.float32)
-    eta_std = np.asarray(normalizer.transform(eta_phys), dtype=np.float32)
+    eta_phys = sample_plummer(
+        n_points,
+        max_dist=10.0,
+        rng=np.random.default_rng(seed),
+    )
+    eta_std = preprocess_eta(
+        eta_phys,
+        normalizer,
+        coordinate_transform,
+    )
     eta_std_j = jnp.asarray(eta_std)
 
     mean_j = jnp.asarray(normalizer.mean, dtype=jnp.float32)
@@ -265,7 +280,11 @@ def _plummer_diagnostics(
 
     rng = jax.random.key(int(seed))
     x_std_rv = sample_apply(df_model, df_params, rng, n_rv_samples, flow_cfg)
-    eta_flow = np.asarray(normalizer.inverse(np.asarray(x_std_rv)), dtype=np.float32)
+    eta_flow = inverse_preprocess_eta(
+        np.asarray(x_std_rv),
+        normalizer,
+        coordinate_transform,
+    )
 
     r_samp = np.sqrt(np.sum(eta_flow[:, :3] ** 2, axis=1))
     v_samp = np.sqrt(np.sum(eta_flow[:, 3:] ** 2, axis=1))

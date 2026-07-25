@@ -7,15 +7,21 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.data import Normalizer
+from dpjax.data import (
+    Normalizer,
+    load_run_preprocessing,
+    require_physics_compatible_transform,
+)
 from dpjax.models.potential import load_phi
 
 
-def _load_normalizer(df_run_dir: Path) -> Normalizer:
-    p = df_run_dir / "normalizer.npz"
-    if not p.exists():
-        raise FileNotFoundError(f"Missing {p}")
-    return Normalizer.load_npz(p)
+def _load_physics_normalizer(df_run_dir: Path) -> Normalizer:
+    normalizer, coordinate_transform = load_run_preprocessing(df_run_dir)
+    require_physics_compatible_transform(
+        coordinate_transform,
+        operation="Phi slice rendering",
+    )
+    return normalizer
 
 
 def main() -> int:
@@ -34,7 +40,7 @@ def main() -> int:
     df_run_dir = Path(args.df_run_dir)
     phi_run_dir = Path(args.phi_run_dir)
 
-    normalizer = _load_normalizer(df_run_dir)
+    normalizer = _load_physics_normalizer(df_run_dir)
     phi_model, phi_params, _ = load_phi(phi_run_dir)
 
     out_dir = Path(args.out_dir) if args.out_dir else (phi_run_dir / "plots")

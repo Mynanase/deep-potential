@@ -19,19 +19,18 @@ import optax
 import yaml
 from tqdm.auto import tqdm
 
-from dpjax.data import iter_batches, load_eta_h5
+from dpjax.data import (
+    iter_batches,
+    load_eta_h5,
+    require_physics_compatible_transform,
+)
+from dpjax.config import load_config
 from dpjax.flows.api import load_df, log_prob_apply, score_apply
 from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.cbe import loss_cbe_robust, residual_A
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
-
-
-def _mean_param_square(params: dict) -> jnp.ndarray:
-    leaves = jax.tree_util.tree_leaves(params)
-    sq_sum = sum(jnp.sum(jnp.square(x)) for x in leaves)
-    n_elem = sum(x.size for x in leaves)
-    return sq_sum / jnp.maximum(jnp.asarray(n_elem, dtype=jnp.float32), 1.0)
+from dpjax.utils.tree import mean_square
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +84,11 @@ def run_joint_finetuning(
     (df_out / "ckpt").mkdir(parents=True, exist_ok=True)
     (phi_out / "ckpt").mkdir(parents=True, exist_ok=True)
 
-    df_model, df_params_init, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
+    df_model, df_params_init, normalizer, df_cfg, coord_transform = load_df(df_run_dir)
+    require_physics_compatible_transform(
+        coord_transform,
+        operation="Joint CBE fine-tuning",
+    )
     flow_cfg = df_cfg.get("flow", {})
     phi_model, phi_params_init, phi_cfg = load_phi(phi_run_dir)
 
@@ -180,7 +183,7 @@ def run_joint_finetuning(
                 lambda_mass=lambda_mass,
             )
 
-        l2 = l2_reg * _mean_param_square(phi_p)
+        l2 = l2_reg * mean_square(phi_p)
 
         loss = lambda_cbe * cbe + lambda_nll * nll + l2
         return loss, (nll, cbe, l2)
@@ -413,7 +416,7 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    cfg = load_config(args.config)
     run_joint_finetuning(
         cfg, args.data, args.df_run_dir, args.phi_run_dir, args.run_dir,
         resume=args.resume,

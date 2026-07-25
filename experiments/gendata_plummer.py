@@ -2,7 +2,7 @@
 
 Usage
 -----
-    python experiments/gendata_plummer.py \
+    python -m experiments.gendata_plummer \
         --total-n 524288 --test-frac 0.1 --max-dist 10.0 \
         --train-out data/plummer_train.h5 \
         --test-out data/plummer_test.h5
@@ -13,31 +13,12 @@ This is a pure-CPU script (no JAX/GPU required).
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-import h5py
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Allow running from repo root without PYTHONPATH
-# ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_SCRIPTS_DIR = _REPO_ROOT / "scripts"
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-from plummer.plummer_gendata import sample_df  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _save_h5(data: np.ndarray, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(str(path), "w") as f:
-        f.create_dataset("eta", data=data, compression="lzf", chunks=True)
+from dpjax.data import save_eta_h5
+from dpjax.datasets.plummer import sample_plummer, split_train_test
 
 
 # ---------------------------------------------------------------------------
@@ -57,28 +38,31 @@ def main() -> int:
     parser.add_argument("--test-out", type=str, default=None, help="Output path for test data (.h5). Required if --test-frac > 0.")
     args = parser.parse_args()
 
+    if args.total_n <= 0:
+        parser.error("--total-n must be positive")
+    if args.max_dist <= 0.0:
+        parser.error("--max-dist must be positive")
+    if not 0.0 <= args.test_frac < 1.0:
+        parser.error("--test-frac must satisfy 0 <= value < 1")
+    if args.test_n is not None and not 0 < args.test_n < args.total_n:
+        parser.error("--test-n must satisfy 0 < value < --total-n")
+
     has_split = args.test_n is not None or args.test_frac > 0
+    if has_split and args.total_n < 2:
+        parser.error("--total-n must be at least 2 when creating a test split")
     if has_split and args.test_out is None:
         parser.error("--test-out is required when --test-frac > 0 or --test-n is set")
 
-    # Seed the global RNG so that sample_df (which uses np.random internally) is
-    # reproducible.  A separate RNG is used later for the train/test shuffle.
-    np.random.seed(args.seed)
-
-    # Generate – oversample in a loop to guarantee exactly total_n points after
-    # the max_dist filter inside sample_df.
-    target = args.total_n
-    chunks: list[np.ndarray] = []
-    n_collected = 0
-    print(f"Generating {target} Plummer samples (max_dist={args.max_dist}, seed={args.seed}) ...")
-    while n_collected < target:
-        n_request = int(1.2 * (target - n_collected)) + 1024
-        chunk = np.asarray(sample_df(n_request, max_dist=args.max_dist), dtype=np.float32)
-        chunks.append(chunk)
-        n_collected += chunk.shape[0]
-        print(f"  ... drew {chunk.shape[0]} samples (total so far: {n_collected})")
-    eta_all = np.concatenate(chunks, axis=0)[:target]
-    assert eta_all.shape[0] == target, f"Expected {target}, got {eta_all.shape[0]}"
+    rng = np.random.default_rng(args.seed)
+    print(
+        f"Generating {args.total_n} Plummer samples "
+        f"(max_dist={args.max_dist}, seed={args.seed}) ..."
+    )
+    eta_all = sample_plummer(
+        args.total_n,
+        max_dist=args.max_dist,
+        rng=rng,
+    )
     print(f"  Final dataset: {eta_all.shape[0]} samples, shape={eta_all.shape}")
 
     # Split
@@ -87,24 +71,20 @@ def main() -> int:
             n_test = args.test_n
         else:
             n_test = int(round(eta_all.shape[0] * args.test_frac))
-        n_test = max(min(n_test, eta_all.shape[0] - 1), 1)
+            n_test = min(max(n_test, 1), eta_all.shape[0] - 1)
 
-        rng = np.random.default_rng(args.seed)
-        perm = rng.permutation(eta_all.shape[0])
-        eta_test = eta_all[perm[:n_test]]
-        eta_train = eta_all[perm[n_test:]]
-
+        eta_train, eta_test = split_train_test(eta_all, test_n=n_test, rng=rng)
         train_out = Path(args.train_out)
         test_out = Path(args.test_out)
 
-        _save_h5(eta_train, train_out)
-        _save_h5(eta_test, test_out)
+        save_eta_h5(eta_train, train_out)
+        save_eta_h5(eta_test, test_out)
 
         print(f"  Train: {eta_train.shape[0]} samples -> {train_out}")
         print(f"  Test:  {eta_test.shape[0]} samples -> {test_out}")
     else:
         train_out = Path(args.train_out)
-        _save_h5(eta_all, train_out)
+        save_eta_h5(eta_all, train_out)
         print(f"  All: {eta_all.shape[0]} samples -> {train_out}")
 
     return 0

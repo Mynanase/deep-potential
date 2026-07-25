@@ -9,7 +9,12 @@ from typing import Optional
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.data import Normalizer, load_eta_h5
+from dpjax.data import (
+    Normalizer,
+    load_eta_h5,
+    load_run_preprocessing,
+    require_physics_compatible_transform,
+)
 from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi, phi_apply
 from dpjax.physics.analytic import plummer_ar, plummer_phi
 from dpjax.plotting.diagnostics import plot_potential_density_overview
@@ -25,11 +30,13 @@ def _resolve_path(path: str | Path) -> Path:
     return PROJECT_ROOT / p
 
 
-def _load_normalizer(df_run_dir: Path) -> Normalizer:
-    path = df_run_dir / "normalizer.npz"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing {path}")
-    return Normalizer.load_npz(path)
+def _load_physics_normalizer(df_run_dir: Path) -> Normalizer:
+    normalizer, coordinate_transform = load_run_preprocessing(df_run_dir)
+    require_physics_compatible_transform(
+        coordinate_transform,
+        operation="Potential overview rendering",
+    )
+    return normalizer
 
 
 def _ensure_slice(
@@ -97,7 +104,7 @@ def _compute_radial(
     n_r: int,
     r_ref: float,
 ) -> dict[str, np.ndarray]:
-    normalizer = _load_normalizer(df_run_dir)
+    normalizer = _load_physics_normalizer(df_run_dir)
     phi_model, phi_params, _ = load_phi(phi_run_dir)
     mean_x = np.asarray(normalizer.mean[:3], dtype=np.float32)
     std_x = np.asarray(normalizer.std[:3], dtype=np.float32)

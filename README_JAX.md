@@ -1,6 +1,10 @@
 # deep-potential (dpjax)
 
-本仓库在保留 TF legacy 代码的同时，新增 `dpjax/`：JAX/Flax 版本最小闭环实现。
+当前受支持的实现位于 `dpjax/`，基于 JAX/Flax。历史 TensorFlow/Sonnet
+代码仅保存在 `archive/legacy_tensorflow/`，不参与当前安装和运行。
+
+日常环境、训练、评估、集群操作和长期维护规范统一记录在
+`docs/operations_maintenance_guide.md`。
 
 当前目标：先跑通 Plummer toy（N=2**17），两阶段训练：
 1) 训练 DF（RealNVP 或 FFJORD）拟合 `log_prob(eta_std)`
@@ -20,12 +24,18 @@
 建议单独建环境：
 
 ```bash
-conda create -n dp-jax python=3.11 pip -y
+conda env create -f environment.yml
 conda activate dp-jax
-pip install -U pip
-pip install -U "jax[cuda12]"
-pip install -e .
+UV_PROJECT_ENVIRONMENT="$CONDA_PREFIX" \
+  uv sync --extra dev --extra tracking --locked
 ```
+
+`UV_PROJECT_ENVIRONMENT` 用于明确复用当前 Conda 环境，避免 `uv` 另外创建
+项目内的 `.venv`。依赖版本由 `uv.lock` 固定。
+
+Linux/CUDA 服务器可在环境创建后按
+[JAX 官方安装说明](https://docs.jax.dev/en/latest/installation.html)替换为匹配
+CUDA 版本的 `jax` / `jaxlib`。
 
 验证 GPU：
 
@@ -52,41 +62,36 @@ export JAX_PLATFORM_NAME=cpu
 ## 生成 Plummer 数据（HDF5）
 生成的 HDF5 只要求有数据集 `eta`，shape `(N,6)`，顺序 `[x,y,z,vx,vy,vz]`。
 
-说明：Plummer 数据生成不需要 TensorFlow（已做成可选依赖）；在 `dp-jax` 环境下可直接运行。
+说明：Plummer 数据生成使用 `dpjax.datasets.plummer` 中的纯 NumPy采样器，
+不依赖归档中的 TensorFlow/Sonnet 代码。
 
 ```bash
 mkdir -p data
-python scripts/plummer/plummer_gendata.py -n 131072 -o data/plummer_n131072.h5
-```
-
-如果你仍遇到 `ModuleNotFoundError: toy_systems`，也可以用下面这种方式显式指定模块搜索路径：
-
-```bash
-PYTHONPATH=./scripts python scripts/plummer/plummer_gendata.py -n 131072 -o data/plummer_n131072.h5
+python -m experiments.gendata_plummer \
+  --total-n 131072 \
+  --train-out data/plummer_n131072.h5
 ```
 
 在 Jupyter Notebook 里也可以运行（建议在仓库根目录启动 notebook），例如：
 
 ```python
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path("scripts").resolve()))
+import numpy as np
 
-from plummer import plummer_gendata
+from dpjax.data import save_eta_h5
+from dpjax.datasets.plummer import sample_plummer
 
-eta = plummer_gendata.sample_df(131072)
-plummer_gendata.save_data(eta, "data/plummer_n131072.h5")
+eta = sample_plummer(131072, rng=np.random.default_rng(42))
+save_eta_h5(eta, "data/plummer_n131072.h5")
 ```
 
 ## 训练 DF（FFJORD，推荐）
 ```bash
-pip install diffrax   # 首次使用 FFJORD 需安装
-python experiments/train_df.py --config configs/df_plummer_ffjord.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df_ffjord
+python -m experiments.train_df --config configs/df_plummer_ffjord.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df_ffjord
 ```
 
 ## 训练 DF（RealNVP，已弃用）
 ```bash
-python experiments/train_df.py --config configs/df_plummer.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df
+python -m experiments.train_df --config configs/df_plummer.yaml --data data/plummer_n131072.h5 --run-dir runs/plummer/df
 ```
 
 > 该命令会触发 `FutureWarning`，提示 RealNVP 即将被移除。
@@ -160,23 +165,51 @@ FFJORD 关键超参（在 `configs/df_plummer_ffjord.yaml` 中调整）：
 
 ```bash
 conda activate dp-jax
-python experiments/train_df.py \
+python -m experiments.train_df \
   --config configs/df_plummer_ffjord.yaml \
   --data data/plummer_n131072.h5 \
   --run-dir runs/plummer/df_ffjord
 ```
 
-训练后可在 `notebooks/06_full_pipeline.ipynb` 的 DF 梯度检查单元中复核散点图与 slope/R² 标注。
+训练后可用 `python -m experiments.eval_df --plummer-diag` 生成 DF 梯度检查图，并在
+`notebooks/07_analysis.ipynb` 中复核结果。
+
+## Halo12 Slurm 作业
+
+当前阶段先训练质量加权、无非线性坐标变换的 v23 ensemble。完整顺序、成分回退和
+验收阈值见 `docs/auriga_halo12_df_stage.md`。
+
+```bash
+sbatch \
+  --export=ALL,INPUT_PATH=/path/to/halo_12_stars.hdf5,OUTPUT_PATH=data/auriga/halo12_all_mass.h5 \
+  jobs/prepare_halo12_df.sbatch
+
+sbatch \
+  --array=0-3 \
+  --export=ALL,DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  jobs/train_halo12_df_ensemble.sbatch
+```
+
+准备步骤会写入 `tracer_weight` 并重新计算基于
+`Potential + 0.5 v²` 的运动学成分标签。训练脚本使用 Slurm 分配的 GPU，不硬编码
+服务器目录、Conda 安装路径或 `CUDA_VISIBLE_DEVICES`。
+
+坐标变换文件从 `schema_version=2` 起才表示变换已真实应用。加载旧版无版本
+文件时会发出警告并按无变换处理；要验证 v21/v22 的 power-transform 实验，
+需要使用当前代码重新训练。
 
 ## 训练 Φ（冻结 DF）
 ```bash
-python experiments/train_phi.py --config configs/phi_plummer.yaml --data data/plummer_n131072.h5 --df-run-dir runs/plummer/df --run-dir runs/plummer/phi
+python -m experiments.train_phi --config configs/phi_plummer.yaml --data data/plummer_n131072.h5 --df-run-dir runs/plummer/df_ffjord --run-dir runs/plummer/phi
 ```
 
-`phi_plummer.yaml` 默认采用论文风格设置：
+`phi_plummer.yaml` 当前基线设置：
 - `potential.hidden_sizes: [512,512,512,512]`（4 层 tanh MLP）
-- `train.loss_type: robust`（`asinh(|CBE|)` + 负密度惩罚）
-- `train.l2_reg: 0.1`（Φ 网络权重 L2 正则）
+- `train.loss_type: mse`
+- `train.l2_reg: 0.001`（Φ 网络权重 L2 正则）
+
+历史实验表明 `robust + l2_reg=0.1` 容易陷入常数势；robust loss 更适合作为
+已收敛 MSE 模型的低学习率微调。详细记录见 `docs/phi_training_log.md`。
 
 ## 方案 B：DF+Φ 联合微调（Joint fine-tune）
 当你发现学到的力曲线（例如 `|a|(r)`）趋势不对时，通常意味着 DF 的 `score=∇ log f` 还不够物理一致。可以在两阶段完成后，用较小学习率做一段联合微调：
@@ -184,10 +217,10 @@ python experiments/train_phi.py --config configs/phi_plummer.yaml --data data/pl
 损失：$L=\lambda_{\mathrm{cbe}}\,L_{\mathrm{CBE}}+\lambda_{\mathrm{nll}}\,\mathrm{NLL}$
 
 ```bash
-python experiments/finetune_joint.py \
+python -m experiments.finetune_joint \
 	--config configs/joint_plummer.yaml \
 	--data data/plummer_n131072.h5 \
-	--df-run-dir runs/plummer/df \
+	--df-run-dir runs/plummer/df_ffjord \
 	--phi-run-dir runs/plummer/phi \
 	--run-dir runs/plummer/joint
 ```
@@ -200,12 +233,12 @@ python experiments/finetune_joint.py \
 用联合微调后的模型评估（注意把 `--df-run-dir/--phi-run-dir` 指到 joint 子目录）：
 
 ```bash
-python experiments/eval_phi.py \
+python -m experiments.eval_phi \
 	--data data/plummer_n131072.h5 \
 	--df-run-dir runs/plummer/joint/df \
 	--phi-run-dir runs/plummer/joint/phi
 
-python experiments/plot_phi_slice.py \
+python -m experiments.plot_phi_slice \
 	--df-run-dir runs/plummer/joint/df \
 	--phi-run-dir runs/plummer/joint/phi
 ```
@@ -214,7 +247,7 @@ python experiments/plot_phi_slice.py \
 
 ## Smoke（不依赖数据）
 ```bash
-python experiments/smoke_dpjax.py
+python -m experiments.smoke_dpjax
 ```
 
 输出（每次运行）：
@@ -245,11 +278,11 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false jupyter lab
 
 ### Notebook 索引
 
-`notebooks/` 目录包含以下示例：
+`notebooks/` 只保留训练后分析入口：
 
 | Notebook | 说明 |
 |----------|------|
-| `06_full_pipeline.ipynb` | 端到端完整流程（数据生成、DF 训练、Φ 训练、联合微调、可视化） |
+| `07_analysis.ipynb` | 加载已完成的训练结果并生成分析图；训练流程使用独立 CLI 脚本 |
 
 ### 在 Notebook 中调用训练
 

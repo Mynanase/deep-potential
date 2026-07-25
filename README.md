@@ -11,10 +11,12 @@ both extremely flexible and easily differentiable. This latter property is
 critical, as the collisionless Boltzmann equation contains gradients of the
 potential (and of the distribution function).
 
-See `notebooks/06_full_pipeline.ipynb` for an end-to-end demonstration of the
-method on the Plummer Sphere toy system, and `README_JAX.md` for detailed
-setup and training instructions.
+See `docs/operations_maintenance_guide.md` for current operation and maintenance
+procedures, `docs/pipeline_guide.md` for the end-to-end workflow,
+`notebooks/07_analysis.ipynb` for post-training analysis, and `README_JAX.md`
+for detailed setup instructions.
 
-This version is implemented in JAX/Flax, with some legacy code in Tensorflow 2.x.
+The active implementation uses JAX/Flax. Historical TensorFlow/Sonnet code is
+kept under `archive/legacy_tensorflow/` and is not part of the supported runtime.
 There is an out-of-date PyTorch implementation at
 [tingyuansen/deep-potential](https://github.com/tingyuansen/deep-potential).

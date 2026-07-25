@@ -6,7 +6,7 @@ This bypasses the inverse coord_transform to isolate:
   B) Are the distortions coming from the flow or the inverse transform?
 
 Pipeline: raw → coord_transform(power) → clip → normalizer(zscore) → flow
-We evaluate: normalizer.inverse(flow_samples) vs normalizer.transform(data_after_clip)
+We compare flow samples and data in the same standardized model space.
 
 When --mass-npz is provided (an npz with 'mass_for_a' field aligned 1-to-1 to
 --data rows), additionally produces mass-weighted variants of marginals, KS,
@@ -15,20 +15,16 @@ artifact of equal-weight histogramming when f(η) is the mass density?"
 """
 import argparse
 import os
-import sys
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy import stats as sp_stats
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from dpjax.flows.api import build_flow, sample_apply, load_df
-from dpjax.data import load_eta_h5, CoordinateTransform, fit_normalizer
+from dpjax.flows.api import load_df, sample_apply
+from dpjax.data import load_eta_h5
 
 
 def _stats_1d(x, w=None):
@@ -125,16 +121,15 @@ def main():
     print(f"Sampling {args.n_samples} points...")
     samples_norm = np.asarray(sample_apply(model, params, rng_sample, args.n_samples, flow_cfg))
 
-    # Denormalize (but do NOT apply coord_transform.inverse)
-    # This gives us data/samples in the "power-transformed" space
-    data_power = data_norm  # already in power+zscore space
-    samples_power = normalizer.inverse(samples_norm)
+    # Compare both arrays in the exact standardized space seen by the flow.
+    data_power = data_norm
+    samples_power = samples_norm
     # Flow samples correspond to equal-weight draws from p_theta by definition.
     # (Indeed the DF is a mass density, but flow samples should be interpreted
     # by mass weight of each sample cell — which here is unknown a priori, so
     # we keep equal-weight samples, exactly as the model is trained!)
 
-    labels = ["x_pow", "y_pow", "z_pow", "vx_pow", "vy_pow", "vz_pow"]
+    labels = ["x_std", "y_std", "z_std", "vx_std", "vy_std", "vz_std"]
     raw_labels = ["x", "y", "z", "vx", "vy", "vz"]
 
     # ---- Statistics table (equal-weight + mass-weighted) ----

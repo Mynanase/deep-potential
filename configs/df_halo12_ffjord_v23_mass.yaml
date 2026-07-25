@@ -1,0 +1,52 @@
+# Halo12 mass-weighted static DF baseline.
+# Physics-safe: no nonlinear coordinate transform, so physical 6D scores can
+# feed the static CBE/Phi stage without an unimplemented chain rule.
+
+seed: 42
+
+data:
+  dataset: eta
+  weight_dataset: tracer_weight
+  val_frac: 0.25
+  split_seed: 1042
+  clip_sigma: 4.5
+  jitter_std: 0.002
+  transform:
+    type: none
+    dims: []
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    # Green et al. (2023)-style compact velocity field.
+    hidden_sizes: [128, 128, 128]
+    n_blocks: 3
+    solver: dopri5
+    stepsize_controller: pid
+    dt0: 0.001
+    max_steps: 16384
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    kin_reg: 1.0e-4
+    jac_reg: 1.0e-4
+
+train:
+  batch_size: 8192
+  epochs: 32
+  lr:
+    schedule: cosine
+    max: 1.0e-4
+    final: 5.0e-6
+    warmup_frac: 0.05
+  grad_clip: 1.0
+  log_every: 25
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true
+  stop_score_p99: 200.0
+  stop_score_max_abs: 5000.0

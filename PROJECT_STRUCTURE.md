@@ -23,8 +23,14 @@
     *   `plotting/`：核心绘图与投影逻辑基础组件。
 *   **`experiments/`**: 驱动整个生命周期的脚本集合。包含 `train_df.py`, `train_phi.py`, `finetune_joint.py`，以及各类独立绘图与评估脚本 (`eval_df.py`, `plot_phi_slice.py` 等)。
 *   **`configs/`**: 各种训练作业的 YAML 配置文件设定（如 Batch Size、学习率调度、网络超参数等）。
-*   **`scripts/`**: 包含旧版 TensorFlow 代码（带有 `_tf.py` 后缀的文件或旧笔记本，正常开发应忽略）。但该目录保留了重要的**测试数据生成脚本**（例如 `plummer/plummer_gendata.py`）。
+*   **`jobs/`**: 参数化的集群批处理模板；具体实验通过环境变量选择配置和输出目录。
+*   **`scripts/`**: 只保留专用的数据核对与离线分析工具；训练、评估和数据生成入口统一放在 `experiments/`。
+*   **`tests/`**: 数据 I/O、预处理、Plummer 采样和公共工具的快速单元测试。
+*   **`archive/legacy_tensorflow/`**: 只读历史归档；不属于当前安装和运行路径。
 *   **`runs/`**: 各项实验运行结果、模型权重 (Checkpoints)、日志 (`metrics.csv`) 以及可视化输出的默认保存目录。
+
+日常操作、质量门禁、故障排查和后续扩展约定见
+`docs/operations_maintenance_guide.md`。
 
 ---
 
@@ -50,12 +56,12 @@
     *   默认结构与论文实现对齐：**4 层隐藏层，每层 512 神经元**。
     *   **激活函数特别要求**：各隐藏层使用 `tanh` 激活函数。避免使用 `relu`，因为 `relu` 的二阶偏导为 0，这会导致物理引力（梯度本身）在后续计算或推导时变得病态或不连续。
 
-### CBE 损失（鲁棒形式）
+### CBE 损失（MSE / 鲁棒形式）
 *   **位置**: `dpjax/physics/cbe.py`
-*   **默认训练目标**:
-    *   使用 `asinh(|residual|)` 形式惩罚非平稳性，降低极端样本对训练的主导；
-    *   额外加入负密度惩罚项 `asinh(max(-\nabla^2\Phi, 0))`，抑制非物理质量分布；
-    *   在 `train_phi` / `finetune_joint` 中可通过 `train.loss_type` 切换为传统 `mse`。
+*   **训练目标**:
+    *   `mse` 直接惩罚 CBE residual；当前 `phi_plummer.yaml` 基线使用该形式；
+    *   `robust` 使用 `asinh(|residual|)` 降低极端样本影响，并加入负密度惩罚；
+    *   `train_phi` / `finetune_joint` 通过 `train.loss_type` 显式选择。
 
 ---
 
@@ -82,13 +88,32 @@
 
 *   **数据格式设计**: 
     模型接受的数据主要来源于仿真生成的 HDF5 文件，维度为 `(N, 6)`的数组，代表特定系统在某刻的全息相空间快照（$x, y, z, v_x, v_y, v_z$）。
-*   **模拟数据生成**: 
-    可以使用遗留目录下的独立 Python 脚本生成测试数据集。利用 Plummer 模型生成数据的命令样例：
+*   **模拟数据生成**:
+    Plummer 采样核心位于 `dpjax/datasets/plummer.py`，命令行入口只负责参数解析与 HDF5 输出：
     ```bash
-    PYTHONPATH=./scripts python scripts/plummer/plummer_gendata.py -n 131072 -o data/plummer_n131072.h5
+    python -m experiments.gendata_plummer \
+      --total-n 131072 \
+      --train-out data/plummer_n131072.h5
     ```
 *   **数据流向 (dpjax/data.py)**:
     在 `train_df.py` 中，程序调用 `load_eta_h5` 将 HDF5 载入内存，并通过 `fit_normalizer` 得到标准化算子，将原始数据 $\eta$ 转换为 $\eta_{std}$，再分割成多个 Batch 交由模型消费。
+*   **非线性坐标变换边界**:
+    `asinh` / `log` / `power` 当前用于 DF 训练与评估。Φ/CBE 阶段在物理梯度的完整链式法则实现前会显式拒绝此类 DF 检查点，避免静默得到错误物理量。
+    旧版无 `schema_version=2` 的变换文件会被识别为历史 no-op 并安全禁用。
+
+### Auriga mock 数据与真值
+
+Auriga/Gadget 原始文件通过 `dpjax.datasets.auriga` 进入项目。核心库同时支持：
+
+- `PartType4/Coordinates` + `PartType4/Velocities`；
+- `PartType4/x, y, z, vx, vy, vz`；
+- 已标准化的根级 `eta`。
+
+统一输出 schema 为 `dpjax.auriga.mock.v1`，至少包含 `(N, 6)` 的 `eta`，
+并可带有逐行对齐的 `particle_id`、`mass`、`potential`、`acceleration` 和
+`source_index`。对齐优先使用唯一 `ParticleIDs`；只有 ID 缺失时才允许显式提供
+六维容差进行 KD-tree 匹配。势能比较会拟合任意加法常数，而加速度使用完整三维
+向量误差，避免只凭径向图或 CBE residual 判断恢复是否成功。
 
 ---
 

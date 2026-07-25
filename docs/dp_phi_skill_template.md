@@ -9,11 +9,11 @@ This skill standardizes PHI train/eval analysis with reusable scripts.
 
 ## Scripts
 
-- `python experiments/check_phi.py <run_dir>`
+- `python -m experiments.check_phi <run_dir>`
   - Summarize single-run training/eval metrics
   - Handles swapped `residual_std`/`residual_p99_abs` columns
 
-- `python experiments/compare_phi.py <run1> <run2> ... [--base <run>]`
+- `python -m experiments.compare_phi <run1> <run2> ... [--base <run>]`
   - Compare eval residual stats, radial errors, and tail-region `phi_mae`
 
 ## Expected workflow

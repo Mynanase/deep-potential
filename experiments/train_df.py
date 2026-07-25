@@ -15,10 +15,22 @@ import numpy as np
 import optax
 import yaml
 
-from dpjax.data import fit_normalizer, iter_batches, load_eta_h5, CoordinateTransform
+from dpjax.data import (
+    CoordinateTransform,
+    fit_normalizer,
+    iter_batches,
+    load_eta_h5,
+    load_h5_vector,
+)
 from dpjax.flows.api import build_flow, init_flow, log_prob_apply, log_prob_reg_apply, score_apply
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
+from experiments._cli import (
+    add_config_override_argument,
+    add_logging_arguments,
+    load_experiment_config,
+)
+from experiments.logger import ExperimentLogger
 
 # ---------------------------------------------------------------------------
 # ReduceLROnPlateau state
@@ -124,6 +136,22 @@ def run_df_training(
     data_cfg = config.get("data", {})
 
     eta = load_eta_h5(data_path, dataset=data_cfg.get("dataset", "eta"))
+    weight_dataset = data_cfg.get("weight_dataset")
+    weights = None
+    if weight_dataset:
+        weights = load_h5_vector(data_path, dataset=str(weight_dataset))
+        if weights.shape[0] != eta.shape[0]:
+            raise ValueError(
+                f"eta has {eta.shape[0]} rows but weight dataset "
+                f"{weight_dataset!r} has {weights.shape[0]}."
+            )
+        if np.any(weights <= 0):
+            raise ValueError("DF training weights must be strictly positive.")
+        weights = weights / np.mean(weights, dtype=np.float64)
+        print(
+            f"[train_df] Using mass/tracer weights from {weight_dataset!r}; "
+            f"normalized mean={weights.mean():.6f}."
+        )
 
     # Optional coordinate preprocessing (e.g. asinh/log/power) applied BEFORE
     # standardization, so that the normalizer sees a flatter distribution.
@@ -142,19 +170,26 @@ def run_df_training(
     # the normalizer's mean/std reflect the clipped distribution.
     clip_sigma = float(data_cfg.get("clip_sigma", 0.0))
     if clip_sigma > 0.0:
-        clip_mean = np.mean(eta, axis=0)
-        clip_std = np.std(eta, axis=0)
+        clip_normalizer = fit_normalizer(eta, weights=weights)
+        clip_mean = clip_normalizer.mean
+        clip_std = clip_normalizer.std
         clip_std = np.maximum(clip_std, 1e-6)
         mask = np.all(np.abs(eta - clip_mean) < clip_sigma * clip_std, axis=1)
         n_before = eta.shape[0]
         eta = eta[mask]
+        if weights is not None:
+            weights = weights[mask]
         n_after = eta.shape[0]
         print(f"[train_df] Sigma-clip at {clip_sigma}σ: removed "
               f"{n_before - n_after}/{n_before} samples "
               f"({100.0 * (n_before - n_after) / n_before:.2f}%), "
               f"kept {n_after}.")
 
-    normalizer = fit_normalizer(eta, eps=float(config.get("normalizer", {}).get("eps", 1.0e-6)))
+    normalizer = fit_normalizer(
+        eta,
+        eps=float(config.get("normalizer", {}).get("eps", 1.0e-6)),
+        weights=weights,
+    )
     normalizer.save_npz(run_dir / "normalizer.npz")
 
     eta_std = normalizer.transform(eta)
@@ -165,13 +200,21 @@ def run_df_training(
     n_total = int(eta_std.shape[0])
     n_val = int(round(n_total * val_frac))
     n_val = min(max(n_val, 0), max(n_total - 1, 0))
+    split_seed = int(data_cfg.get("split_seed", config.get("seed", 0)))
+    split_order = np.random.default_rng(split_seed).permutation(n_total)
+    val_indices = split_order[:n_val]
+    train_indices = split_order[n_val:]
 
     if n_val > 0:
-        eta_train = eta_std[:-n_val]
-        eta_val = eta_std[-n_val:]
+        eta_train = eta_std[train_indices]
+        eta_val = eta_std[val_indices]
+        weights_train = None if weights is None else weights[train_indices]
+        weights_val = None if weights is None else weights[val_indices]
     else:
-        eta_train = eta_std
+        eta_train = eta_std[train_indices]
         eta_val = np.empty((0, eta_std.shape[1]), dtype=np.float32)
+        weights_train = None if weights is None else weights[train_indices]
+        weights_val = None
 
     flow_cfg = config.get("flow", {})
     model = build_flow(flow_cfg)
@@ -235,6 +278,15 @@ def run_df_training(
         rng_jitter = np.random.default_rng(seed=seed + 9999)
         eta_train = eta_train + rng_jitter.normal(0.0, jitter_std, size=eta_train.shape).astype(np.float32)
         print(f"[train_df] Applied jitter with std={jitter_std} to training data.")
+
+    if weights_train is None:
+        weights_train = np.ones(eta_train.shape[0], dtype=np.float32)
+    else:
+        weights_train = np.asarray(weights_train, dtype=np.float32)
+    if weights_val is None:
+        weights_val = np.ones(eta_val.shape[0], dtype=np.float32)
+    else:
+        weights_val = np.asarray(weights_val, dtype=np.float32)
 
     params = init_flow(model, rng, flow_cfg)
 
@@ -371,20 +423,27 @@ def run_df_training(
     def _to_host(tree):
         return jax.tree_util.tree_map(lambda x: np.asarray(jax.device_get(x)), tree)
 
+    def _weighted_mean(values, batch_weights):
+        batch_weights = batch_weights / jnp.maximum(
+            jnp.mean(batch_weights),
+            jnp.asarray(1.0e-12, dtype=batch_weights.dtype),
+        )
+        return jnp.mean(values * batch_weights)
+
     @jax.jit
-    def eval_loss(params, batch):
+    def eval_loss(params, batch, batch_weights):
         lp, reg = log_prob_reg_apply(model, params, batch, flow_cfg)
-        return -jnp.mean(lp) + jnp.mean(reg)
+        return _weighted_mean(-lp + reg, batch_weights)
 
     # train_step is NOT jit-decorated here because we need to re-jit it
     # whenever the optimizer is rebuilt (ReduceLROnPlateau).  Instead we
     # manage jit compilation via train_step_fn_holder.
     def _make_train_step(optimizer):
         @jax.jit
-        def _train_step(params, opt_state, batch):
+        def _train_step(params, opt_state, batch, batch_weights):
             def loss_fn(p):
                 lp, reg = log_prob_reg_apply(model, p, batch, flow_cfg)
-                return -jnp.mean(lp) + jnp.mean(reg)
+                return _weighted_mean(-lp + reg, batch_weights)
             loss, grads = jax.value_and_grad(loss_fn)(params)
             updates, opt_state2 = optimizer.update(grads, opt_state, params)
             params2 = optax.apply_updates(params, updates)
@@ -432,6 +491,13 @@ def run_df_training(
         np_rng = np.random.default_rng(seed=seed)
         n_val_eval = min(2048, int(eta_val.shape[0]))
         val_eval = eta_val[:n_val_eval] if n_val_eval > 0 else None
+        val_weight_eval = (
+            weights_val[:n_val_eval] if n_val_eval > 0 else None
+        )
+        train_rows = np.concatenate(
+            [eta_train, weights_train[:, None]],
+            axis=1,
+        )
 
         start_epoch = step0 // max(steps_per_epoch, 1)
         pbar = tqdm(
@@ -446,18 +512,30 @@ def run_df_training(
 
         for epoch in range(start_epoch, epochs):
             for batch_np in iter_batches(
-                eta_train,
+                train_rows,
                 batch_size=batch_size,
                 rng=np_rng,
                 shuffle=True,
                 drop_remainder=True,
                 max_batches=max_batches_per_epoch,
             ):
-                batch = jnp.asarray(batch_np)
+                batch_eta_np = batch_np[:, :6]
+                batch_weight_np = batch_np[:, 6]
+                batch = jnp.asarray(batch_eta_np)
+                batch_weights = jnp.asarray(batch_weight_np)
                 if use_sharding:
                     batch = jax.device_put(batch, batch_sharding)
+                    batch_weights = jax.device_put(
+                        batch_weights,
+                        batch_sharding,
+                    )
 
-                params, opt_state, loss = train_step_fn_holder[0](params, opt_state, batch)
+                params, opt_state, loss = train_step_fn_holder[0](
+                    params,
+                    opt_state,
+                    batch,
+                    batch_weights,
+                )
                 loss_scalar = float(jax.device_get(loss))
 
                 # ── Compute effective lr for logging ──────────────────────
@@ -482,7 +560,7 @@ def run_df_training(
                     params_host = params
                     opt_state_host = opt_state
 
-                x_small = jnp.asarray(batch_np[:1024])
+                x_small = jnp.asarray(batch_eta_np[:1024])
 
                 if (global_step % log_every) == 0:
                     score = score_apply(model, params_host, x_small, flow_cfg)
@@ -493,7 +571,14 @@ def run_df_training(
 
                     if val_eval is not None:
                         val_batch = jnp.asarray(val_eval)
-                        val_loss = float(eval_loss(params_host, val_batch))
+                        val_weight_batch = jnp.asarray(val_weight_eval)
+                        val_loss = float(
+                            eval_loss(
+                                params_host,
+                                val_batch,
+                                val_weight_batch,
+                            )
+                        )
                         val_score = score_apply(model, params_host, val_batch, flow_cfg)
                         val_score_p99 = float(jnp.percentile(jnp.abs(val_score), 99.0))
                     else:
@@ -602,26 +687,14 @@ def main() -> int:
     parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--run-dir", type=str, required=True)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument(
-        "--override", type=str, default=None,
-        help="JSON string of config overrides, e.g. '{\"train\": {\"epochs\": 64}}'.",
+    add_config_override_argument(
+        parser,
+        example='{"train": {"epochs": 64}}',
     )
-    parser.add_argument("--logger", type=str, default="csv", help="Logger backend: csv, wandb, tensorboard, wandb+tb.")
-    parser.add_argument("--project", type=str, default="dp-plummer", help="W&B project name.")
-    parser.add_argument("--run-name", type=str, default=None, help="W&B / experiment run name.")
+    add_logging_arguments(parser)
     args = parser.parse_args()
 
-    import json
-    import sys
-    _repo = Path(__file__).resolve().parents[1]
-    if str(_repo) not in sys.path:
-        sys.path.insert(0, str(_repo))
-    from dpjax.config import merge_config
-    from experiments.logger import ExperimentLogger
-
-    cfg = yaml.safe_load(Path(args.config).read_text())
-    if args.override:
-        cfg = merge_config(cfg, json.loads(args.override))
+    cfg = load_experiment_config(args.config, args.override)
 
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)

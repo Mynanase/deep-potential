@@ -7,13 +7,13 @@
     1.  **Stage 1 (DF)**: Train a Normalizing Flow (RealNVP in `dpjax/flows/`) on tracer data to fit `log_prob(eta_std)`.
     2.  **Stage 2 ($\Phi$)**: Freeze the DF, and train the Potential network (`dpjax/models/`) to minimize the CBE residual constraint.
     3.  **Joint Fine-tuning**: Jointly fine-tune both networks to enforce physical consistency ($L=\lambda_{\mathrm{cbe}}\,L_{\mathrm{CBE}}+\lambda_{\mathrm{nll}}\,\mathrm{NLL}$).
-*   **Legacy Code**: Ignore legacy TensorFlow `.py` scripts in `scripts/` containing `_tf` in their names and older notebook analysis unless explicitly asked. The active framework is **JAX** + **Flax** + **Optax** located in the `dpjax/` and `experiments/` directories.
+*   **Legacy Code**: Ignore `archive/legacy_tensorflow/` unless explicitly asked. The active framework is **JAX** + **Flax** + **Optax** located in the `dpjax/`, `experiments/`, and active `scripts/` directories.
 
 ## Developer Workflows & Commands
 
 *   **Handling JAX GPU OOM**: If GPU initialization encounters OOM, temporarily disable preallocation: `export XLA_PYTHON_CLIENT_PREALLOCATE=false`.
 *   **CPU Smoke Tests**: If you need to quickly verify the pipeline without GPU compilation overhead, use `export JAX_PLATFORM_NAME=cpu`.
-*   **Generating Dummy Data**: Tracers data is processed from HDF5 (shape `(N, 6)` with order `[x,y,z,vx,vy,vz]`). Generate Plummer data using `PYTHONPATH=./scripts python scripts/plummer/plummer_gendata.py -n 131072 -o data/plummer_n131072.h5`.
+*   **Generating Dummy Data**: Tracer data is stored in HDF5 with shape `(N, 6)` and order `[x,y,z,vx,vy,vz]`. Generate Plummer data with `python -m experiments.gendata_plummer --total-n 131072 --train-out data/plummer_n131072.h5`.
 *   **Training Scripts (`experiments/`)**:
     *   `train_df.py`, `train_phi.py`, `finetune_joint.py` handle phases of training.
     *   Configurations are driven by YAML files in `configs/` (e.g., `configs/joint_plummer.yaml`).

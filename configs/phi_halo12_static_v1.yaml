@@ -1,0 +1,40 @@
+# Halo12 static-potential baseline.
+#
+# Requires a DF run with a physics-compatible coordinate transform. The
+# current safe starting point is df_halo12_ffjord_v22.yaml (transform: none);
+# power/asinh/log DF runs remain blocked until their physical score and
+# potential chain rules are implemented and validated.
+
+seed: 42
+
+data:
+  dataset: eta
+
+normalizer:
+  eps: 1.0e-6
+
+potential:
+  hidden_sizes: [512, 512, 512, 512]
+
+train:
+  batch_size: 32768
+  epochs: 32
+  loss_type: robust
+  alpha: 1.0
+  beta: 1.0
+  lambda_mass: 1.0
+  # mean_square(params) already divides by the parameter count. This matches
+  # the 2025 implementation's 0.001 / n_weights convention.
+  l2_reg: 0.001
+  reweight:
+    gamma: 0.0
+    r_ref: 20.0
+  lr:
+    max: 0.001
+    final: 1.0e-6
+    warmup_frac: 0.03
+  grad_clip: 1.0
+  log_every: 50
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true

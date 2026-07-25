@@ -14,19 +14,23 @@ import numpy as np
 import optax
 import yaml
 
-from dpjax.data import iter_batches, load_eta_h5
+from dpjax.data import (
+    iter_batches,
+    load_eta_h5,
+    require_physics_compatible_transform,
+)
 from dpjax.flows.api import load_df, score_apply
 from dpjax.models.potential import PotentialConfig, PotentialMLP, grad_phi_apply, laplacian_phi_apply
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.cbe import loss_cbe_A, loss_cbe_robust, residual_A
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
-
-
-def _mean_param_square(params: dict) -> jnp.ndarray:
-    leaves = jax.tree_util.tree_leaves(params)
-    sq_sum = sum(jnp.sum(jnp.square(x)) for x in leaves)
-    n_elem = sum(x.size for x in leaves)
-    return sq_sum / jnp.maximum(jnp.asarray(n_elem, dtype=jnp.float32), 1.0)
+from dpjax.utils.tree import mean_square
+from experiments._cli import (
+    add_config_override_argument,
+    add_logging_arguments,
+    load_experiment_config,
+)
+from experiments.logger import ExperimentLogger
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +85,11 @@ def run_phi_training(
 
     (run_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
-    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, coord_transform = load_df(df_run_dir)
+    require_physics_compatible_transform(
+        coord_transform,
+        operation="Phi/CBE training",
+    )
     flow_cfg = df_cfg.get("flow", {})
 
     eta = load_eta_h5(data_path, dataset=config.get("data", {}).get("dataset", "eta"))
@@ -272,7 +280,7 @@ def run_phi_training(
                     weights=weights,
                 )
 
-            return cbe_loss + l2_reg * _mean_param_square(p)
+            return cbe_loss + l2_reg * mean_square(p)
 
         loss, grads = jax.value_and_grad(loss_fn)(phi_params)
         updates, opt_state2 = opt.update(grads, opt_state, phi_params)
@@ -395,28 +403,16 @@ def main() -> int:
         default=None,
         help="Initialize Phi params from another run_dir checkpoint (weights-only init).",
     )
-    parser.add_argument(
-        "--override", type=str, default=None,
-        help="JSON string of config overrides, e.g. '{\"train\": {\"epochs\": 32}}'.",
+    add_config_override_argument(
+        parser,
+        example='{"train": {"epochs": 32}}',
     )
-    parser.add_argument("--logger", type=str, default="csv", help="Logger backend: csv, wandb, tensorboard, wandb+tb.")
-    parser.add_argument("--project", type=str, default="dp-plummer", help="W&B project name.")
-    parser.add_argument("--run-name", type=str, default=None, help="W&B / experiment run name.")
+    add_logging_arguments(parser)
     args = parser.parse_args()
     if args.resume and args.init_params:
         parser.error("--resume and --init-params cannot be used together.")
 
-    import json
-    import sys
-    _repo = Path(__file__).resolve().parents[1]
-    if str(_repo) not in sys.path:
-        sys.path.insert(0, str(_repo))
-    from dpjax.config import merge_config
-    from experiments.logger import ExperimentLogger
-
-    cfg = yaml.safe_load(Path(args.config).read_text())
-    if args.override:
-        cfg = merge_config(cfg, json.loads(args.override))
+    cfg = load_experiment_config(args.config, args.override)
 
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)

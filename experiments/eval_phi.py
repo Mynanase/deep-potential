@@ -9,7 +9,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.data import iter_batches, load_eta_h5
+from dpjax.data import (
+    iter_batches,
+    load_eta_h5,
+    require_physics_compatible_transform,
+)
 from dpjax.flows.api import load_df, score_apply
 from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi, phi_apply
 from dpjax.paths import ensure_dir, resolve_path
@@ -53,7 +57,11 @@ def run_eval_phi(
     df_run_dir = resolve_path(df_run_dir)
     phi_run_dir = resolve_path(phi_run_dir)
 
-    df_model, df_params, normalizer, df_cfg, _coord_transform = load_df(df_run_dir)
+    df_model, df_params, normalizer, df_cfg, coord_transform = load_df(df_run_dir)
+    require_physics_compatible_transform(
+        coord_transform,
+        operation="Phi/CBE evaluation",
+    )
     flow_cfg = df_cfg.get("flow", {})
     phi_model, phi_params, _ = load_phi(phi_run_dir)
 

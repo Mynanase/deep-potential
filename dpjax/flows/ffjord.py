@@ -312,7 +312,7 @@ class FFJORD(nn.Module):
     def log_prob_with_reg(self, x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         """Compute ``(log p(x), reg_cost)`` for a batch.
 
-        ``reg_cost`` is per-sample ``\int (kin_reg ||f||^2 + jac_reg ||J||_F^2) dt``
+        ``reg_cost`` is per-sample ``\\int (kin_reg ||f||^2 + jac_reg ||J||_F^2) dt``
         summed over blocks.  Zero when both ``kin_reg`` and ``jac_reg`` are 0.
         """
         n_b = self.cfg.n_blocks
