@@ -1,0 +1,61 @@
+# Halo12 FFJORD v22 — ablation of CoordinateTransform
+# Built on v21 (alpha=0.5 + 12-layer) but with transform: none.
+#
+# Purpose: empirically verify whether CoordinateTransform is actually
+# necessary to keep FFJORD stable on Auriga halo_12. The v10-v18 era
+# commit message claims "v10-v18 all diverge at NLL~5 due to ODE
+# numerical instability"; this ablation reproduces that regime but
+# under the v21 architecture (12-layer network, lower reg).
+#
+# Expected: divergence / unstable training → confirms CoordTransform
+#           is a numerical-stability necessity, not a fit-quality knob.
+# If trains: → CoordTransform was unnecessary, removing it simplifies
+#             the inverse pipeline.
+#
+# All hyperparams identical to v21 except `transform: type: none`.
+
+seed: 42
+
+data:
+  dataset: eta
+  val_frac: 0.1
+  clip_sigma: 4.5
+  jitter_std: 0.01
+  transform:
+    type: none
+    dims: []
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    hidden_sizes: [192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192]
+    n_blocks: 3
+    solver: dopri5
+    stepsize_controller: pid
+    dt0: 0.001
+    max_steps: 16384
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    kin_reg: 1.0e-5
+    jac_reg: 1.0e-5
+
+train:
+  batch_size: 8192
+  epochs: 20
+  lr:
+    schedule: cosine
+    max: 1.0e-4
+    final: 1.0e-6
+    warmup_frac: 0.2
+  grad_clip: 1.0
+  log_every: 25
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true
+  stop_score_p99: 200.0
+  stop_score_max_abs: 5000.0

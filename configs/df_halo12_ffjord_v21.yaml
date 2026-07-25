@@ -1,0 +1,57 @@
+# Halo12 FFJORD v21 — alpha=0.5 + wider network
+# v19/v20 diagnosis: in transformed space, flow outputs have std=1.2-4.0 
+# vs data std=1.0. The model never converged to true distribution.
+#
+# Root cause: alpha=0.3 over-compresses → all kurtosis negative (platykurtic).
+# The flow sees flat distributions it can't model well.
+# alpha=0.5 gives kurtosis closer to normal: z=3.65, others near 0.
+#
+# Also increasing network from 6→12 hidden layers (matching Green 2023 paper).
+# Keeping reg at 1e-5 (v20 showed 1e-3 vs 1e-5 made little difference).
+
+seed: 42
+
+data:
+  dataset: eta
+  val_frac: 0.1
+  clip_sigma: 4.5
+  jitter_std: 0.01
+  transform:
+    type: power
+    dims: [0, 1, 2, 3, 4, 5]
+    alpha: 0.5
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    hidden_sizes: [192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192]
+    n_blocks: 3
+    solver: dopri5
+    stepsize_controller: pid
+    dt0: 0.001
+    max_steps: 16384
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    kin_reg: 1.0e-5
+    jac_reg: 1.0e-5
+
+train:
+  batch_size: 8192
+  epochs: 20
+  lr:
+    schedule: cosine
+    max: 1.0e-4
+    final: 1.0e-6
+    warmup_frac: 0.2
+  grad_clip: 1.0
+  log_every: 25
+  ckpt_every: 500
+  max_to_keep: 3
+  multi_gpu: true
+  stop_score_p99: 200.0
+  stop_score_max_abs: 5000.0
