@@ -46,7 +46,7 @@
 | `dpjax/` | 数据、模型、物理、绘图和检查点核心库 | 只放可复用、可测试的实现 |
 | `experiments/` | CLI 参数解析与实验流程编排 | 保持轻量，不复制核心算法 |
 | `configs/` | 可复现实验的 YAML 配置 | 已运行配置保持不可变，新实验新建文件 |
-| `jobs/` | 参数化 Slurm 模板 | 不硬编码服务器路径、GPU 编号或用户名 |
+| `jobs/` | 无调度器 Bash 服务器脚本 | 不硬编码服务器路径、GPU 编号或用户名 |
 | `scripts/` | 专用核对和离线诊断 | 不新增训练主入口 |
 | `tests/` | 快速单元与回归测试 | 每次修复都应补对应测试 |
 | `notebooks/` | 交互式结果分析 | 不承载唯一实现，不保存大体积输出 |
@@ -473,31 +473,51 @@ env WANDB_MODE=offline python -m experiments.train_df ...
 `data/`、`runs/`、图片和检查点默认不进入 Git，因此不能把 Git 仓库当作实验
 备份。
 
-## 7. Slurm 操作
+## 7. 普通 Linux 服务器操作
 
-Halo12 使用统一模板：
+Halo12 使用普通 Bash 脚本，不依赖集群调度器。单次训练示例：
 
 ```bash
-sbatch \
-  --job-name=halo12-df-v22 \
-  --export=ALL,CONFIG=configs/df_halo12_ffjord_v22.yaml,RUN_DIR=runs/halo_12/df_ffjord_v22,RUN_NAME=halo12-df-v22 \
-  jobs/train_halo12_df.sbatch
+env \
+  CONFIG=configs/df_halo12_ffjord_v23_mass.yaml \
+  DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  RUN_DIR=runs/halo_12/df_ffjord_v23_mass/seed_42 \
+  GPU_DEVICES=0,1 \
+  bash jobs/train_halo12_df.sh
 ```
 
 可选环境变量：
 
-- `DEEP_POTENTIAL_ROOT`：仓库绝对路径；默认使用 `SLURM_SUBMIT_DIR`。
+- `DEEP_POTENTIAL_ROOT`：仓库绝对路径；默认根据脚本位置自动定位。
 - `DATA_PATH`：输入 HDF5；默认 `data/halo_12_train.h5`。
 - `CONDA_ENV_NAME`：Conda 环境名；默认 `dp-jax`。
-- `LOGGER`：日志后端；默认 `wandb`。
+- `GPU_DEVICES`：可见 GPU，例如 `0` 或 `0,1`；默认使用全部可见设备。
+- `LOGGER`：日志后端；默认 `csv`。
 - `WANDB_PROJECT`：W&B 项目名。
+- `SEEDS`：ensemble seed 列表，默认 `42,43,44,45`。
+- `RESUME=1`：从已有 checkpoint 恢复训练。
 
-维护 Slurm 模板时：
+后台运行完整 prepare → train → eval 流程：
 
-- 使用 Slurm 分配的设备，不设置固定 `CUDA_VISIBLE_DEVICES`。
+```bash
+mkdir -p logs
+nohup env \
+  INPUT_PATH=/path/to/halo_12_stars.hdf5 \
+  GPU_DEVICES=0,1 \
+  LOGGER=csv \
+  bash jobs/run_halo12_df_pipeline.sh \
+  > logs/halo12-pipeline.log 2>&1 &
+```
+
+使用 fish 时可用 `echo $last_pid` 查看刚启动的后台进程，并用
+`tail -f logs/halo12-pipeline.log` 跟踪日志。
+
+维护服务器脚本时：
+
+- GPU 通过 `GPU_DEVICES` 传入，不在脚本中固定设备编号。
 - 不写个人 home、Conda 安装路径或服务器专用仓库路径。
 - 实验差异通过 `CONFIG`、`RUN_DIR` 和环境变量传入。
-- 新集群只新增确有调度差异的模板，不为每个超参数组合复制脚本。
+- ensemble 默认顺序运行，避免多个 FFJORD 进程争用同一 GPU 显存。
 
 多 GPU 训练会根据 `jax.local_device_count()` 启用分片。全局 batch size 最好能
 被设备数整除；否则训练器会向下调整并打印实际 batch size。
@@ -614,13 +634,13 @@ git diff --check
 - CBE residual 的尺度与符号检查。
 - 单 GPU 与目标多 GPU 配置各做一次小规模运行。
 
-### 9.5 CLI、配置或 Slurm 改动
+### 9.5 CLI、配置或服务器脚本改动
 
 额外要求：
 
 ```bash
 python -m experiments.<module> --help
-bash -n jobs/*.sbatch
+bash -n jobs/*.sh
 ```
 
 并确认 README 或本指南中的命令仍然有效。
@@ -715,7 +735,7 @@ python -m pytest
 - Python 3.10 和 3.11 的单元测试。
 - CPU `experiments.smoke_dpjax`。
 - `uv lock --check` 和 `pip check`。
-- YAML、Notebook JSON 和 Slurm 语法检查。
+- YAML、Notebook JSON 和服务器 Bash 语法检查。
 
 这能防止当前人工质量门禁随着后续提交失效。
 

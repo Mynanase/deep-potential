@@ -25,9 +25,10 @@ Halo12 没有解析的六维 score 真值。因此，当前的 score 验收是�
 ### 1. 生成全恒星规范化数据
 
 ```bash
-sbatch \
-  --export=ALL,INPUT_PATH=/path/to/halo_12_stars.hdf5,OUTPUT_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/prepare_halo12_df.sbatch
+env \
+  INPUT_PATH=/path/to/halo_12_stars.hdf5 \
+  OUTPUT_PATH=data/auriga/halo12_all_mass.h5 \
+  bash jobs/prepare_halo12_df.sh
 ```
 
 若全样本训练不可行，可把 `COMPONENT` 设为 `cold`、`warm`、`hot` 或 `counter`。
@@ -41,32 +42,49 @@ sbatch \
 ### 2. 先提交一个种子作为数值门禁
 
 ```bash
-sbatch \
-  --array=0-0 \
-  --export=ALL,DATA_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/train_halo12_df_ensemble.sbatch
+env \
+  DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  SEEDS=42 \
+  GPU_DEVICES=0,1 \
+  bash jobs/train_halo12_df_ensemble.sh
 ```
 
 确认 NLL 有下降趋势、没有触发 score early-stop、checkpoint 和 `metrics.csv`
-正常后，再提交四种子：
+正常后，再训练剩余三个 seed：
 
 ```bash
-sbatch \
-  --array=0-3 \
-  --export=ALL,DATA_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/train_halo12_df_ensemble.sbatch
+env \
+  DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  SEEDS=43,44,45 \
+  GPU_DEVICES=0,1 \
+  bash jobs/train_halo12_df_ensemble.sh
 ```
 
 ### 3. 评估密度与 6D score
 
-训练数组全部成功后：
+四个 seed 全部成功后：
 
 ```bash
-sbatch \
-  --dependency=afterok:<TRAIN_ARRAY_JOB_ID> \
-  --export=ALL,DATA_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/eval_halo12_df_ensemble.sbatch
+env \
+  DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  SEEDS=42,43,44,45 \
+  GPU_DEVICES=0 \
+  bash jobs/eval_halo12_df_ensemble.sh
 ```
+
+需要离开 SSH 后继续运行时，可以使用：
+
+```bash
+mkdir -p logs
+nohup env \
+  INPUT_PATH=/path/to/halo_12_stars.hdf5 \
+  GPU_DEVICES=0,1 \
+  LOGGER=csv \
+  bash jobs/run_halo12_df_pipeline.sh \
+  > logs/halo12-pipeline.log 2>&1 &
+```
+
+完整流程默认顺序训练四个 seed，任一步失败都会停止，不会继续产生误导性的评估结果。
 
 主要输出：
 

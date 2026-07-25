@@ -23,7 +23,7 @@
     *   `plotting/`：核心绘图与投影逻辑基础组件。
 *   **`experiments/`**: 驱动整个生命周期的脚本集合。包含 `train_df.py`, `train_phi.py`, `finetune_joint.py`，以及各类独立绘图与评估脚本 (`eval_df.py`, `plot_phi_slice.py` 等)。
 *   **`configs/`**: 各种训练作业的 YAML 配置文件设定（如 Batch Size、学习率调度、网络超参数等）。
-*   **`jobs/`**: 参数化的集群批处理模板；具体实验通过环境变量选择配置和输出目录。
+*   **`jobs/`**: 不依赖调度器的 Linux/Bash 服务器脚本；具体实验通过环境变量选择配置、GPU 和输出目录。
 *   **`scripts/`**: 只保留专用的数据核对与离线分析工具；训练、评估和数据生成入口统一放在 `experiments/`。
 *   **`tests/`**: 数据 I/O、预处理、Plummer 采样和公共工具的快速单元测试。
 *   **`archive/legacy_tensorflow/`**: 只读历史归档；不属于当前安装和运行路径。

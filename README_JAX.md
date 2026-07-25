@@ -174,25 +174,27 @@ python -m experiments.train_df \
 训练后可用 `python -m experiments.eval_df --plummer-diag` 生成 DF 梯度检查图，并在
 `notebooks/07_analysis.ipynb` 中复核结果。
 
-## Halo12 Slurm 作业
+## Halo12 普通服务器作业
 
 当前阶段先训练质量加权、无非线性坐标变换的 v23 ensemble。完整顺序、成分回退和
 验收阈值见 `docs/auriga_halo12_df_stage.md`。
 
 ```bash
-sbatch \
-  --export=ALL,INPUT_PATH=/path/to/halo_12_stars.hdf5,OUTPUT_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/prepare_halo12_df.sbatch
+env \
+  INPUT_PATH=/path/to/halo_12_stars.hdf5 \
+  OUTPUT_PATH=data/auriga/halo12_all_mass.h5 \
+  bash jobs/prepare_halo12_df.sh
 
-sbatch \
-  --array=0-3 \
-  --export=ALL,DATA_PATH=data/auriga/halo12_all_mass.h5 \
-  jobs/train_halo12_df_ensemble.sbatch
+env \
+  DATA_PATH=data/auriga/halo12_all_mass.h5 \
+  SEEDS=42,43,44,45 \
+  GPU_DEVICES=0,1 \
+  bash jobs/train_halo12_df_ensemble.sh
 ```
 
 准备步骤会写入 `tracer_weight` 并重新计算基于
-`Potential + 0.5 v²` 的运动学成分标签。训练脚本使用 Slurm 分配的 GPU，不硬编码
-服务器目录、Conda 安装路径或 `CUDA_VISIBLE_DEVICES`。
+`Potential + 0.5 v²` 的运动学成分标签。脚本默认顺序训练各 seed；通过
+`GPU_DEVICES` 选择服务器 GPU，不硬编码服务器路径或 Conda 安装路径。
 
 坐标变换文件从 `schema_version=2` 起才表示变换已真实应用。加载旧版无版本
 文件时会发出警告并按无变换处理；要验证 v21/v22 的 power-transform 实验，
