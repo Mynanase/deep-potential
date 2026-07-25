@@ -24,7 +24,12 @@ from dpjax.evaluation import (
     score_ensemble_metrics,
     spherical_density_profile,
     stein_score_metrics,
+    truth_cbe_radial_profile,
+    truth_cbe_score_metrics,
 )
+from dpjax.data import Normalizer
+from dpjax.plotting.auriga_score import plot_truth_cbe_diagnostics
+from experiments import eval_auriga_df_acceleration
 from experiments.prepare_auriga import prepare_auriga
 
 
@@ -284,3 +289,165 @@ def test_density_and_score_diagnostics():
     assert ensemble["finite_point_fraction"] == pytest.approx(1.0)
     assert ensemble["pairwise_cosine_median"] == pytest.approx(1.0)
     assert stein["mean_score_l2"] < 0.2
+
+
+def _stationary_truth_case(
+    n: int = 256,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(17)
+    eta = rng.normal(size=(n, 6))
+    eta[:, :3] += np.array([3.0, 0.0, 0.0])
+    score = rng.normal(size=(n, 6))
+    score_v_norm2 = np.sum(score[:, 3:] ** 2, axis=1)
+    transport = np.sum(eta[:, 3:] * score[:, :3], axis=1)
+    acceleration = (
+        -transport[:, None]
+        * score[:, 3:]
+        / score_v_norm2[:, None]
+    )
+    return eta, score, acceleration
+
+
+def test_truth_cbe_score_metrics_use_physical_acceleration_plus_sign():
+    eta, score, acceleration = _stationary_truth_case()
+
+    metrics, diagnostics = truth_cbe_score_metrics(
+        eta,
+        score,
+        acceleration,
+    )
+
+    assert metrics["finite_point_fraction"] == pytest.approx(1.0)
+    assert metrics["transport_vs_negative_acceleration"][
+        "slope_through_origin"
+    ] == pytest.approx(1.0)
+    assert metrics["transport_vs_negative_acceleration"][
+        "pearson_r"
+    ] == pytest.approx(1.0)
+    assert metrics["residual"]["p99_abs"] < 1.0e-12
+    assert metrics["normalized_residual"]["p90"] < 1.0e-12
+    np.testing.assert_allclose(
+        diagnostics["transport_term"] + diagnostics["acceleration_term"],
+        0.0,
+        atol=1.0e-12,
+    )
+
+    wrong_sign_metrics, _ = truth_cbe_score_metrics(
+        eta,
+        score,
+        -acceleration,
+    )
+    assert wrong_sign_metrics["normalized_residual"]["median"] > 0.99
+
+
+def test_truth_cbe_radial_profile_and_plots(tmp_path):
+    eta, score, acceleration = _stationary_truth_case()
+    metrics, diagnostics = truth_cbe_score_metrics(
+        eta,
+        score,
+        acceleration,
+    )
+    profile = truth_cbe_radial_profile(
+        eta[:, :3],
+        diagnostics["residual"],
+        diagnostics["normalized_residual"],
+        n_bins=4,
+    )
+
+    assert profile["n_bins"] == 4
+    assert sum(row["n"] for row in profile["bins"]) == eta.shape[0]
+    paths = plot_truth_cbe_diagnostics(
+        diagnostics,
+        metrics,
+        profile,
+        component=np.arange(eta.shape[0]) % 4,
+        fig_dir=tmp_path,
+        dpi=72,
+    )
+    assert {path.name for path in paths} == {
+        "cbe_truth_terms_scatter.png",
+        "cbe_truth_terms_by_component.png",
+        "cbe_truth_residual_hist.png",
+        "cbe_truth_normalized_residual_hist.png",
+        "cbe_truth_residual_profiles.png",
+    }
+    assert all(path.stat().st_size > 0 for path in paths)
+
+
+def test_run_eval_auriga_df_acceleration_writes_outputs(
+    tmp_path,
+    monkeypatch,
+):
+    eta, score, acceleration = _stationary_truth_case(n=64)
+    snapshot = AurigaSnapshot(
+        eta=eta.astype(np.float32),
+        acceleration=acceleration.astype(np.float32),
+        tracer_weight=np.linspace(0.5, 1.5, eta.shape[0], dtype=np.float32),
+        component=(np.arange(eta.shape[0]) % 4).astype(np.int8),
+    ).validate()
+    data_path = save_auriga_snapshot(
+        snapshot,
+        tmp_path / "halo.h5",
+        length_unit="kpc",
+        velocity_unit="km/s",
+        acceleration_unit="(km/s)^2/kpc",
+    )
+    config = {
+        "seed": 42,
+        "data": {
+            "weight_dataset": "tracer_weight",
+            "val_frac": 0.25,
+            "split_seed": 1042,
+            "clip_sigma": 0.0,
+        },
+        "flow": {"type": "ffjord"},
+    }
+    normalizer = Normalizer(
+        mean=np.zeros(6, dtype=np.float32),
+        std=np.ones(6, dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        eval_auriga_df_acceleration,
+        "load_df",
+        lambda _: (object(), {}, normalizer, config, None),
+    )
+
+    def fake_physical_score(
+        model,
+        params,
+        normalizer_arg,
+        flow_cfg,
+        evaluated_eta,
+        *,
+        batch_size,
+    ):
+        del model, params, normalizer_arg, flow_cfg, batch_size
+        distances = np.sum(
+            (eta[:, None, :] - evaluated_eta[None, :, :]) ** 2,
+            axis=2,
+        )
+        return score[np.argmin(distances, axis=0)]
+
+    monkeypatch.setattr(
+        eval_auriga_df_acceleration,
+        "_physical_score",
+        fake_physical_score,
+    )
+    out_dir = tmp_path / "eval"
+    result = (
+        eval_auriga_df_acceleration.run_eval_auriga_df_acceleration(
+            data_path,
+            tmp_path / "run",
+            out_dir=out_dir,
+            subset="all",
+            n_eval=None,
+            radial_bins=4,
+            dpi=72,
+        )
+    )
+
+    assert result["n_eval"] == eta.shape[0]
+    assert result["cbe_truth_acceleration"]["residual"]["p99_abs"] < 1.0e-5
+    assert (out_dir / "auriga_df_acceleration_metrics.json").exists()
+    assert (out_dir / "auriga_df_acceleration_diagnostics.npz").exists()
+    assert len(list((out_dir / "plots").glob("*.png"))) == 5

@@ -497,6 +497,22 @@ env \
 - `SEEDS`：ensemble seed 列表，默认 `42,43,44,45`。
 - `RESUME=1`：从已有 checkpoint 恢复训练。
 
+若规范 HDF5 带有逐行对齐的 `acceleration`，可对单个 DF 运行真力场 CBE
+梯度诊断：
+
+```bash
+env \
+  DATA_PATH=data/auriga/halo12_all_mass_with_acceleration.h5 \
+  RUN_DIR=runs/halo_12/df_ffjord_v23_mass/seed_42 \
+  GPU_DEVICES=0 \
+  bash jobs/eval_halo12_df_acceleration.sh
+```
+
+可选变量包括 `SUBSET=validation|train|all`、`N_EVAL`、`BATCH_SIZE`、
+`RADIAL_BINS`、`TRUTH_ACCELERATION_SCALE` 和 `OUTPUT_DIR`。这里的
+`acceleration` 必须是物理加速度 `-∇Φ`；评估脚本使用
+`v·score_x + acceleration·score_v`。
+
 后台运行完整 prepare → train → eval 流程：
 
 ```bash
