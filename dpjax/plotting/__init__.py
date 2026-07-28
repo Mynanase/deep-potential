@@ -1,5 +1,10 @@
 from .flow_projections import calc_coords, plot_1d_marginals, plot_2d_marginal
-from .training_curves import plot_df_training, plot_phi_training, read_metrics
+from .training_curves import (
+    plot_df_training,
+    plot_df_training_ensemble,
+    plot_phi_training,
+    read_metrics,
+)
 from .diagnostics import (
     plot_phase_space_grid,
     plot_score_comparison,
@@ -10,4 +15,5 @@ from .diagnostics import (
     plot_plummer_figure3,
     plot_potential_density_overview,
     plot_residual_spatial,
+    plot_auriga_df_ensemble,
 )

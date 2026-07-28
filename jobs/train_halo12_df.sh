@@ -9,7 +9,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/_common.sh"
 
 data_path="${DATA_PATH:-data/halo_12_train.h5}"
 run_name="${RUN_NAME:-$(basename "$RUN_DIR")}"
-logger="${LOGGER:-csv}"
+logger="${LOGGER:-wandb}"
 wandb_project="${WANDB_PROJECT:-deep-potential}"
 
 args=(

@@ -848,3 +848,164 @@ def plot_residual_spatial(
         plt.close(fig)
         return None
     return fig
+
+
+# ── Auriga DF ensemble diagnostics ───────────────────────────────────────
+
+
+def plot_auriga_df_ensemble(
+    metrics_json: str | Path,
+    diagnostics_npz: str | Path,
+    fig_dir: Optional[str | Path] = None,
+    *,
+    run_dirs: Optional[list[str | Path]] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+):
+    """Render Halo DF ensemble diagnostics from eval_auriga_df outputs.
+
+    Consumes the JSON + NPZ written by ``experiments.eval_auriga_df`` and
+    produces four figures:
+
+    - ``density_profile.png``   – radial ρ(r) data vs flow samples + fractional error
+    - ``score_consistency.png`` – per-dim MAD bars + pairwise cosine histogram
+    - ``score_per_dim_hist.png`` – per-dimension score distribution across seeds
+    - ``training_curves.png``   – 4-seed train/val NLL overlay (optional,
+      requires ``run_dirs`` pointing at the per-seed training directories)
+
+    Parameters
+    ----------
+    metrics_json, diagnostics_npz : paths produced by ``eval_auriga_df``
+    fig_dir : output directory; defaults to the diagnostics NPZ parent
+    run_dirs : optional list of per-seed training run directories, used to
+        also overlay the training curves in one of the panels
+    """
+    import json
+
+    import matplotlib.pyplot as plt
+
+    metrics_json = Path(metrics_json)
+    diagnostics_npz = Path(diagnostics_npz)
+    if fig_dir is None:
+        fig_dir = diagnostics_npz.parent
+    fig_dir = Path(fig_dir)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    m = json.loads(metrics_json.read_text(encoding="utf-8"))
+    d = np.load(diagnostics_npz)
+
+    edges = d["radial_edges"]
+    r_centers = np.sqrt(edges[:-1] * edges[1:])
+    ref = d["reference_density"]
+    mdl = d["model_density"]
+    dm = m["density_profile"]
+
+    # ── density profile ─────────────────────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    axes[0].loglog(r_centers, ref, "k-o", lw=2, ms=5, label="data (Auriga)")
+    axes[0].loglog(
+        r_centers, mdl, "--", color="tab:orange", lw=1.8, marker="s", ms=5,
+        label="DF samples",
+    )
+    axes[0].set_xlabel("r [kpc]")
+    axes[0].set_ylabel(r"$\rho(r)$ [normalized]")
+    axes[0].set_title(
+        f"Halo12 radial density (log10_RMSE={dm['log10_rmse_dex']:.3f} dex)"
+    )
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3, which="both")
+
+    rel = np.abs(mdl - ref) / np.maximum(ref, 1e-12)
+    axes[1].semilogx(r_centers, rel, "s-", color="tab:red", lw=1.5)
+    axes[1].axhline(0.30, ls="--", color="k", alpha=0.5, label="p90 gate 0.30")
+    axes[1].axhline(
+        dm["median_fractional_error"], ls=":", color="tab:blue",
+        label=f"median={dm['median_fractional_error']:.3f}",
+    )
+    axes[1].set_xlabel("r [kpc]")
+    axes[1].set_ylabel(r"$|\rho_{model}-\rho_{data}|/\rho_{data}$")
+    axes[1].set_title(f"Fractional error (p90={dm['p90_fractional_error']:.3f})")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    plt.tight_layout()
+    for fmt in fig_fmt:
+        fig.savefig(fig_dir / f"density_profile.{fmt}", dpi=dpi)
+    plt.close(fig)
+
+    # ── score consistency ───────────────────────────────────────────
+    scores = d["scores"]  # (n_models, N, 6)
+    n_models, n_pts, dim = scores.shape
+    labels = ["x", "y", "z", "vx", "vy", "vz"]
+    se = m["score_ensemble"]
+
+    def _cos(a, b):
+        na = np.linalg.norm(a, axis=-1)
+        nb = np.linalg.norm(b, axis=-1)
+        return np.sum(a * b, axis=-1) / (na * nb + 1e-12)
+
+    pairs = []
+    for i in range(n_models):
+        for j in range(i + 1, n_models):
+            pairs.append(_cos(scores[i], scores[j]))
+    all_pairs = np.concatenate(pairs)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    axes[0].bar(labels, se["relative_mad_by_dimension"], color="tab:purple", alpha=0.85)
+    axes[0].axhline(0.20, ls="--", color="k", alpha=0.5, label="per-dim gate 0.20")
+    axes[0].axhline(0.10, ls=":", color="k", alpha=0.5, label="median gate 0.10")
+    axes[0].set_ylabel("6D relative MAD")
+    axes[0].set_title(f"Per-dimension MAD (median={se['median_relative_mad']:.3f})")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].hist(all_pairs, bins=60, color="tab:green", alpha=0.8)
+    axes[1].axvline(
+        0.95, ls="--", color="k",
+        label=f"median gate 0.95 (got {se['pairwise_cosine_median']:.3f})",
+    )
+    axes[1].axvline(
+        0.80, ls=":", color="k",
+        label=f"p10 gate 0.80 (got {se['pairwise_cosine_p10']:.3f})",
+    )
+    axes[1].set_xlabel(r"pairwise $\cos(\nabla\log f_i, \nabla\log f_j)$")
+    axes[1].set_ylabel("count")
+    axes[1].set_title("Ensemble score consistency")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    plt.tight_layout()
+    for fmt in fig_fmt:
+        fig.savefig(fig_dir / f"score_consistency.{fmt}", dpi=dpi)
+    plt.close(fig)
+
+    # ── per-dimension score distribution ───────────────────────────
+    rng = np.random.default_rng(0)
+    idx = rng.choice(n_pts, size=min(2000, n_pts), replace=False)
+    fig, axes = plt.subplots(2, 3, figsize=(13, 7.5))
+    axes = axes.ravel()
+    for k in range(6):
+        for mi in range(n_models):
+            axes[k].hist(
+                scores[mi, idx, k], bins=40, histtype="step", lw=1.2,
+                label=f"seed_{42 + mi}",
+            )
+        axes[k].set_xlabel(f"score[{labels[k]}]")
+        axes[k].set_ylabel("count")
+        axes[k].legend(fontsize=8)
+        axes[k].grid(True, alpha=0.3)
+    plt.suptitle("Per-dimension score distribution across seeds")
+    plt.tight_layout()
+    for fmt in fig_fmt:
+        fig.savefig(fig_dir / f"score_per_dim_hist.{fmt}", dpi=dpi)
+    plt.close(fig)
+
+    # ── optional training curves overlay ───────────────────────────
+    if run_dirs:
+        from .training_curves import plot_df_training_ensemble
+        plot_df_training_ensemble(run_dirs, save_dir=fig_dir, dpi=dpi)
+
+    return {
+        "fig_dir": str(fig_dir),
+        "density_profile": str(fig_dir / "density_profile.png"),
+        "score_consistency": str(fig_dir / "score_consistency.png"),
+        "score_per_dim_hist": str(fig_dir / "score_per_dim_hist.png"),
+    }

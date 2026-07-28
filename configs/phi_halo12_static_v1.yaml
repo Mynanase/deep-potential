@@ -1,7 +1,7 @@
 # Halo12 static-potential baseline.
 #
 # Requires a DF run with a physics-compatible coordinate transform. The
-# current safe starting point is df_halo12_ffjord_v22.yaml (transform: none);
+# current safe starting point is df_halo12_ffjord_v23_mass.yaml (transform: none);
 # power/asinh/log DF runs remain blocked until their physical score and
 # potential chain rules are implemented and validated.
 
@@ -15,24 +15,41 @@ normalizer:
 
 potential:
   hidden_sizes: [512, 512, 512, 512]
+  # Output scaling: Halo12 Phi has dynamic range ~57000 (km/s)^2, while
+  # Plummer (where lr/l2/grad_clip were tuned) has Phi~O(1). Without scaling,
+  # the tanh MLP cannot grow weights fast enough to reach physical scales
+  # (needs 2800x amplification in 6400 steps). output_scale lets the network
+  # learn O(1) perturbations; the multiplier handles physical units. With
+  # this, Plummer's proven hyperparameters (lr=0.003, l2=0.001, clip=1.0)
+  # transfer directly.
+  output_scale: 50000.0
 
 train:
   batch_size: 32768
-  epochs: 32
-  loss_type: robust
+  epochs: 128
+  # MSE loss required for initial training: robust (arcsinh) gradient decays
+  # as 1/sqrt(1+x^2) and is ~0.0045 at Halo12 residual scale (~220), causing
+  # the constant-collapse trap documented in docs/phi_training_log.md.
+  # Switch to robust only for fine-tuning from a converged MSE checkpoint.
+  loss_type: mse
   alpha: 1.0
   beta: 1.0
   lambda_mass: 1.0
-  # mean_square(params) already divides by the parameter count. This matches
-  # the 2025 implementation's 0.001 / n_weights convention.
+  # Plummer-proven value. Works with output_scale since network weights stay
+  # O(1) and l2 penalises normalised weights, not physical-scale outputs.
   l2_reg: 0.001
   reweight:
     gamma: 0.0
     r_ref: 20.0
   lr:
-    max: 0.001
+    # Plummer sweet-spot. With output_scale, effective gradient w.r.t. network
+    # weights is amplified by 50000x, so lr=0.003 gives sufficient step size.
+    max: 0.003
     final: 1.0e-6
     warmup_frac: 0.03
+  # Plummer-proven value. With output_scale amplifying gradients, the global
+  # gradient norm is ~O(10-100) even after scaling, so clip=1.0 prevents
+  # overshooting while preserving signal.
   grad_clip: 1.0
   log_every: 50
   ckpt_every: 500

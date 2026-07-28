@@ -8,7 +8,7 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/_common.sh"
 
 config="${CONFIG:-configs/df_halo12_ffjord_v23_mass.yaml}"
 run_root="${RUN_ROOT:-runs/halo_12/df_ffjord_v23_mass}"
-logger="${LOGGER:-csv}"
+logger="${LOGGER:-wandb}"
 wandb_project="${WANDB_PROJECT:-deep-potential}"
 seed_list="${SEEDS:-42,43,44,45}"
 resume="${RESUME:-0}"

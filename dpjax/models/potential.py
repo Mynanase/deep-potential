@@ -15,6 +15,7 @@ from dpjax.utils.ckpt import create_manager, restore_latest
 @dataclass(frozen=True)
 class PotentialConfig:
     hidden_sizes: tuple[int, ...] = (512, 512, 512, 512)
+    output_scale: float = 1.0
 
 
 class PotentialMLP(nn.Module):
@@ -28,7 +29,7 @@ class PotentialMLP(nn.Module):
             h = nn.Dense(width, name=f"dense_{i}")(h)
             h = nn.tanh(h)
         out = nn.Dense(1, name="dense_out")(h)
-        return jnp.squeeze(out, axis=-1)
+        return jnp.squeeze(out, axis=-1) * self.cfg.output_scale
 
 
 def phi_apply(model: PotentialMLP, params: dict, x: jnp.ndarray) -> jnp.ndarray:
@@ -87,7 +88,8 @@ def load_phi(phi_run_dir: str | Path) -> tuple[PotentialMLP, dict, dict[str, Any
         PotentialConfig(
             hidden_sizes=tuple(
                 int(x) for x in pot_cfg.get("hidden_sizes", [512, 512, 512, 512])
-            )
+            ),
+            output_scale=float(pot_cfg.get("output_scale", 1.0)),
         )
     )
 

@@ -78,6 +78,63 @@ def plot_df_training(
     return fig
 
 
+def plot_df_training_ensemble(
+    run_dirs: list[str | Path] | dict[str, str | Path],
+    save_dir: Optional[str | Path] = None,
+    *,
+    dpi: int = 100,
+    seed_from_name: bool = True,
+):
+    """Overlay DF training curves for multiple seeds.
+
+    Parameters
+    ----------
+    run_dirs : either a list of run directories, or a mapping
+        ``{label: run_dir}``. When a list is passed the trailing
+        integer after the last underscore in the directory name is used
+        as the label (e.g. ``seed_42`` → ``42``); pass an explicit
+        mapping to override.
+    save_dir : if given, save the figure there instead of showing.
+    """
+    import matplotlib.pyplot as plt
+
+    if isinstance(run_dirs, dict):
+        items = list(run_dirs.items())
+    else:
+        items = []
+        for p in run_dirs:
+            name = Path(p).name
+            tail = name.rsplit("_", 1)[-1] if "_" in name else name
+            items.append((tail, p))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+    has_val = False
+    for label, run_dir in items:
+        try:
+            m = read_metrics(run_dir)
+        except FileNotFoundError:
+            continue
+        ax1.plot(m["step"], m["loss"], lw=1.3, label=f"seed {label}")
+        if "val_loss" in m:
+            ax1.plot(m["step"], m["val_loss"], lw=1.3, ls="--", alpha=0.7)
+            has_val = True
+        if "score_p99" in m:
+            ax2.plot(m["step"], m["score_p99"], lw=1.3, label=f"seed {label}")
+    ax1.set_xlabel("step"); ax1.set_ylabel("NLL"); ax1.set_title("DF Loss (— train ·- val)")
+    ax1.grid(True, alpha=0.2); ax1.legend(fontsize=8)
+    ax2.set_xlabel("step"); ax2.set_ylabel("|score| p99"); ax2.set_title("Score p99")
+    ax2.grid(True, alpha=0.2); ax2.legend(fontsize=8)
+    fig.suptitle("DF Ensemble Training", fontsize=13)
+    fig.tight_layout()
+    if save_dir is not None:
+        save_dir = Path(save_dir); save_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_dir / "df_ensemble_training.png", dpi=dpi)
+        plt.close(fig)
+    else:
+        plt.show()
+    return fig
+
+
 def plot_phi_training(
     run_dir: str | Path,
     save_dir: Optional[str | Path] = None,

@@ -96,7 +96,10 @@ def run_phi_training(
     eta_std = normalizer.transform(eta)
 
     pot_cfg = config.get("potential", {})
-    phi_model = PotentialMLP(PotentialConfig(hidden_sizes=tuple(int(x) for x in pot_cfg.get("hidden_sizes", [512, 512, 512, 512]))))
+    phi_model = PotentialMLP(PotentialConfig(
+        hidden_sizes=tuple(int(x) for x in pot_cfg.get("hidden_sizes", [512, 512, 512, 512])),
+        output_scale=float(pot_cfg.get("output_scale", 1.0)),
+    ))
 
     train_cfg = config.get("train", {})
     batch_size = int(train_cfg.get("batch_size", 4096))
