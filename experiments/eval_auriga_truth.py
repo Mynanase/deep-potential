@@ -17,11 +17,16 @@ from dpjax.data import (
 from dpjax.datasets.auriga import load_auriga_snapshot
 from dpjax.evaluation import (
     acceleration_error_metrics,
+    binned_potential_truth_by_phi,
     potential_error_metrics,
     radial_acceleration_profile,
 )
 from dpjax.models.potential import grad_phi_apply, load_phi, phi_apply
 from dpjax.paths import ensure_dir, resolve_path
+from dpjax.plotting.diagnostics import (
+    plot_auriga_potential_comparison,
+    plot_potential_rz_by_phi,
+)
 
 
 def _json_safe(value: Any) -> Any:
@@ -48,8 +53,17 @@ def run_eval_auriga_truth(
     truth_potential_scale: float = 1.0,
     truth_acceleration_scale: float = 1.0,
     radial_bins: int = 12,
+    plot_truth: bool = True,
+    slice_phi_bins: int = 6,
+    slice_r_bins: int = 40,
+    slice_z_bins: int = 40,
+    slice_min_count: int = 3,
+    slice_r_max: float | None = None,
+    slice_z_max: float | None = None,
+    fig_fmt: tuple[str, ...] = ("png", "pdf"),
+    dpi: int = 180,
 ) -> dict[str, Any]:
-    """Compute additive-offset-safe potential and vector force errors."""
+    """Compute simulator-truth metrics and render potential field diagnostics."""
     data_path = resolve_path(data_path)
     df_run_dir = resolve_path(df_run_dir)
     phi_run_dir = resolve_path(phi_run_dir)
@@ -152,6 +166,146 @@ def run_eval_auriga_truth(
             truth_acceleration_scale
         )
 
+    if truth_potential is not None and plot_truth:
+        plot_auriga_potential_comparison(
+            positions,
+            truth_potential,
+            aligned_predicted_potential,
+            metrics=metrics["potential"],
+            fig_dir=out_dir,
+            fig_fmt=fig_fmt,
+            dpi=int(dpi),
+        )
+
+        if (
+            int(slice_phi_bins) < 1
+            or int(slice_r_bins) < 1
+            or int(slice_z_bins) < 1
+        ):
+            raise ValueError("Potential slice bin counts must be positive.")
+        cylindrical_radius = np.hypot(positions[:, 0], positions[:, 1])
+        r_max = (
+            float(slice_r_max)
+            if slice_r_max is not None
+            else float(np.percentile(cylindrical_radius, 99.0))
+        )
+        z_max = (
+            float(slice_z_max)
+            if slice_z_max is not None
+            else float(np.percentile(np.abs(positions[:, 2]), 99.0))
+        )
+        r_max = max(r_max, 1.0e-6)
+        z_max = max(z_max, 1.0e-6)
+        phi_edges = np.linspace(
+            -np.pi,
+            np.pi,
+            int(slice_phi_bins) + 1,
+        )
+        cylindrical_radius_edges = np.linspace(
+            0.0,
+            r_max,
+            int(slice_r_bins) + 1,
+        )
+        z_edges = np.linspace(
+            -z_max,
+            z_max,
+            int(slice_z_bins) + 1,
+        )
+        truth_slices = binned_potential_truth_by_phi(
+            positions,
+            truth_potential,
+            phi_edges=phi_edges,
+            cylindrical_radius_edges=cylindrical_radius_edges,
+            z_edges=z_edges,
+            min_cell_count=int(slice_min_count),
+        )
+
+        phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
+        radial_centers = 0.5 * (
+            cylindrical_radius_edges[:-1]
+            + cylindrical_radius_edges[1:]
+        )
+        z_centers = 0.5 * (z_edges[:-1] + z_edges[1:])
+        radial_grid, z_grid = np.meshgrid(
+            radial_centers,
+            z_centers,
+            indexing="ij",
+        )
+        model_potential_grid = np.empty(
+            (
+                int(slice_phi_bins),
+                int(slice_r_bins),
+                int(slice_z_bins),
+            ),
+            dtype=np.float64,
+        )
+        fitted_offset = float(
+            metrics["potential"]["fitted_additive_offset"]
+        )
+        for phi_index, phi_center in enumerate(phi_centers):
+            grid_positions = np.column_stack(
+                [
+                    radial_grid.ravel() * np.cos(phi_center),
+                    radial_grid.ravel() * np.sin(phi_center),
+                    z_grid.ravel(),
+                ]
+            ).astype(np.float32)
+            grid_std = (
+                grid_positions - mean_x[None, :]
+            ) / std_x[None, :]
+            model_parts: list[np.ndarray] = []
+            for start in range(0, grid_std.shape[0], int(batch_size)):
+                stop = min(start + int(batch_size), grid_std.shape[0])
+                model_parts.append(
+                    np.asarray(
+                        phi_apply(
+                            phi_model,
+                            phi_params,
+                            jnp.asarray(grid_std[start:stop]),
+                        ),
+                        dtype=np.float64,
+                    )
+                )
+            model_potential_grid[phi_index] = (
+                np.concatenate(model_parts).reshape(radial_grid.shape)
+                + fitted_offset
+            )
+
+        slice_path = out_dir / "potential_rz_by_phi.npz"
+        np.savez_compressed(
+            slice_path,
+            phi_edges=phi_edges,
+            cylindrical_radius_edges=cylindrical_radius_edges,
+            z_edges=z_edges,
+            model_potential=model_potential_grid,
+            truth_potential=truth_slices["truth_median"],
+            truth_count=truth_slices["count"],
+            min_cell_count=truth_slices["min_cell_count"],
+            fitted_additive_offset=np.asarray(fitted_offset),
+        )
+        plot_potential_rz_by_phi(
+            phi_edges,
+            cylindrical_radius_edges,
+            z_edges,
+            model_potential_grid,
+            truth_potential=truth_slices["truth_median"],
+            truth_count=truth_slices["count"],
+            min_cell_count=int(slice_min_count),
+            fig_dir=out_dir,
+            fig_fmt=fig_fmt,
+            dpi=int(dpi),
+        )
+        supported = truth_slices["count"] >= int(slice_min_count)
+        metrics["potential_slices"] = {
+            "phi_bins": int(slice_phi_bins),
+            "cylindrical_radius_bins": int(slice_r_bins),
+            "z_bins": int(slice_z_bins),
+            "min_cell_count": int(slice_min_count),
+            "supported_cell_fraction": float(np.mean(supported)),
+            "r_max": r_max,
+            "z_max": z_max,
+        }
+
     metrics_path = out_dir / "auriga_truth_metrics.json"
     metrics_path.write_text(
         json.dumps(_json_safe(metrics), indent=2) + "\n",
@@ -198,6 +352,15 @@ def main() -> int:
     parser.add_argument("--truth-potential-scale", type=float, default=1.0)
     parser.add_argument("--truth-acceleration-scale", type=float, default=1.0)
     parser.add_argument("--radial-bins", type=int, default=12)
+    parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument("--slice-phi-bins", type=int, default=6)
+    parser.add_argument("--slice-r-bins", type=int, default=40)
+    parser.add_argument("--slice-z-bins", type=int, default=40)
+    parser.add_argument("--slice-min-count", type=int, default=3)
+    parser.add_argument("--slice-r-max", type=float, default=None)
+    parser.add_argument("--slice-z-max", type=float, default=None)
+    parser.add_argument("--fig-formats", nargs="+", default=["png", "pdf"])
+    parser.add_argument("--dpi", type=int, default=180)
     args = parser.parse_args()
 
     run_eval_auriga_truth(
@@ -211,6 +374,15 @@ def main() -> int:
         truth_potential_scale=args.truth_potential_scale,
         truth_acceleration_scale=args.truth_acceleration_scale,
         radial_bins=args.radial_bins,
+        plot_truth=not args.no_plots,
+        slice_phi_bins=args.slice_phi_bins,
+        slice_r_bins=args.slice_r_bins,
+        slice_z_bins=args.slice_z_bins,
+        slice_min_count=args.slice_min_count,
+        slice_r_max=args.slice_r_max,
+        slice_z_max=args.slice_z_max,
+        fig_fmt=tuple(args.fig_formats),
+        dpi=args.dpi,
     )
     return 0
 

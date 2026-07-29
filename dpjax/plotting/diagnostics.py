@@ -369,14 +369,60 @@ def plot_phi_rho_slice(
     axes[0].set_title(r"$\Phi(x,y)$ (mean-sub.)")
     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-    # ρ (log scale)
-    rho_pos = np.clip(rho, 1e-12, np.inf)
-    vmin_r, vmax_r = np.nanpercentile(rho_pos, [5, 99])
-    im1 = axes[1].imshow(
-        rho_pos, extent=extent, origin="lower", cmap="magma",
-        norm=colors.LogNorm(vmin=max(vmin_r, 1e-12), vmax=max(vmax_r, 1e-11)),
-    )
-    axes[1].set_title(r"$\rho = \nabla^2\Phi / (4\pi)$")
+    # ρ: retain the sign.  Clipping negative Laplacians before LogNorm makes
+    # unphysical regions look like ordinary low-density pixels.
+    finite_rho = rho[np.isfinite(rho)]
+    has_negative = finite_rho.size > 0 and np.any(finite_rho < 0.0)
+    if has_negative:
+        rho_scale = max(
+            float(np.nanpercentile(np.abs(finite_rho), 99.0)),
+            1.0e-12,
+        )
+        rho_nonzero = np.abs(finite_rho[finite_rho != 0.0])
+        rho_linthresh = (
+            max(
+                float(np.nanpercentile(rho_nonzero, 10.0)),
+                rho_scale * 1.0e-4,
+                1.0e-12,
+            )
+            if rho_nonzero.size
+            else rho_scale * 1.0e-4
+        )
+        im1 = axes[1].imshow(
+            rho,
+            extent=extent,
+            origin="lower",
+            cmap="coolwarm",
+            norm=colors.SymLogNorm(
+                linthresh=rho_linthresh,
+                vmin=-rho_scale,
+                vmax=rho_scale,
+            ),
+        )
+        negative_fraction = float(np.mean(finite_rho < 0.0))
+        density_title = (
+            r"signed $\rho = \nabla^2\Phi/(4\pi)$"
+            f"\nnegative pixels: {negative_fraction:.1%}"
+        )
+    else:
+        rho_pos = np.ma.masked_less_equal(rho, 0.0)
+        positive_rho = finite_rho[finite_rho > 0.0]
+        if positive_rho.size:
+            vmin_r, vmax_r = np.nanpercentile(positive_rho, [5, 99])
+        else:
+            vmin_r, vmax_r = 1.0e-12, 1.0e-11
+        im1 = axes[1].imshow(
+            rho_pos,
+            extent=extent,
+            origin="lower",
+            cmap="magma",
+            norm=colors.LogNorm(
+                vmin=max(float(vmin_r), 1.0e-12),
+                vmax=max(float(vmax_r), 1.0e-11),
+            ),
+        )
+        density_title = r"$\rho = \nabla^2\Phi/(4\pi)$"
+    axes[1].set_title(density_title)
     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
     # |a| (log scale)
@@ -725,7 +771,7 @@ def plot_potential_density_overview(
     ax_phi.set_aspect("equal")
 
     finite_rho = rho_slice[np.isfinite(rho_slice)]
-    has_negative = finite_rho.size > 0 and float(np.nanpercentile(finite_rho, 1.0)) < 0.0
+    has_negative = finite_rho.size > 0 and np.any(finite_rho < 0.0)
     if has_negative:
         rho_v = float(max(np.nanpercentile(np.abs(finite_rho), 99.0), 1.0e-12))
         rho_linthresh = float(max(np.nanpercentile(np.abs(finite_rho), 20.0), rho_v * 1.0e-4, 1.0e-12))
@@ -779,6 +825,518 @@ def plot_potential_density_overview(
         fig_dir.mkdir(parents=True, exist_ok=True)
         for fmt in fig_fmt:
             fig.savefig(fig_dir / f"{filename}.{fmt}", dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        return None
+    return fig
+
+
+def plot_auriga_potential_comparison(
+    positions: np.ndarray,
+    truth: np.ndarray,
+    aligned_model: np.ndarray,
+    *,
+    metrics: Optional[dict[str, float | int]] = None,
+    potential_unit: str = r"$(\mathrm{km}\,\mathrm{s}^{-1})^2$",
+    radial_bins: int = 24,
+    max_scatter_points: int = 50000,
+    fig_dir: Optional[str | Path] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+    filename: str = "potential_truth_comparison",
+):
+    """Compare offset-aligned model potential directly with simulator truth."""
+    import matplotlib.pyplot as plt
+
+    positions = np.asarray(positions, dtype=np.float64)
+    truth = np.asarray(truth, dtype=np.float64)
+    aligned_model = np.asarray(aligned_model, dtype=np.float64)
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError("positions must have shape (N, 3).")
+    if truth.shape != (positions.shape[0],) or aligned_model.shape != truth.shape:
+        raise ValueError("truth and aligned_model must have shape (N,).")
+    finite = (
+        np.all(np.isfinite(positions), axis=1)
+        & np.isfinite(truth)
+        & np.isfinite(aligned_model)
+    )
+    if not np.any(finite):
+        raise ValueError("No finite potential comparison rows are available.")
+    positions = positions[finite]
+    truth = truth[finite]
+    aligned_model = aligned_model[finite]
+    radius = np.linalg.norm(positions, axis=1)
+    residual = aligned_model - truth
+
+    if positions.shape[0] > int(max_scatter_points):
+        plot_index = np.linspace(
+            0,
+            positions.shape[0] - 1,
+            int(max_scatter_points),
+            dtype=np.int64,
+        )
+    else:
+        plot_index = np.arange(positions.shape[0])
+
+    radial_max = float(max(np.percentile(radius, 99.5), 1.0e-9))
+    radial_edges = np.linspace(0.0, radial_max, int(radial_bins) + 1)
+    radial_centers = 0.5 * (radial_edges[:-1] + radial_edges[1:])
+    radial_index = np.digitize(radius, radial_edges) - 1
+
+    def radial_stat(values: np.ndarray, percentile: float) -> np.ndarray:
+        return np.asarray(
+            [
+                np.percentile(values[radial_index == index], percentile)
+                if np.count_nonzero(radial_index == index) >= 3
+                else np.nan
+                for index in range(int(radial_bins))
+            ]
+        )
+
+    truth_median = radial_stat(truth, 50.0)
+    model_median = radial_stat(aligned_model, 50.0)
+    residual_p16 = radial_stat(residual, 16.0)
+    residual_median = radial_stat(residual, 50.0)
+    residual_p84 = radial_stat(residual, 84.0)
+
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=(15.5, 4.5),
+        dpi=dpi,
+        constrained_layout=True,
+    )
+    hb = axes[0].hexbin(
+        truth[plot_index],
+        aligned_model[plot_index],
+        gridsize=65,
+        mincnt=1,
+        bins="log",
+        cmap="viridis",
+    )
+    comparison_values = np.concatenate([truth[plot_index], aligned_model[plot_index]])
+    comparison_lo, comparison_hi = np.percentile(comparison_values, [0.5, 99.5])
+    axes[0].plot(
+        [comparison_lo, comparison_hi],
+        [comparison_lo, comparison_hi],
+        color="tab:red",
+        lw=1.2,
+        ls="--",
+    )
+    axes[0].set_xlim(comparison_lo, comparison_hi)
+    axes[0].set_ylim(comparison_lo, comparison_hi)
+    axes[0].set_aspect("equal", adjustable="box")
+    axes[0].set_xlabel(rf"$\Phi_{{\rm truth}}$ {potential_unit}")
+    axes[0].set_ylabel(rf"$\Phi_{{\rm model}}+C$ {potential_unit}")
+    axes[0].set_title("Pointwise potential comparison")
+    fig.colorbar(hb, ax=axes[0], label="log10 point count")
+
+    axes[1].scatter(
+        radius[plot_index],
+        truth[plot_index],
+        s=2,
+        alpha=0.08,
+        color="black",
+        edgecolors="none",
+        label="simulator truth",
+    )
+    axes[1].scatter(
+        radius[plot_index],
+        aligned_model[plot_index],
+        s=2,
+        alpha=0.08,
+        color="tab:orange",
+        edgecolors="none",
+        label="model + fitted offset",
+    )
+    axes[1].plot(radial_centers, truth_median, color="black", lw=2.0)
+    axes[1].plot(
+        radial_centers,
+        model_median,
+        color="tab:orange",
+        lw=2.0,
+        ls="--",
+    )
+    axes[1].set_xlim(0.0, radial_max)
+    axes[1].set_xlabel("r [kpc]")
+    axes[1].set_ylabel(rf"$\Phi$ {potential_unit}")
+    axes[1].set_title("Radial structure")
+    axes[1].legend(fontsize=8)
+
+    axes[2].scatter(
+        radius[plot_index],
+        residual[plot_index],
+        s=2,
+        alpha=0.08,
+        color="tab:blue",
+        edgecolors="none",
+    )
+    axes[2].fill_between(
+        radial_centers,
+        residual_p16,
+        residual_p84,
+        color="tab:blue",
+        alpha=0.2,
+        label="16–84 percentile",
+    )
+    axes[2].plot(
+        radial_centers,
+        residual_median,
+        color="tab:blue",
+        lw=2.0,
+        label="median",
+    )
+    axes[2].axhline(0.0, color="0.2", lw=0.9, ls="--")
+    axes[2].set_xlim(0.0, radial_max)
+    axes[2].set_xlabel("r [kpc]")
+    axes[2].set_ylabel(rf"$\Phi_{{\rm model}}+C-\Phi_{{\rm truth}}$ {potential_unit}")
+    axes[2].set_title("Offset-aligned residual")
+    axes[2].legend(fontsize=8)
+    if metrics is not None:
+        nrmse = metrics.get("normalized_rmse", float("nan"))
+        pearson = metrics.get("pearson_r", float("nan"))
+        axes[2].text(
+            0.03,
+            0.97,
+            f"NRMSE={float(nrmse):.3g}\nPearson r={float(pearson):.3g}",
+            transform=axes[2].transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
+    for ax in axes:
+        ax.grid(True, alpha=0.2)
+    fig.suptitle(
+        "Auriga potential recovery (one global additive offset fitted)",
+        fontsize=14,
+    )
+
+    if fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in fig_fmt:
+            fig.savefig(
+                fig_dir / f"{filename}.{fmt}",
+                dpi=dpi,
+                bbox_inches="tight",
+            )
+        plt.close(fig)
+        return None
+    return fig
+
+
+def plot_potential_rz_by_phi(
+    phi_edges: np.ndarray,
+    cylindrical_radius_edges: np.ndarray,
+    z_edges: np.ndarray,
+    model_potential: np.ndarray,
+    *,
+    truth_potential: Optional[np.ndarray] = None,
+    truth_count: Optional[np.ndarray] = None,
+    min_cell_count: int = 1,
+    potential_unit: str = r"$(\mathrm{km}\,\mathrm{s}^{-1})^2$",
+    fig_dir: Optional[str | Path] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+    filename: str = "potential_rz_by_phi",
+):
+    """Plot dense model ``R-z`` slices at azimuth centers, with truth if given."""
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+
+    phi_edges = np.asarray(phi_edges, dtype=np.float64)
+    cylindrical_radius_edges = np.asarray(
+        cylindrical_radius_edges,
+        dtype=np.float64,
+    )
+    z_edges = np.asarray(z_edges, dtype=np.float64)
+    model_potential = np.asarray(model_potential, dtype=np.float64)
+    expected_shape = (
+        phi_edges.size - 1,
+        cylindrical_radius_edges.size - 1,
+        z_edges.size - 1,
+    )
+    if model_potential.shape != expected_shape:
+        raise ValueError(
+            f"Expected model_potential shape {expected_shape}, "
+            f"got {model_potential.shape}."
+        )
+    if truth_potential is not None:
+        truth_potential = np.asarray(truth_potential, dtype=np.float64)
+        if truth_potential.shape != expected_shape:
+            raise ValueError(
+                f"Expected truth_potential shape {expected_shape}, "
+                f"got {truth_potential.shape}."
+            )
+    if truth_count is not None:
+        truth_count = np.asarray(truth_count)
+        if truth_count.shape != expected_shape:
+            raise ValueError(
+                f"Expected truth_count shape {expected_shape}, "
+                f"got {truth_count.shape}."
+            )
+        if truth_potential is not None:
+            truth_potential = truth_potential.copy()
+            truth_potential[truth_count < int(min_cell_count)] = np.nan
+
+    n_phi = expected_shape[0]
+    n_rows = 3 if truth_potential is not None else 1
+    shared_values = [model_potential[np.isfinite(model_potential)]]
+    if truth_potential is not None:
+        shared_values.append(truth_potential[np.isfinite(truth_potential)])
+    shared = np.concatenate([values for values in shared_values if values.size])
+    if shared.size == 0:
+        raise ValueError("Potential slices contain no finite values.")
+    potential_vmin, potential_vmax = np.percentile(shared, [1.0, 99.0])
+    if potential_vmax <= potential_vmin:
+        potential_vmax = potential_vmin + 1.0
+
+    cmap_potential = plt.get_cmap("viridis").with_extremes(bad="#d9d9d9")
+    potential_norm = colors.Normalize(
+        vmin=float(potential_vmin),
+        vmax=float(potential_vmax),
+    )
+    residual = None
+    residual_norm = None
+    if truth_potential is not None:
+        residual = model_potential - truth_potential
+        finite_residual = np.abs(residual[np.isfinite(residual)])
+        residual_limit = (
+            max(float(np.percentile(finite_residual, 99.0)), 1.0e-12)
+            if finite_residual.size
+            else 1.0
+        )
+        residual_norm = colors.TwoSlopeNorm(
+            vmin=-residual_limit,
+            vcenter=0.0,
+            vmax=residual_limit,
+        )
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_phi,
+        figsize=(max(14.0, 3.0 * n_phi), 3.15 * n_rows),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    potential_mappable = None
+    residual_mappable = None
+    for phi_index in range(n_phi):
+        phi_left = np.degrees(phi_edges[phi_index])
+        phi_right = np.degrees(phi_edges[phi_index + 1])
+        if truth_potential is not None:
+            potential_mappable = axes[0, phi_index].pcolormesh(
+                cylindrical_radius_edges,
+                z_edges,
+                np.ma.masked_invalid(truth_potential[phi_index].T),
+                cmap=cmap_potential,
+                norm=potential_norm,
+                shading="auto",
+            )
+            model_row = 1
+            residual_row = 2
+        else:
+            model_row = 0
+            residual_row = None
+        potential_mappable = axes[model_row, phi_index].pcolormesh(
+            cylindrical_radius_edges,
+            z_edges,
+            model_potential[phi_index].T,
+            cmap=cmap_potential,
+            norm=potential_norm,
+            shading="auto",
+        )
+        if residual_row is not None and residual is not None:
+            residual_mappable = axes[residual_row, phi_index].pcolormesh(
+                cylindrical_radius_edges,
+                z_edges,
+                np.ma.masked_invalid(residual[phi_index].T),
+                cmap="coolwarm",
+                norm=residual_norm,
+                shading="auto",
+            )
+        axes[0, phi_index].set_title(
+            rf"${phi_left:.0f}^\circ\leq\phi<{phi_right:.0f}^\circ$"
+        )
+        axes[-1, phi_index].set_xlabel("R [kpc]")
+
+    if truth_potential is not None:
+        axes[0, 0].set_ylabel("simulator median\nz [kpc]")
+        axes[1, 0].set_ylabel("model at bin center\nz [kpc]")
+        axes[2, 0].set_ylabel("model − simulator\nz [kpc]")
+    else:
+        axes[0, 0].set_ylabel("model\nz [kpc]")
+    fig.colorbar(
+        potential_mappable,
+        ax=axes[: (2 if truth_potential is not None else 1), :].ravel().tolist(),
+        label=rf"$\Phi+C$ {potential_unit}",
+        shrink=0.86,
+    )
+    if residual_mappable is not None:
+        fig.colorbar(
+            residual_mappable,
+            ax=axes[-1, :].ravel().tolist(),
+            label=rf"$\Delta\Phi$ {potential_unit}",
+            shrink=0.86,
+        )
+    coverage_note = (
+        f"; simulator cells require ≥{int(min_cell_count)} particles"
+        if truth_potential is not None
+        else ""
+    )
+    unsupported_note = (
+        " (gray = unsupported truth)"
+        if truth_potential is not None
+        else ""
+    )
+    fig.suptitle(
+        "Auriga potential R-z slices by azimuth"
+        + coverage_note
+        + unsupported_note,
+        fontsize=14,
+    )
+
+    if fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in fig_fmt:
+            fig.savefig(
+                fig_dir / f"{filename}.{fmt}",
+                dpi=dpi,
+                bbox_inches="tight",
+            )
+        plt.close(fig)
+        return None
+    return fig
+
+
+def plot_laplacian_density_diagnostics(
+    x: np.ndarray,
+    y: np.ndarray,
+    density: np.ndarray,
+    *,
+    density_label: str = r"$\nabla^2\Phi/(4\pi G)$",
+    fig_dir: Optional[str | Path] = None,
+    fig_fmt: Iterable[str] = ("png",),
+    dpi: int = 150,
+    filename: str = "laplacian_density_diagnostics",
+):
+    """Expose signed Laplacian density instead of clipping it for log display."""
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+
+    from dpjax.physics.units import summarize_density_sign
+
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    density = np.asarray(density, dtype=np.float64)
+    if density.shape != (y.size, x.size):
+        raise ValueError(
+            f"Expected density shape ({y.size}, {x.size}), got {density.shape}."
+        )
+    finite = density[np.isfinite(density)]
+    if finite.size == 0:
+        raise ValueError("density contains no finite values.")
+    summary = summarize_density_sign(density)
+    extent = [float(x[0]), float(x[-1]), float(y[0]), float(y[-1])]
+
+    absolute = np.abs(finite)
+    scale = max(float(np.percentile(absolute, 99.0)), 1.0e-12)
+    nonzero = absolute[absolute > 0.0]
+    linthresh = (
+        max(float(np.percentile(nonzero, 10.0)), scale * 1.0e-4, 1.0e-12)
+        if nonzero.size
+        else scale * 1.0e-4
+    )
+    signed_norm = colors.SymLogNorm(
+        linthresh=linthresh,
+        vmin=-scale,
+        vmax=scale,
+    )
+
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=(14.5, 4.4),
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    im_signed = axes[0].imshow(
+        density,
+        extent=extent,
+        origin="lower",
+        cmap="coolwarm",
+        norm=signed_norm,
+        interpolation="nearest",
+    )
+    axes[0].set_title("Signed raw density (symmetric log)")
+    fig.colorbar(im_signed, ax=axes[0], label=density_label)
+
+    positive = np.ma.masked_less_equal(density, 0.0)
+    positive_values = finite[finite > 0.0]
+    positive_cmap = plt.get_cmap("magma").with_extremes(bad="#d9d9d9")
+    if positive_values.size:
+        positive_vmin, positive_vmax = np.percentile(
+            positive_values,
+            [2.0, 99.0],
+        )
+        positive_vmin = max(float(positive_vmin), 1.0e-12)
+        positive_vmax = max(float(positive_vmax), positive_vmin * 1.01)
+    else:
+        positive_vmin, positive_vmax = 1.0e-12, 1.0e-11
+    im_positive = axes[1].imshow(
+        positive,
+        extent=extent,
+        origin="lower",
+        cmap=positive_cmap,
+        norm=colors.LogNorm(vmin=positive_vmin, vmax=positive_vmax),
+        interpolation="nearest",
+    )
+    axes[1].set_title("Positive density only (gray = non-positive)")
+    fig.colorbar(im_positive, ax=axes[1], label=density_label)
+
+    sign_image = np.full(density.shape, np.nan)
+    sign_image[np.isfinite(density) & (density < 0.0)] = -1.0
+    sign_image[np.isfinite(density) & (density == 0.0)] = 0.0
+    sign_image[np.isfinite(density) & (density > 0.0)] = 1.0
+    sign_cmap = colors.ListedColormap(["#3b4cc0", "#eeeeee", "#f4987a"])
+    sign_norm = colors.BoundaryNorm([-1.5, -0.5, 0.5, 1.5], sign_cmap.N)
+    im_sign = axes[2].imshow(
+        sign_image,
+        extent=extent,
+        origin="lower",
+        cmap=sign_cmap,
+        norm=sign_norm,
+        interpolation="nearest",
+    )
+    axes[2].set_title(
+        "Laplacian sign\n"
+        f"negative={summary['negative_fraction']:.1%}, "
+        f"non-positive={summary['nonpositive_fraction']:.1%}"
+    )
+    sign_colorbar = fig.colorbar(im_sign, ax=axes[2], ticks=[-1.0, 0.0, 1.0])
+    sign_colorbar.ax.set_yticklabels(["negative", "zero", "positive"])
+    for ax in axes:
+        ax.set_xlabel("x [kpc]")
+        ax.set_ylabel("y [kpc]")
+        ax.set_aspect("equal")
+    fig.suptitle(
+        "Total-density diagnostic from the raw potential Laplacian",
+        fontsize=14,
+    )
+
+    if fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        for fmt in fig_fmt:
+            fig.savefig(
+                fig_dir / f"{filename}.{fmt}",
+                dpi=dpi,
+                bbox_inches="tight",
+            )
         plt.close(fig)
         return None
     return fig

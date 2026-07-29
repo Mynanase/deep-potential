@@ -22,8 +22,12 @@ from dpjax.physics.cbe import residual_A
 from dpjax.physics.units import (
     density_from_laplacian,
     gravitational_constant_for_system,
+    summarize_density_sign,
 )
-from dpjax.plotting.diagnostics import plot_potential_density_overview
+from dpjax.plotting.diagnostics import (
+    plot_laplacian_density_diagnostics,
+    plot_potential_density_overview,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +225,25 @@ def run_eval_phi(
         acc_img = np.concatenate(acc_slices).reshape(X.shape)
         np.savez(plots_dir / "phi_slice_xy.npz", x=xs, y=ys, phi=phi_img, rho=rho_img, acc_mag=acc_img)
         slice_data = {"x": xs, "y": ys, "phi": phi_img, "rho": rho_img, "acc_mag": acc_img}
+        density_summary = summarize_density_sign(rho_img)
+        (plots_dir / "rho_slice_xy_summary.json").write_text(
+            json.dumps(density_summary, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        plot_laplacian_density_diagnostics(
+            xs,
+            ys,
+            rho_img,
+            density_label=(
+                r"$\rho_{\rm total}$"
+                if system == "halo"
+                else r"$\rho$"
+            ),
+            fig_dir=plots_dir,
+            fig_fmt=fig_fmt,
+            dpi=int(dpi),
+            filename="rho_laplacian_diagnostics",
+        )
         plot_potential_density_overview(
             r,
             phi_learned_shift,

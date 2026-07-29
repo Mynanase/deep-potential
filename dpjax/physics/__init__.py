@@ -10,4 +10,5 @@ from dpjax.physics.units import (  # noqa: F401
     G_KPC_KMS2_PER_MSUN,
     density_from_laplacian,
     gravitational_constant_for_system,
+    summarize_density_sign,
 )

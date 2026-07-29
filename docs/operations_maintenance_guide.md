@@ -392,11 +392,19 @@ python -m experiments.eval_auriga_truth \
 - `auriga_truth_metrics.json`：势的加法常数对齐后误差；只有输入 snapshot
   含 acceleration 时才包含三维加速度相对误差、方向余弦和径向分箱误差；
 - `auriga_truth_predictions.npz`：逐粒子的预测、真值、位置、标准化文件行号和
-  原始 `source_index`。
+  原始 `source_index`；
+- `potential_truth_comparison.{png,pdf}`：势能真值—模型一一对比、径向结构和
+  加法常数对齐后的残差；
+- `potential_rz_by_phi.{png,pdf}`：按方位角分列的 `R-z` 势能剖面。模型在规则
+  网格上求值；模拟真值只显示每格至少 3 个粒子支持的中位数，灰格不插值；
+- `potential_rz_by_phi.npz`：上述剖面的网格边界、模型值、真值中位数、计数和
+  拟合的全局加法常数。
 
 若 snapshot 真值单位需要换算，可使用 `--truth-potential-scale` 和
 `--truth-acceleration-scale`。换算因子必须记录到实验说明；禁止为了获得更好
 误差而事后拟合乘法尺度。势能只允许拟合物理上不可观测的加法常数。
+可用 `--slice-phi-bins`、`--slice-r-bins`、`--slice-z-bins` 和
+`--slice-min-count` 调整剖面分辨率与真值覆盖门槛。
 
 建议第一阶段验收门槛（只对数据中实际存在的真值字段应用）：
 
@@ -409,8 +417,10 @@ python -m experiments.eval_auriga_truth \
 
 - CBE residual 的均值接近 0，标准差和高分位数随训练下降。
 - Plummer 势能和径向加速度趋势与解析解一致。
-- `rho_total = ∇²Φ/(4πG)` 没有大面积负值或数值爆炸；恒星粒子直方图
-  `rho_star` 不作为 `rho_total` 的真值。
+- `rho_total = ∇²Φ/(4πG)` 没有大面积负值或数值爆炸；
+  `rho_laplacian_diagnostics` 必须检查 signed raw、positive-only 和 sign mask，
+  禁止先裁剪负值再用对数色标掩盖；恒星粒子直方图 `rho_star` 不作为
+  `rho_total` 的真值。
 - 不只看训练 loss，还要检查空间切片和径向曲线。
 
 ### 5.5 联合微调

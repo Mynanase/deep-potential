@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import jax
@@ -13,7 +14,11 @@ from dpjax.data import (
     require_physics_compatible_transform,
 )
 from dpjax.models.potential import load_phi
-from dpjax.physics.units import gravitational_constant_for_system
+from dpjax.physics.units import (
+    gravitational_constant_for_system,
+    summarize_density_sign,
+)
+from dpjax.plotting.diagnostics import plot_laplacian_density_diagnostics
 
 
 def _load_physics_normalizer(df_run_dir: Path) -> Normalizer:
@@ -133,16 +138,56 @@ def main() -> int:
     fig.savefig(out_dir / "phi_slice_xy.png")
     plt.close(fig)
 
-    # rho (log)
+    # rho (signed if needed)
     fig, ax = plt.subplots(1, 1, figsize=(4.5, 4), dpi=150)
-    rho_pos = np.clip(rho_img, 1e-12, np.inf)
-    im = ax.imshow(
-        rho_pos,
-        extent=[-rmax, rmax, -rmax, rmax],
-        origin="lower",
-        cmap="magma",
-        norm=colors.LogNorm(vmin=np.nanpercentile(rho_pos, 5), vmax=np.nanpercentile(rho_pos, 99)),
-    )
+    finite_rho = rho_img[np.isfinite(rho_img)]
+    density_summary = summarize_density_sign(rho_img)
+    if np.any(finite_rho < 0.0):
+        rho_scale = max(
+            float(np.percentile(np.abs(finite_rho), 99.0)),
+            1.0e-12,
+        )
+        rho_nonzero = np.abs(finite_rho[finite_rho != 0.0])
+        rho_linthresh = (
+            max(
+                float(np.percentile(rho_nonzero, 10.0)),
+                rho_scale * 1.0e-4,
+                1.0e-12,
+            )
+            if rho_nonzero.size
+            else rho_scale * 1.0e-4
+        )
+        im = ax.imshow(
+            rho_img,
+            extent=[-rmax, rmax, -rmax, rmax],
+            origin="lower",
+            cmap="coolwarm",
+            norm=colors.SymLogNorm(
+                linthresh=rho_linthresh,
+                vmin=-rho_scale,
+                vmax=rho_scale,
+            ),
+        )
+    else:
+        positive = np.ma.masked_less_equal(rho_img, 0.0)
+        positive_values = finite_rho[finite_rho > 0.0]
+        if positive_values.size:
+            rho_vmin, rho_vmax = np.percentile(
+                positive_values,
+                [5.0, 99.0],
+            )
+        else:
+            rho_vmin, rho_vmax = 1.0e-12, 1.0e-11
+        im = ax.imshow(
+            positive,
+            extent=[-rmax, rmax, -rmax, rmax],
+            origin="lower",
+            cmap="magma",
+            norm=colors.LogNorm(
+                vmin=max(float(rho_vmin), 1.0e-12),
+                vmax=max(float(rho_vmax), 1.0e-11),
+            ),
+        )
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     density_title = (
@@ -150,11 +195,31 @@ def main() -> int:
         if args.system == "halo"
         else r"$\rho(x,y)=\nabla^2\Phi/(4\pi G)$"
     )
-    ax.set_title(density_title)
+    ax.set_title(
+        density_title
+        + f"\nnegative pixels: {density_summary['negative_fraction']:.1%}"
+    )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     fig.savefig(out_dir / "rho_slice_xy.png")
     plt.close(fig)
+    (out_dir / "rho_slice_xy_summary.json").write_text(
+        json.dumps(density_summary, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    plot_laplacian_density_diagnostics(
+        xs,
+        ys,
+        rho_img,
+        density_label=(
+            r"$\rho_{\rm total}$"
+            if args.system == "halo"
+            else r"$\rho$"
+        ),
+        fig_dir=out_dir,
+        fig_fmt=("png",),
+        filename="rho_laplacian_diagnostics",
+    )
 
     # |a|
     fig, ax = plt.subplots(1, 1, figsize=(4.5, 4), dpi=150)

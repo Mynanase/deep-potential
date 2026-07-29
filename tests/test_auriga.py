@@ -18,6 +18,7 @@ from dpjax.datasets.auriga import (
 )
 from dpjax.evaluation import (
     acceleration_error_metrics,
+    binned_potential_truth_by_phi,
     cartesian_to_spherical_phase_space,
     conditional_velocity_diagnostics,
     cylindrical_rz_density_by_phi,
@@ -235,6 +236,29 @@ def test_potential_metrics_remove_only_additive_offset():
     assert metrics["fitted_additive_offset"] == pytest.approx(17.5)
     assert metrics["rmse"] == pytest.approx(0.0)
     assert metrics["pearson_r"] == pytest.approx(1.0)
+
+
+def test_binned_potential_truth_masks_sparse_cells():
+    positions = np.array(
+        [
+            [0.5, -0.1, -0.5],
+            [0.6, -0.1, -0.4],
+            [-1.5, 0.1, 0.5],
+        ]
+    )
+    result = binned_potential_truth_by_phi(
+        positions,
+        np.array([-10.0, -12.0, -3.0]),
+        phi_edges=np.array([-np.pi, 0.0, np.pi]),
+        cylindrical_radius_edges=np.array([0.0, 1.0, 2.0]),
+        z_edges=np.array([-1.0, 0.0, 1.0]),
+        min_cell_count=2,
+    )
+
+    assert result["count"][0, 0, 0] == 2
+    assert result["truth_median"][0, 0, 0] == pytest.approx(-11.0)
+    assert result["count"][1, 1, 1] == 1
+    assert np.isnan(result["truth_median"][1, 1, 1])
 
 
 def test_acceleration_metrics_and_radial_profile():

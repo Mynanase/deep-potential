@@ -561,6 +561,75 @@ def cylindrical_rz_density_by_phi(
     }
 
 
+def binned_potential_truth_by_phi(
+    positions: np.ndarray,
+    potential: np.ndarray,
+    *,
+    phi_edges: np.ndarray,
+    cylindrical_radius_edges: np.ndarray,
+    z_edges: np.ndarray,
+    min_cell_count: int = 3,
+) -> dict[str, np.ndarray]:
+    """Bin simulator potential truth into cylindrical ``(phi, R, z)`` cells.
+
+    Auriga provides potential values at particle positions rather than on a
+    regular volume grid.  This helper records the per-cell median and leaves
+    under-populated cells as NaN, so downstream figures do not interpolate
+    unsupported simulator truth.
+    """
+    from scipy.stats import binned_statistic_dd
+
+    positions = np.asarray(positions, dtype=np.float64)
+    potential = np.asarray(potential, dtype=np.float64)
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError("positions must have shape (N, 3).")
+    if potential.shape != (positions.shape[0],):
+        raise ValueError(
+            f"Expected potential shape ({positions.shape[0]},), "
+            f"got {potential.shape}."
+        )
+    if min_cell_count < 1:
+        raise ValueError("min_cell_count must be positive.")
+    phi_edges = _validate_edges(phi_edges, name="phi_edges")
+    cylindrical_radius_edges = _validate_edges(
+        cylindrical_radius_edges,
+        name="cylindrical_radius_edges",
+    )
+    z_edges = _validate_edges(z_edges, name="z_edges")
+    if cylindrical_radius_edges[0] < 0:
+        raise ValueError("cylindrical_radius_edges must be non-negative.")
+
+    finite = np.all(np.isfinite(positions), axis=1) & np.isfinite(potential)
+    if not np.any(finite):
+        raise ValueError("No finite position/potential pairs are available.")
+    positions = positions[finite]
+    potential = potential[finite]
+    coordinates = np.column_stack(
+        [
+            np.arctan2(positions[:, 1], positions[:, 0]),
+            np.hypot(positions[:, 0], positions[:, 1]),
+            positions[:, 2],
+        ]
+    )
+    bins = [phi_edges, cylindrical_radius_edges, z_edges]
+    median = binned_statistic_dd(
+        coordinates,
+        potential,
+        statistic="median",
+        bins=bins,
+    ).statistic
+    count, _ = np.histogramdd(coordinates, bins=bins)
+    median[count < int(min_cell_count)] = np.nan
+    return {
+        "phi_edges": phi_edges,
+        "cylindrical_radius_edges": cylindrical_radius_edges,
+        "z_edges": z_edges,
+        "truth_median": median,
+        "count": count.astype(np.int64),
+        "min_cell_count": np.asarray(min_cell_count, dtype=np.int64),
+    }
+
+
 def _finite_pair(
     predicted: np.ndarray,
     truth: np.ndarray,

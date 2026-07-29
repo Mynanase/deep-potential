@@ -21,7 +21,10 @@ from dpjax.physics.units import (
     density_from_laplacian,
     gravitational_constant_for_system,
 )
-from dpjax.plotting.diagnostics import plot_potential_density_overview
+from dpjax.plotting.diagnostics import (
+    plot_laplacian_density_diagnostics,
+    plot_potential_density_overview,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -233,6 +236,20 @@ def main() -> int:
         gravitational_constant=density_g,
     )
     slice_data = np.load(slice_path)
+    plot_laplacian_density_diagnostics(
+        slice_data["x"],
+        slice_data["y"],
+        slice_data["rho"],
+        density_label=(
+            r"$\rho_{\rm total}$"
+            if args.system == "halo"
+            else r"$\rho$"
+        ),
+        fig_dir=out_dir,
+        fig_fmt=tuple(args.formats),
+        dpi=int(args.dpi),
+        filename="rho_laplacian_diagnostics",
+    )
 
     title = "Plummer Potential / Density Overview" if args.system == "plummer" else "Halo Potential / Density Overview"
     filename = "plummer_potential_density_overview" if args.system == "plummer" else "halo_potential_density_overview"

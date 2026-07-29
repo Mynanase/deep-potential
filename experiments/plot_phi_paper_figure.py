@@ -6,6 +6,8 @@ together as morphological context, but are not a model/truth density pair.
 """
 from __future__ import annotations
 
+import json
+
 import h5py
 import jax.numpy as jnp
 import numpy as np
@@ -19,6 +21,10 @@ from dpjax.data import (
     load_run_preprocessing,
     require_physics_compatible_transform,
 )
+from dpjax.evaluation import (
+    binned_potential_truth_by_phi,
+    potential_error_metrics,
+)
 from dpjax.models.potential import (
     phi_apply,
     laplacian_phi_apply,
@@ -27,6 +33,12 @@ from dpjax.models.potential import (
 from dpjax.physics.units import (
     G_KPC_KMS2_PER_MSUN,
     density_from_laplacian,
+    summarize_density_sign,
+)
+from dpjax.plotting.diagnostics import (
+    plot_auriga_potential_comparison,
+    plot_laplacian_density_diagnostics,
+    plot_potential_rz_by_phi,
 )
 
 
@@ -72,6 +84,19 @@ def main():
     # Align additive constant
     offset = np.median(pot_truth_sample - pot_model)
     pot_model_aligned = pot_model + offset
+    potential_metrics, _ = potential_error_metrics(
+        pot_model,
+        pot_truth_sample,
+    )
+    plot_auriga_potential_comparison(
+        pos_sample,
+        pot_truth_sample,
+        pot_model_aligned,
+        metrics=potential_metrics,
+        fig_dir=out_dir,
+        fig_fmt=("png",),
+        filename="phi_truth_comparison",
+    )
 
     # Laplacian -> density
     lap_model = np.asarray(
@@ -139,6 +164,92 @@ def main():
         lap_grid,
         gravitational_constant=G_KPC_KMS2_PER_MSUN,
     ).reshape(200, 200)
+    density_summary = summarize_density_sign(rho_total_grid)
+    (out_dir / "rho_laplacian_summary.json").write_text(
+        json.dumps(density_summary, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    plot_laplacian_density_diagnostics(
+        grid_1d,
+        grid_1d,
+        rho_total_grid.T,
+        density_label=r"$\rho_{\rm total}$ [$M_\odot\,\mathrm{kpc}^{-3}$]",
+        fig_dir=out_dir,
+        fig_fmt=("png",),
+        filename="rho_laplacian_diagnostics",
+    )
+
+    # Dense model R-z slices at azimuth-bin centers.  Simulator truth exists
+    # only at particle positions, so its row is a per-cell median with sparse
+    # cells left gray rather than interpolated.
+    slice_phi_edges = np.linspace(-np.pi, np.pi, 7)
+    slice_radius_edges = np.linspace(0.0, 75.0, 41)
+    slice_z_edges = np.linspace(-75.0, 75.0, 41)
+    truth_slices = binned_potential_truth_by_phi(
+        pos,
+        pot_truth,
+        phi_edges=slice_phi_edges,
+        cylindrical_radius_edges=slice_radius_edges,
+        z_edges=slice_z_edges,
+        min_cell_count=5,
+    )
+    slice_phi_centers = 0.5 * (
+        slice_phi_edges[:-1] + slice_phi_edges[1:]
+    )
+    slice_radius_centers = 0.5 * (
+        slice_radius_edges[:-1] + slice_radius_edges[1:]
+    )
+    slice_z_centers = 0.5 * (slice_z_edges[:-1] + slice_z_edges[1:])
+    slice_radius_grid, slice_z_grid = np.meshgrid(
+        slice_radius_centers,
+        slice_z_centers,
+        indexing="ij",
+    )
+    model_slices = np.empty((6, 40, 40), dtype=np.float64)
+    for phi_index, phi_center in enumerate(slice_phi_centers):
+        slice_positions = np.column_stack(
+            [
+                slice_radius_grid.ravel() * np.cos(phi_center),
+                slice_radius_grid.ravel() * np.sin(phi_center),
+                slice_z_grid.ravel(),
+            ]
+        )
+        slice_positions_std = (
+            slice_positions - mean[:3]
+        ) / std_x
+        model_slices[phi_index] = (
+            np.asarray(
+                phi_apply(
+                    phi_model,
+                    phi_params,
+                    jnp.asarray(slice_positions_std, dtype=jnp.float32),
+                )
+            ).reshape(slice_radius_grid.shape)
+            + offset
+        )
+    np.savez_compressed(
+        out_dir / "phi_rz_by_phi.npz",
+        phi_edges=slice_phi_edges,
+        cylindrical_radius_edges=slice_radius_edges,
+        z_edges=slice_z_edges,
+        model_potential=model_slices,
+        truth_potential=truth_slices["truth_median"],
+        truth_count=truth_slices["count"],
+        min_cell_count=truth_slices["min_cell_count"],
+        fitted_additive_offset=np.asarray(offset),
+    )
+    plot_potential_rz_by_phi(
+        slice_phi_edges,
+        slice_radius_edges,
+        slice_z_edges,
+        model_slices,
+        truth_potential=truth_slices["truth_median"],
+        truth_count=truth_slices["count"],
+        min_cell_count=5,
+        fig_dir=out_dir,
+        fig_fmt=("png",),
+        filename="phi_rz_by_phi",
+    )
 
     # Stellar-tracer density in a finite z slab.  The exact cell volume uses
     # the histogram edges rather than a hard-coded pixel size.
@@ -162,7 +273,7 @@ def main():
     fig = plt.figure(figsize=(16, 10))
 
     # Layout: left column (3 rows, x=r), right column (2 panels side by side)
-    ax1 = fig.add_axes([0.06, 0.69, 0.26, 0.27])  # top: Phi vs r
+    ax1 = fig.add_axes([0.06, 0.68, 0.26, 0.23])  # top: Phi vs r
     ax2 = fig.add_axes([0.06, 0.39, 0.26, 0.27])  # middle: rho vs r
     ax3 = fig.add_axes([0.06, 0.08, 0.26, 0.27])  # bottom: rho residual vs r
     ax4 = fig.add_axes([0.40, 0.39, 0.27, 0.55])  # Phi 2D slice
@@ -258,16 +369,35 @@ def main():
     ax4.set_title(r"$\Phi_{\rm model}(x, y, z{=}0)$")
     plt.colorbar(im4, cax=cax4, orientation="horizontal")
 
-    # --- Right right: 2D rho slice with truth contours ---
-    # Clip rho for display (can have negative values from Laplacian noise)
-    rho_disp = np.clip(rho_total_grid, 1e-2, None)
+    # --- Right right: signed 2D rho slice with stellar-density contours ---
+    # Negative Laplacians are kept visible.  Clipping them to a positive floor
+    # would make sign failures look like ordinary low-density black pixels.
+    rho_finite = rho_total_grid[np.isfinite(rho_total_grid)]
+    rho_scale = max(
+        float(np.percentile(np.abs(rho_finite), 99.0)),
+        1.0e-12,
+    )
+    rho_nonzero = np.abs(rho_finite[rho_finite != 0.0])
+    rho_linthresh = (
+        max(
+            float(np.percentile(rho_nonzero, 10.0)),
+            rho_scale * 1.0e-4,
+            1.0e-12,
+        )
+        if rho_nonzero.size
+        else rho_scale * 1.0e-4
+    )
     im5 = ax5.imshow(
-        rho_disp.T,
+        rho_total_grid.T,
         origin="lower",
         extent=[-75, 75, -75, 75],
-        cmap="magma",
+        cmap="coolwarm",
         aspect="equal",
-        norm=plt.matplotlib.colors.LogNorm(vmin=1e-1, vmax=rho_disp.max()),
+        norm=plt.matplotlib.colors.SymLogNorm(
+            linthresh=rho_linthresh,
+            vmin=-rho_scale,
+            vmax=rho_scale,
+        ),
     )
     # Stellar density contours provide morphology only; they are not truth
     # contours for the total gravitating density.
@@ -289,7 +419,9 @@ def main():
     ax5.set_ylabel("y [kpc]")
     ax5.set_title(
         r"$\rho_{\rm total,model}(x,y,z{=}0)$"
-        "\ncyan: stellar-tracer density"
+        "\n"
+        f"signed; negative pixels={density_summary['negative_fraction']:.1%}; "
+        "cyan: stellar density"
     )
     plt.colorbar(im5, cax=cax5, orientation="horizontal")
 
@@ -297,7 +429,7 @@ def main():
         "Halo12: Potential Recovery and Density Context "
         "(total model density is not compared to stellar density as truth)",
         fontsize=14,
-        y=0.98,
+        y=0.99,
     )
 
     out_path = out_dir / "phi_paper_figure.png"

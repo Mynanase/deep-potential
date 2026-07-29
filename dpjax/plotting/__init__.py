@@ -14,6 +14,9 @@ from .diagnostics import (
     plot_density_profile,
     plot_plummer_figure3,
     plot_potential_density_overview,
+    plot_auriga_potential_comparison,
+    plot_potential_rz_by_phi,
+    plot_laplacian_density_diagnostics,
     plot_residual_spatial,
     plot_auriga_df_ensemble,
 )
