@@ -18,6 +18,9 @@ from dpjax.datasets.auriga import (
 )
 from dpjax.evaluation import (
     acceleration_error_metrics,
+    cartesian_to_spherical_phase_space,
+    conditional_velocity_diagnostics,
+    cylindrical_rz_density_by_phi,
     density_profile_metrics,
     potential_error_metrics,
     radial_acceleration_profile,
@@ -284,3 +287,86 @@ def test_density_and_score_diagnostics():
     assert ensemble["finite_point_fraction"] == pytest.approx(1.0)
     assert ensemble["pairwise_cosine_median"] == pytest.approx(1.0)
     assert stein["mean_score_l2"] < 0.2
+
+
+def test_cartesian_to_spherical_phase_space_velocity_basis():
+    eta = np.array(
+        [
+            [1.0, 0.0, 0.0, 1.0, 2.0, 3.0],
+            [0.0, 0.0, 2.0, 4.0, 5.0, 6.0],
+        ]
+    )
+
+    spherical = cartesian_to_spherical_phase_space(eta)
+
+    np.testing.assert_allclose(
+        spherical[0],
+        [1.0, np.pi / 2.0, 0.0, 1.0, -3.0, 2.0],
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        spherical[1],
+        [2.0, 0.0, 0.0, 6.0, 4.0, 5.0],
+        atol=1.0e-12,
+    )
+
+
+def test_conditional_velocity_histograms_marginalize_other_coordinates():
+    rng = np.random.default_rng(12)
+    eta = rng.normal(size=(256, 6))
+    eta[:, :3] += np.array([2.0, 0.5, -0.25])
+    diagnostics = conditional_velocity_diagnostics(
+        eta,
+        eta[None, ...],
+        reference_weights=np.ones(eta.shape[0]),
+        conditioning_edges={
+            "r": np.array([0.0, 10.0]),
+            "theta": np.array([0.0, np.pi]),
+            "phi": np.array([-np.pi, np.pi]),
+        },
+        n_velocity_bins=16,
+    )
+
+    for coordinate in ("r", "theta", "phi"):
+        np.testing.assert_allclose(
+            diagnostics[coordinate]["reference_hist"],
+            diagnostics[coordinate]["model_hist"][0],
+        )
+        np.testing.assert_allclose(
+            diagnostics[coordinate]["wasserstein"],
+            0.0,
+            atol=1.0e-12,
+        )
+        np.testing.assert_allclose(
+            diagnostics[coordinate]["ks_histogram"],
+            0.0,
+            atol=1.0e-12,
+        )
+
+
+def test_cylindrical_rz_density_uses_exact_cell_volume():
+    positions = np.array(
+        [
+            [0.5, 0.0, 0.0],
+            [1.5, 0.0, 0.0],
+        ]
+    )
+    diagnostics = cylindrical_rz_density_by_phi(
+        positions,
+        positions[None, ...],
+        reference_weights=np.ones(2),
+        phi_edges=np.array([-np.pi, np.pi]),
+        cylindrical_radius_edges=np.array([0.0, 1.0, 2.0]),
+        z_edges=np.array([-1.0, 1.0]),
+        min_cell_count=1,
+    )
+
+    volume = diagnostics["cell_volume"]
+    np.testing.assert_allclose(volume[0, :, 0], [2.0 * np.pi, 6.0 * np.pi])
+    assert np.sum(diagnostics["reference_density"] * volume) == pytest.approx(
+        1.0
+    )
+    np.testing.assert_allclose(
+        diagnostics["model_density"][0],
+        diagnostics["reference_density"],
+    )

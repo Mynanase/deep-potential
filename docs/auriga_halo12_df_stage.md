@@ -60,9 +60,10 @@ env \
   bash jobs/train_halo12_df_ensemble.sh
 ```
 
-### 3. 评估密度与 6D score
+### 3. 评估局部分布与 6D score
 
-四个 seed 全部成功后：
+单个 seed 完成后即可先运行 data/model 分布诊断；四个 seed 全部成功后，同一入口
+会额外计算 score ensemble：
 
 ```bash
 env \
@@ -88,8 +89,18 @@ nohup env \
 
 主要输出：
 
-- `auriga_df_metrics.json`：质量密度与 score 指标；
-- `auriga_df_diagnostics.npz`：固定径向分箱、模型密度、抽样点和各模型 score。
+- `auriga_df_metrics.json`：恒星 tracer 质量密度、条件速度边缘分布和 score 指标；
+- `auriga_df_diagnostics.npz`：保留独立 model/seed 维度的绘图数据；
+- `density_profile.png`：球对称恒星 tracer 密度；
+- `df_spatial_rz_by_phi.png`：不同方位角区间的 data/model `R-z` 密度和
+  `log10(model/data)`；
+- `velocity_marginals_by_r.png`、`velocity_marginals_by_theta.png`、
+  `velocity_marginals_by_phi.png`：逐空间 bin 的
+  `v_r/v_theta/v_phi` data/model 直方图；
+- `score_consistency.png`：至少两个 seed 时生成。
+
+上述密度是 DF 学到的归一化恒星 tracer 质量密度，不是
+`nabla^2 Phi/(4 pi G)` 给出的总引力质量密度。
 
 ## 预注册的阶段性验收线
 

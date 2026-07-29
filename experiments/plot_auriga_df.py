@@ -1,4 +1,4 @@
-"""Render DF ensemble diagnostics plots from eval_auriga_df outputs.
+"""Render single-model or ensemble DF diagnostics from eval outputs.
 
 Reads the ``auriga_df_metrics.json`` + ``auriga_df_diagnostics.npz`` produced
 by :mod:`experiments.eval_auriga_df` and writes the following figures to the
@@ -8,6 +8,8 @@ evaluation directory (or a user-specified ``--out-dir``):
 * ``score_consistency.png``    – per-dim MAD bars + pairwise cosine histogram
 * ``score_per_dim_hist.png``   – per-dimension score distribution across seeds
 * ``df_ensemble_training.png`` – 4-seed train/val NLL overlay (when --run-dir is provided)
+* ``df_spatial_rz_by_phi.png`` – stellar-tracer R-z density by azimuth wedge
+* ``velocity_marginals_by_*.png`` – data/model spherical-velocity histograms
 
 Examples
 --------
@@ -30,7 +32,7 @@ from dpjax.plotting import plot_auriga_df_ensemble
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Plot Auriga DF ensemble diagnostics from eval outputs.",
+        description="Plot Auriga DF diagnostics from eval outputs.",
     )
     parser.add_argument(
         "--eval-dir",
@@ -90,7 +92,7 @@ def main() -> int:
         dpi=args.dpi,
     )
 
-    print("Wrote ensemble DF diagnostic figures:")
+    print("Wrote DF diagnostic figures:")
     for key, val in result.items():
         print(f"  {key}: {val}")
 

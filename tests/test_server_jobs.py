@@ -39,3 +39,14 @@ def test_server_jobs_are_scheduler_free_and_valid_bash():
     )
     assert ("sl" + "urm") not in active_text
     assert ("s" + "batch") not in active_text
+
+
+def test_halo_df_evaluation_job_supports_single_model_and_renders_plots():
+    script = (
+        PROJECT_ROOT / "jobs" / "eval_halo12_df_ensemble.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "DF evaluation requires at least one seed" in script
+    assert "Ensemble evaluation requires at least two seeds" not in script
+    assert "python -m experiments.plot_auriga_df" in script
+    assert "SKIP_PLOT" in script

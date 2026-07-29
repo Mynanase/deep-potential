@@ -363,6 +363,18 @@ python -m experiments.plot_phi_slice \
   --phi-run-dir runs/plummer/phi_ffjord_seed0
 ```
 
+Halo 势场切片必须显式指定物理单位系统：
+
+```bash
+python -m experiments.plot_phi_slice \
+  --df-run-dir runs/halo_12/df_ffjord_v23_mass/seed_42 \
+  --phi-run-dir runs/halo_12/phi_static_v1 \
+  --system halo
+```
+
+此时泊松方程使用
+`G=4.300917e-6 (km/s)^2 kpc / Msun`，输出的是总引力质量密度。
+
 Auriga 实验必须再对模拟真值做量化评估：
 
 ```bash
@@ -377,8 +389,8 @@ python -m experiments.eval_auriga_truth \
 
 输出包括：
 
-- `auriga_truth_metrics.json`：势的加法常数对齐后误差、三维加速度相对误差、
-  方向余弦以及径向分箱误差；
+- `auriga_truth_metrics.json`：势的加法常数对齐后误差；只有输入 snapshot
+  含 acceleration 时才包含三维加速度相对误差、方向余弦和径向分箱误差；
 - `auriga_truth_predictions.npz`：逐粒子的预测、真值、位置、标准化文件行号和
   原始 `source_index`。
 
@@ -386,19 +398,19 @@ python -m experiments.eval_auriga_truth \
 `--truth-acceleration-scale`。换算因子必须记录到实验说明；禁止为了获得更好
 误差而事后拟合乘法尺度。势能只允许拟合物理上不可观测的加法常数。
 
-建议第一阶段验收门槛（之后根据等价静态 mock 校准）：
+建议第一阶段验收门槛（只对数据中实际存在的真值字段应用）：
 
 - potential normalized RMSE `< 0.10`；
-- acceleration median relative error `< 0.10`；
-- acceleration p90 relative error `< 0.25`；
-- median cosine similarity `> 0.98`；
+- 若存在 acceleration truth：median relative error `< 0.10`、
+  p90 relative error `< 0.25`、median cosine similarity `> 0.98`；
 - 误差随半径、子结构掩膜和 seed 不出现未解释的系统漂移。
 
 主要验收内容：
 
 - CBE residual 的均值接近 0，标准差和高分位数随训练下降。
 - Plummer 势能和径向加速度趋势与解析解一致。
-- `rho = ∇²Φ/(4π)` 没有大面积负值或数值爆炸。
+- `rho_total = ∇²Φ/(4πG)` 没有大面积负值或数值爆炸；恒星粒子直方图
+  `rho_star` 不作为 `rho_total` 的真值。
 - 不只看训练 loss，还要检查空间切片和径向曲线。
 
 ### 5.5 联合微调

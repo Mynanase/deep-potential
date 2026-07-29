@@ -19,6 +19,10 @@ from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.analytic import plummer_ar, plummer_phi
 from dpjax.physics.cbe import residual_A
+from dpjax.physics.units import (
+    density_from_laplacian,
+    gravitational_constant_for_system,
+)
 from dpjax.plotting.diagnostics import plot_potential_density_overview
 
 
@@ -45,6 +49,7 @@ def run_eval_phi(
     slice_rmax: Optional[float] = None,
     fig_fmt: tuple[str, ...] = ("png", "pdf"),
     dpi: int = 180,
+    gravitational_constant: float | None = None,
 ) -> Dict[str, Any]:
     """Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.
 
@@ -67,6 +72,11 @@ def run_eval_phi(
 
     out_dir = ensure_dir(out_dir or phi_run_dir)
     plots_dir = ensure_dir(out_dir / "plots")
+    system = str(system).lower()
+    density_g = gravitational_constant_for_system(
+        system,
+        gravitational_constant,
+    )
 
     eta = load_eta_h5(data_path, dataset="eta")
     eta_std = normalizer.transform(eta)
@@ -112,6 +122,8 @@ def run_eval_phi(
         "residual_p99_abs": float(np.percentile(np.abs(r_all), 99.0)),
         "residual_p999_abs": float(np.percentile(np.abs(r_all), 99.9)),
         "residual_max_abs": float(np.max(np.abs(r_all))),
+        "density_semantics": "total_gravitating_density",
+        "density_gravitational_constant": density_g,
     }
 
     (out_dir / "eval_stats.json").write_text(json.dumps(stats, indent=2) + "\n")
@@ -135,13 +147,16 @@ def run_eval_phi(
     i_ref = int(np.argmin(np.abs(r - r_ref)))
     phi_learned_shift = phi_learned - phi_learned[i_ref]
 
-    # Density profile: rho = Laplacian(Phi) / (4 pi)
+    # Total gravitating density from the Poisson equation.
     std_x_j = jnp.asarray(std_x)
     lap_phys = np.asarray(
         laplacian_phi_apply(phi_model, phi_params, x_std_j, std_x=std_x_j),
         dtype=np.float32,
     )
-    rho_learned = lap_phys / (4.0 * np.pi)
+    rho_learned = density_from_laplacian(
+        lap_phys,
+        gravitational_constant=density_g,
+    )
 
     np.savez(
         out_dir / "radial_curves.npz",
@@ -152,7 +167,6 @@ def run_eval_phi(
         rho_learned=rho_learned,
     )
 
-    system = str(system).lower()
     phi_true = None
     ar_true = None
     rho_analytic = None
@@ -195,7 +209,12 @@ def run_eval_phi(
             grad_phys_b = grad_b / std_x[None, :]
             lap_b = np.asarray(laplacian_phi_apply(phi_model, phi_params, x_batch, std_x=std_x_j), dtype=np.float32)
             phi_slices.append(phi_b)
-            rho_slices.append(lap_b / (4.0 * np.pi))
+            rho_slices.append(
+                density_from_laplacian(
+                    lap_b,
+                    gravitational_constant=density_g,
+                )
+            )
             acc_slices.append(np.linalg.norm(-grad_phys_b, axis=-1))
         phi_img = np.concatenate(phi_slices).reshape(X.shape)
         rho_img = np.concatenate(rho_slices).reshape(X.shape)
@@ -216,6 +235,11 @@ def run_eval_phi(
             ar_true=ar_true,
             data_xy=eta_eval_phys[:, :2] if system != "plummer" else None,
             title="Plummer Potential / Density Overview" if system == "plummer" else "Halo Potential / Density Overview",
+            density_label=(
+                r"$\rho_{\rm total}=\nabla^2\Phi/(4\pi G)$"
+                if system == "halo"
+                else r"$\rho=\nabla^2\Phi/(4\pi G)$"
+            ),
             fig_dir=plots_dir,
             fig_fmt=fig_fmt,
             dpi=int(dpi),
@@ -289,6 +313,15 @@ def main() -> int:
     parser.add_argument("--slice-rmax", type=float, default=None)
     parser.add_argument("--fig-formats", nargs="+", default=["png", "pdf"])
     parser.add_argument("--dpi", type=int, default=180)
+    parser.add_argument(
+        "--gravitational-constant",
+        type=float,
+        default=None,
+        help=(
+            "Override G in the active unit system. Halo defaults to "
+            "4.300917e-6 (km/s)^2 kpc / Msun; other systems default to G=1."
+        ),
+    )
     args = parser.parse_args()
 
     run_eval_phi(
@@ -298,6 +331,7 @@ def main() -> int:
         n_r=args.n_r, r_ref=args.r_ref, system=args.system,
         plot_overview=not args.no_overview, slice_grid=args.slice_grid,
         slice_rmax=args.slice_rmax, fig_fmt=tuple(args.fig_formats), dpi=args.dpi,
+        gravitational_constant=args.gravitational_constant,
     )
     return 0
 

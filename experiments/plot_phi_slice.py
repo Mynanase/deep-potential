@@ -13,6 +13,7 @@ from dpjax.data import (
     require_physics_compatible_transform,
 )
 from dpjax.models.potential import load_phi
+from dpjax.physics.units import gravitational_constant_for_system
 
 
 def _load_physics_normalizer(df_run_dir: Path) -> Normalizer:
@@ -34,6 +35,12 @@ def main() -> int:
     parser.add_argument("--rmax", type=float, default=5.0)
     parser.add_argument("--grid", type=int, default=128)
     parser.add_argument("--batch", type=int, default=2048)
+    parser.add_argument(
+        "--system",
+        choices=["generic", "plummer", "halo"],
+        default="generic",
+    )
+    parser.add_argument("--gravitational-constant", type=float, default=None)
 
     args = parser.parse_args()
 
@@ -48,6 +55,10 @@ def main() -> int:
 
     mean_x = np.asarray(normalizer.mean[:3], dtype=np.float32)
     std_x = np.asarray(normalizer.std[:3], dtype=np.float32)
+    density_g = gravitational_constant_for_system(
+        args.system,
+        args.gravitational_constant,
+    )
 
     # Grid in physical coords
     rmax = float(args.rmax)
@@ -79,7 +90,7 @@ def main() -> int:
         lap_phys_b = jnp.sum(diag_std / (jnp.asarray(std_x) ** 2)[None, :], axis=-1)
 
         acc_mag_b = jnp.linalg.norm(-grad_phys_b, axis=-1)
-        rho_b = lap_phys_b / (4.0 * jnp.pi)
+        rho_b = lap_phys_b / (4.0 * jnp.pi * density_g)
 
         return phi_b, acc_mag_b, rho_b
 
@@ -134,7 +145,12 @@ def main() -> int:
     )
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title(r"$\rho(x,y)=\nabla^2\Phi/(4\pi)$")
+    density_title = (
+        r"$\rho_{\rm total}(x,y)=\nabla^2\Phi/(4\pi G)$"
+        if args.system == "halo"
+        else r"$\rho(x,y)=\nabla^2\Phi/(4\pi G)$"
+    )
+    ax.set_title(density_title)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     fig.savefig(out_dir / "rho_slice_xy.png")
@@ -157,7 +173,16 @@ def main() -> int:
     fig.savefig(out_dir / "accmag_slice_xy.png")
     plt.close(fig)
 
-    np.savez(out_dir / "phi_slice_xy.npz", x=xs, y=ys, phi=phi_img, rho=rho_img, acc_mag=acc_img)
+    np.savez(
+        out_dir / "phi_slice_xy.npz",
+        x=xs,
+        y=ys,
+        phi=phi_img,
+        rho=rho_img,
+        acc_mag=acc_img,
+        density_gravitational_constant=np.asarray(density_g),
+        density_semantics=np.asarray("total_gravitating_density"),
+    )
 
     print(f"Wrote slice plots to {out_dir}")
     return 0

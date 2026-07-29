@@ -624,6 +624,7 @@ def plot_potential_density_overview(
     ar_true: Optional[np.ndarray] = None,
     data_xy: Optional[np.ndarray] = None,
     title: str = "Potential / Density Overview",
+    density_label: str = r"$\rho=\nabla^2\Phi/(4\pi G)$",
     fig_dir: Optional[str | Path] = None,
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
@@ -679,7 +680,7 @@ def plot_potential_density_overview(
     else:
         ax_rho_r.plot(r, rho_learned, color="tab:blue", lw=1.4)
     ax_rho_r.set_xscale("log")
-    ax_rho_r.set_ylabel(r"$\rho^*$")
+    ax_rho_r.set_ylabel(density_label)
 
     if rho_true is not None:
         ax_aux.scatter(r, rho_learned - rho_true, s=5, color="tab:green", alpha=0.25, edgecolors="none")
@@ -770,7 +771,7 @@ def plot_potential_density_overview(
     cbar_phi = fig.colorbar(im_phi, ax=ax_phi, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
     cbar_phi.set_label(r"$\Phi^*-\mathrm{median}(\Phi^*)$")
     cbar_rho = fig.colorbar(im_rho, ax=ax_rho, orientation="horizontal", fraction=0.08, pad=0.04, location="top")
-    cbar_rho.set_label(r"$\rho^*=\nabla^2\Phi^*/(4\pi)$")
+    cbar_rho.set_label(density_label)
     fig.suptitle(title, fontsize=13)
 
     if fig_dir is not None:
@@ -862,16 +863,18 @@ def plot_auriga_df_ensemble(
     fig_fmt: Iterable[str] = ("png",),
     dpi: int = 150,
 ):
-    """Render Halo DF ensemble diagnostics from eval_auriga_df outputs.
+    """Render Halo DF diagnostics from ``eval_auriga_df`` outputs.
 
     Consumes the JSON + NPZ written by ``experiments.eval_auriga_df`` and
-    produces four figures:
+    produces radial density, local spatial density, conditional velocity, and
+    score figures.  Distribution and Stein diagnostics work with one DF;
+    score-repeatability plots are added when at least two models are present.
 
-    - ``density_profile.png``   – radial ρ(r) data vs flow samples + fractional error
-    - ``score_consistency.png`` – per-dim MAD bars + pairwise cosine histogram
+    - ``density_profile.png`` – radial stellar-tracer density
+    - ``df_spatial_rz_by_phi.png`` – data/model/log-ratio R-z wedges
+    - ``velocity_marginals_by_{r,theta,phi}.png`` – requested histogram grids
+    - ``score_consistency.png`` – ensemble-only score repeatability
     - ``score_per_dim_hist.png`` – per-dimension score distribution across seeds
-    - ``training_curves.png``   – 4-seed train/val NLL overlay (optional,
-      requires ``run_dirs`` pointing at the per-seed training directories)
 
     Parameters
     ----------
@@ -883,6 +886,7 @@ def plot_auriga_df_ensemble(
     import json
 
     import matplotlib.pyplot as plt
+    from matplotlib import colors
 
     metrics_json = Path(metrics_json)
     diagnostics_npz = Path(diagnostics_npz)
@@ -892,27 +896,60 @@ def plot_auriga_df_ensemble(
     fig_dir.mkdir(parents=True, exist_ok=True)
 
     m = json.loads(metrics_json.read_text(encoding="utf-8"))
-    d = np.load(diagnostics_npz)
+    d = np.load(diagnostics_npz, allow_pickle=False)
+    result = {"fig_dir": str(fig_dir)}
 
     edges = d["radial_edges"]
     r_centers = np.sqrt(edges[:-1] * edges[1:])
     ref = d["reference_density"]
     mdl = d["model_density"]
+    mdl_by_model = (
+        d["model_density_by_model"]
+        if "model_density_by_model" in d.files
+        else mdl[None, :]
+    )
+    model_labels = (
+        [str(value) for value in d["model_labels"]]
+        if "model_labels" in d.files
+        else [f"model_{index}" for index in range(mdl_by_model.shape[0])]
+    )
     dm = m["density_profile"]
 
     # ── density profile ─────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    axes[0].loglog(r_centers, ref, "k-o", lw=2, ms=5, label="data (Auriga)")
     axes[0].loglog(
-        r_centers, mdl, "--", color="tab:orange", lw=1.8, marker="s", ms=5,
-        label="DF samples",
+        r_centers,
+        ref,
+        "k-o",
+        lw=2,
+        ms=5,
+        label="data: stellar tracer mass",
+    )
+    for model_index, density in enumerate(mdl_by_model):
+        axes[0].loglog(
+            r_centers,
+            density,
+            lw=1.0,
+            alpha=0.45,
+            label=model_labels[model_index],
+        )
+    axes[0].loglog(
+        r_centers,
+        mdl,
+        "--",
+        color="tab:orange",
+        lw=2.2,
+        marker="s",
+        ms=5,
+        label="DF median" if mdl_by_model.shape[0] > 1 else "DF model",
     )
     axes[0].set_xlabel("r [kpc]")
-    axes[0].set_ylabel(r"$\rho(r)$ [normalized]")
+    axes[0].set_ylabel(r"normalized stellar-tracer density [kpc$^{-3}$]")
     axes[0].set_title(
-        f"Halo12 radial density (log10_RMSE={dm['log10_rmse_dex']:.3f} dex)"
+        f"Halo12 DF spatial marginal "
+        f"(log10_RMSE={dm['log10_rmse_dex']:.3f} dex)"
     )
-    axes[0].legend()
+    axes[0].legend(fontsize=8)
     axes[0].grid(True, alpha=0.3, which="both")
 
     rel = np.abs(mdl - ref) / np.maximum(ref, 1e-12)
@@ -931,51 +968,307 @@ def plot_auriga_df_ensemble(
     for fmt in fig_fmt:
         fig.savefig(fig_dir / f"density_profile.{fmt}", dpi=dpi)
     plt.close(fig)
+    result["density_profile"] = str(fig_dir / "density_profile.png")
+
+    # ── cylindrical R-z density in azimuth wedges ──────────────────
+    if "spatial_reference_density" in d.files:
+        phi_edges = d["spatial_phi_edges"]
+        cylindrical_radius_edges = d["spatial_r_edges"]
+        z_edges = d["spatial_z_edges"]
+        reference_density = d["spatial_reference_density"]
+        model_density = d["spatial_model_median_density"]
+        reference_count = d["spatial_reference_count"]
+        model_count = np.median(d["spatial_model_count"], axis=0)
+        min_cell_count = int(d["spatial_min_cell_count"])
+        n_phi = phi_edges.size - 1
+
+        positive = np.concatenate(
+            [
+                reference_density[reference_density > 0],
+                model_density[model_density > 0],
+            ]
+        )
+        density_vmin, density_vmax = np.percentile(positive, [5.0, 99.5])
+        if density_vmax <= density_vmin:
+            density_vmax = density_vmin * 10.0
+        density_norm = colors.LogNorm(
+            vmin=max(float(density_vmin), np.finfo(float).tiny),
+            vmax=float(density_vmax),
+        )
+
+        valid_ratio = (
+            (reference_count >= min_cell_count)
+            & (model_count >= min_cell_count)
+            & (reference_density > 0)
+            & (model_density > 0)
+        )
+        log_ratio = np.full_like(reference_density, np.nan)
+        log_ratio[valid_ratio] = np.log10(
+            model_density[valid_ratio] / reference_density[valid_ratio]
+        )
+        finite_ratio = np.abs(log_ratio[np.isfinite(log_ratio)])
+        ratio_limit = (
+            max(float(np.percentile(finite_ratio, 98.0)), 0.1)
+            if finite_ratio.size
+            else 1.0
+        )
+        ratio_norm = colors.TwoSlopeNorm(
+            vmin=-ratio_limit,
+            vcenter=0.0,
+            vmax=ratio_limit,
+        )
+
+        fig, axes = plt.subplots(
+            3,
+            n_phi,
+            figsize=(max(14.0, 3.0 * n_phi), 10.0),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+        )
+        axes = np.asarray(axes).reshape(3, n_phi)
+        density_mappable = None
+        ratio_mappable = None
+        for phi_index in range(n_phi):
+            phi_left = np.degrees(phi_edges[phi_index])
+            phi_right = np.degrees(phi_edges[phi_index + 1])
+            data_image = np.ma.masked_less_equal(
+                reference_density[phi_index].T,
+                0.0,
+            )
+            model_image = np.ma.masked_less_equal(
+                model_density[phi_index].T,
+                0.0,
+            )
+            density_mappable = axes[0, phi_index].pcolormesh(
+                cylindrical_radius_edges,
+                z_edges,
+                data_image,
+                cmap="magma",
+                norm=density_norm,
+                shading="auto",
+            )
+            axes[1, phi_index].pcolormesh(
+                cylindrical_radius_edges,
+                z_edges,
+                model_image,
+                cmap="magma",
+                norm=density_norm,
+                shading="auto",
+            )
+            ratio_mappable = axes[2, phi_index].pcolormesh(
+                cylindrical_radius_edges,
+                z_edges,
+                np.ma.masked_invalid(log_ratio[phi_index].T),
+                cmap="coolwarm",
+                norm=ratio_norm,
+                shading="auto",
+            )
+            axes[0, phi_index].set_title(
+                rf"${phi_left:.0f}^\circ\leq\phi<{phi_right:.0f}^\circ$"
+            )
+            axes[2, phi_index].set_xlabel("R [kpc]")
+        axes[0, 0].set_ylabel("data\nz [kpc]")
+        axes[1, 0].set_ylabel("DF model\nz [kpc]")
+        axes[2, 0].set_ylabel(r"$\log_{10}(\rho_{\rm DF}/\rho_\star)$" "\nz [kpc]")
+        fig.colorbar(
+            density_mappable,
+            ax=axes[:2, :].ravel().tolist(),
+            label=r"normalized stellar-tracer density [kpc$^{-3}$]",
+            shrink=0.85,
+        )
+        fig.colorbar(
+            ratio_mappable,
+            ax=axes[2, :].ravel().tolist(),
+            label="log10 density ratio",
+            shrink=0.85,
+        )
+        fig.suptitle(
+            "Halo12 stellar-tracer density by azimuth wedge "
+            f"(cells require at least {min_cell_count} samples)",
+            fontsize=14,
+        )
+        for fmt in fig_fmt:
+            fig.savefig(fig_dir / f"df_spatial_rz_by_phi.{fmt}", dpi=dpi)
+        plt.close(fig)
+        result["df_spatial_rz_by_phi"] = str(
+            fig_dir / "df_spatial_rz_by_phi.png"
+        )
+
+    # ── requested conditional spherical-velocity marginals ─────────
+    if "conditional_velocity_edges" in d.files:
+        velocity_edges = d["conditional_velocity_edges"]
+        velocity_labels = (r"$v_r$", r"$v_\theta$", r"$v_\phi$")
+        line_colors = plt.get_cmap("tab10")
+        for coordinate_name in ("r", "theta", "phi"):
+            key_prefix = f"conditional_{coordinate_name}_"
+            if f"{key_prefix}reference_hist" not in d.files:
+                continue
+            coordinate_edges = d[f"{key_prefix}edges"]
+            reference_hist = d[f"{key_prefix}reference_hist"]
+            model_hist = d[f"{key_prefix}model_hist"]
+            reference_effective_count = d[
+                f"{key_prefix}reference_effective_count"
+            ]
+            model_count_conditional = d[f"{key_prefix}model_count"]
+            wasserstein = d[f"{key_prefix}wasserstein"]
+            n_rows = coordinate_edges.size - 1
+
+            fig, axes = plt.subplots(
+                n_rows,
+                3,
+                figsize=(13.5, max(3.5, 1.9 * n_rows)),
+                sharex="col",
+                squeeze=False,
+                constrained_layout=True,
+            )
+            for row in range(n_rows):
+                for velocity_index in range(3):
+                    ax = axes[row, velocity_index]
+                    ax.stairs(
+                        reference_hist[row, velocity_index],
+                        velocity_edges[velocity_index],
+                        color="black",
+                        lw=1.8,
+                        label="data",
+                    )
+                    for model_index in range(model_hist.shape[0]):
+                        ax.stairs(
+                            model_hist[
+                                model_index,
+                                row,
+                                velocity_index,
+                            ],
+                            velocity_edges[velocity_index],
+                            color=line_colors(model_index % 10),
+                            lw=1.1,
+                            alpha=0.85,
+                            label=model_labels[model_index],
+                        )
+                    w1_values = wasserstein[:, row, velocity_index]
+                    finite_w1 = w1_values[np.isfinite(w1_values)]
+                    if finite_w1.size:
+                        ax.text(
+                            0.98,
+                            0.93,
+                            f"W1={np.median(finite_w1):.2g}",
+                            ha="right",
+                            va="top",
+                            transform=ax.transAxes,
+                            fontsize=7,
+                        )
+                    ax.grid(True, alpha=0.2)
+                    if row == 0:
+                        ax.set_title(velocity_labels[velocity_index])
+                    if row == n_rows - 1:
+                        ax.set_xlabel(r"velocity [km s$^{-1}$]")
+
+                left = coordinate_edges[row]
+                right = coordinate_edges[row + 1]
+                if coordinate_name == "r":
+                    interval = f"{left:.2g} ≤ r < {right:.2g} kpc"
+                else:
+                    interval = (
+                        f"{np.degrees(left):.0f}° ≤ {coordinate_name} "
+                        f"< {np.degrees(right):.0f}°"
+                    )
+                median_model_count = int(
+                    np.median(model_count_conditional[:, row])
+                )
+                axes[row, 0].set_ylabel(
+                    f"{interval}\nPDF\n"
+                    f"N_eff={reference_effective_count[row]:.0f}, "
+                    f"N_m≈{median_model_count}"
+                )
+            axes[0, -1].legend(loc="upper left", fontsize=7)
+            fig.suptitle(
+                f"Velocity marginals conditioned only on {coordinate_name}; "
+                "all other coordinates are marginalized",
+                fontsize=13,
+            )
+            filename = f"velocity_marginals_by_{coordinate_name}"
+            for fmt in fig_fmt:
+                fig.savefig(fig_dir / f"{filename}.{fmt}", dpi=dpi)
+            plt.close(fig)
+            result[filename] = str(fig_dir / f"{filename}.png")
 
     # ── score consistency ───────────────────────────────────────────
     scores = d["scores"]  # (n_models, N, 6)
     n_models, n_pts, dim = scores.shape
     labels = ["x", "y", "z", "vx", "vy", "vz"]
-    se = m["score_ensemble"]
+    se = m.get("score_ensemble")
 
-    def _cos(a, b):
-        na = np.linalg.norm(a, axis=-1)
-        nb = np.linalg.norm(b, axis=-1)
-        return np.sum(a * b, axis=-1) / (na * nb + 1e-12)
+    if n_models >= 2 and se is not None:
+        def _cos(a, b):
+            na = np.linalg.norm(a, axis=-1)
+            nb = np.linalg.norm(b, axis=-1)
+            return np.sum(a * b, axis=-1) / (na * nb + 1e-12)
 
-    pairs = []
-    for i in range(n_models):
-        for j in range(i + 1, n_models):
-            pairs.append(_cos(scores[i], scores[j]))
-    all_pairs = np.concatenate(pairs)
+        pairs = []
+        for i in range(n_models):
+            for j in range(i + 1, n_models):
+                pairs.append(_cos(scores[i], scores[j]))
+        all_pairs = np.concatenate(pairs)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    axes[0].bar(labels, se["relative_mad_by_dimension"], color="tab:purple", alpha=0.85)
-    axes[0].axhline(0.20, ls="--", color="k", alpha=0.5, label="per-dim gate 0.20")
-    axes[0].axhline(0.10, ls=":", color="k", alpha=0.5, label="median gate 0.10")
-    axes[0].set_ylabel("6D relative MAD")
-    axes[0].set_title(f"Per-dimension MAD (median={se['median_relative_mad']:.3f})")
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+        axes[0].bar(
+            labels,
+            se["relative_mad_by_dimension"],
+            color="tab:purple",
+            alpha=0.85,
+        )
+        axes[0].axhline(
+            0.20,
+            ls="--",
+            color="k",
+            alpha=0.5,
+            label="per-dim gate 0.20",
+        )
+        axes[0].axhline(
+            0.10,
+            ls=":",
+            color="k",
+            alpha=0.5,
+            label="median gate 0.10",
+        )
+        axes[0].set_ylabel("6D relative MAD")
+        axes[0].set_title(
+            f"Per-dimension MAD "
+            f"(median={se['median_relative_mad']:.3f})"
+        )
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
 
-    axes[1].hist(all_pairs, bins=60, color="tab:green", alpha=0.8)
-    axes[1].axvline(
-        0.95, ls="--", color="k",
-        label=f"median gate 0.95 (got {se['pairwise_cosine_median']:.3f})",
-    )
-    axes[1].axvline(
-        0.80, ls=":", color="k",
-        label=f"p10 gate 0.80 (got {se['pairwise_cosine_p10']:.3f})",
-    )
-    axes[1].set_xlabel(r"pairwise $\cos(\nabla\log f_i, \nabla\log f_j)$")
-    axes[1].set_ylabel("count")
-    axes[1].set_title("Ensemble score consistency")
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
-    plt.tight_layout()
-    for fmt in fig_fmt:
-        fig.savefig(fig_dir / f"score_consistency.{fmt}", dpi=dpi)
-    plt.close(fig)
+        axes[1].hist(all_pairs, bins=60, color="tab:green", alpha=0.8)
+        axes[1].axvline(
+            0.95,
+            ls="--",
+            color="k",
+            label=(
+                "median gate 0.95 "
+                f"(got {se['pairwise_cosine_median']:.3f})"
+            ),
+        )
+        axes[1].axvline(
+            0.80,
+            ls=":",
+            color="k",
+            label=f"p10 gate 0.80 (got {se['pairwise_cosine_p10']:.3f})",
+        )
+        axes[1].set_xlabel(
+            r"pairwise $\cos(\nabla\log f_i, \nabla\log f_j)$"
+        )
+        axes[1].set_ylabel("count")
+        axes[1].set_title("Ensemble score consistency")
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        plt.tight_layout()
+        for fmt in fig_fmt:
+            fig.savefig(fig_dir / f"score_consistency.{fmt}", dpi=dpi)
+        plt.close(fig)
+        result["score_consistency"] = str(
+            fig_dir / "score_consistency.png"
+        )
 
     # ── per-dimension score distribution ───────────────────────────
     rng = np.random.default_rng(0)
@@ -986,26 +1279,27 @@ def plot_auriga_df_ensemble(
         for mi in range(n_models):
             axes[k].hist(
                 scores[mi, idx, k], bins=40, histtype="step", lw=1.2,
-                label=f"seed_{42 + mi}",
+                label=model_labels[mi],
             )
         axes[k].set_xlabel(f"score[{labels[k]}]")
         axes[k].set_ylabel("count")
         axes[k].legend(fontsize=8)
         axes[k].grid(True, alpha=0.3)
-    plt.suptitle("Per-dimension score distribution across seeds")
+    plt.suptitle(
+        "Per-dimension physical-score distribution"
+        + (" across models" if n_models > 1 else "")
+    )
     plt.tight_layout()
     for fmt in fig_fmt:
         fig.savefig(fig_dir / f"score_per_dim_hist.{fmt}", dpi=dpi)
     plt.close(fig)
+    result["score_per_dim_hist"] = str(
+        fig_dir / "score_per_dim_hist.png"
+    )
 
     # ── optional training curves overlay ───────────────────────────
     if run_dirs:
         from .training_curves import plot_df_training_ensemble
         plot_df_training_ensemble(run_dirs, save_dir=fig_dir, dpi=dpi)
 
-    return {
-        "fig_dir": str(fig_dir),
-        "density_profile": str(fig_dir / "density_profile.png"),
-        "score_consistency": str(fig_dir / "score_consistency.png"),
-        "score_per_dim_hist": str(fig_dir / "score_per_dim_hist.png"),
-    }
+    return result

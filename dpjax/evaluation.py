@@ -7,6 +7,560 @@ from typing import Any
 import numpy as np
 
 
+SPHERICAL_PHASE_SPACE_COLUMNS = (
+    "r",
+    "theta",
+    "phi",
+    "v_r",
+    "v_theta",
+    "v_phi",
+)
+
+
+def cartesian_to_spherical_phase_space(eta: np.ndarray) -> np.ndarray:
+    """Convert ``[x,y,z,vx,vy,vz]`` rows to spherical phase-space rows.
+
+    ``theta`` is the colatitude in ``[0, pi]`` and ``phi`` is the azimuth in
+    ``[-pi, pi]``.  The velocity basis is orthonormal, so transforming samples
+    and then histogramming them performs the requested velocity marginalization
+    without an additional Jacobian.
+    """
+    eta = np.asarray(eta, dtype=np.float64)
+    if eta.ndim != 2 or eta.shape[1] != 6:
+        raise ValueError(f"Expected eta shape (N, 6), got {eta.shape}.")
+    if not np.all(np.isfinite(eta)):
+        raise ValueError("eta contains NaN or Inf values.")
+
+    x, y, z, vx, vy, vz = eta.T
+    cylindrical_radius = np.hypot(x, y)
+    radius = np.sqrt(cylindrical_radius**2 + z**2)
+    theta = np.arctan2(cylindrical_radius, z)
+    phi = np.arctan2(y, x)
+
+    sin_theta = np.sin(theta)
+    cos_theta = np.cos(theta)
+    sin_phi = np.sin(phi)
+    cos_phi = np.cos(phi)
+
+    v_r = (
+        vx * sin_theta * cos_phi
+        + vy * sin_theta * sin_phi
+        + vz * cos_theta
+    )
+    v_theta = (
+        vx * cos_theta * cos_phi
+        + vy * cos_theta * sin_phi
+        - vz * sin_theta
+    )
+    v_phi = -vx * sin_phi + vy * cos_phi
+    return np.column_stack(
+        [radius, theta, phi, v_r, v_theta, v_phi]
+    )
+
+
+def _validate_edges(edges: np.ndarray, *, name: str) -> np.ndarray:
+    edges = np.asarray(edges, dtype=np.float64)
+    if (
+        edges.ndim != 1
+        or edges.size < 2
+        or not np.all(np.isfinite(edges))
+        or np.any(np.diff(edges) <= 0)
+    ):
+        raise ValueError(f"{name} must be finite and strictly increasing.")
+    return edges
+
+
+def _weighted_quantile(
+    values: np.ndarray,
+    weights: np.ndarray,
+    quantile: float,
+) -> float:
+    values = np.asarray(values, dtype=np.float64).reshape(-1)
+    weights = np.asarray(weights, dtype=np.float64).reshape(-1)
+    finite = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    values = values[finite]
+    weights = weights[finite]
+    if values.size == 0:
+        return float("nan")
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cumulative = np.cumsum(weights) - 0.5 * weights
+    cumulative /= np.sum(weights)
+    return float(
+        np.interp(
+            float(np.clip(quantile, 0.0, 1.0)),
+            cumulative,
+            values,
+            left=values[0],
+            right=values[-1],
+        )
+    )
+
+
+def _bin_mask(
+    values: np.ndarray,
+    edges: np.ndarray,
+    index: int,
+) -> np.ndarray:
+    if index == edges.size - 2:
+        return (values >= edges[index]) & (values <= edges[index + 1])
+    return (values >= edges[index]) & (values < edges[index + 1])
+
+
+def _normalized_histogram(
+    values: np.ndarray,
+    edges: np.ndarray,
+    *,
+    weights: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    values = np.asarray(values, dtype=np.float64)
+    finite = np.isfinite(values)
+    if weights is not None:
+        weights = np.asarray(weights, dtype=np.float64)
+        finite &= np.isfinite(weights) & (weights > 0)
+        weights = weights[finite]
+    values = values[finite]
+    if values.size:
+        # The robust display range is finite.  Accumulate more extreme values
+        # in the edge bins so each conditional histogram still integrates to 1.
+        values = np.clip(
+            values,
+            edges[0],
+            np.nextafter(edges[-1], edges[0]),
+        )
+    count, _ = np.histogram(values, bins=edges, weights=weights)
+    total = float(np.sum(count))
+    probability = (
+        count.astype(np.float64) / total
+        if total > 0
+        else np.full(edges.size - 1, np.nan, dtype=np.float64)
+    )
+    density = probability / np.diff(edges)
+    return density, probability
+
+
+def _weighted_mean_std(
+    values: np.ndarray,
+    weights: np.ndarray | None = None,
+) -> tuple[float, float]:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0:
+        return float("nan"), float("nan")
+    if weights is None:
+        return float(np.mean(values)), float(np.std(values))
+    weights = np.asarray(weights, dtype=np.float64)
+    total = float(np.sum(weights))
+    if total <= 0:
+        return float("nan"), float("nan")
+    mean = float(np.sum(values * weights) / total)
+    variance = float(np.sum(weights * (values - mean) ** 2) / total)
+    return mean, float(np.sqrt(max(variance, 0.0)))
+
+
+def conditional_velocity_diagnostics(
+    reference_eta: np.ndarray,
+    model_eta: np.ndarray,
+    *,
+    reference_weights: np.ndarray | None = None,
+    conditioning_edges: dict[str, np.ndarray],
+    n_velocity_bins: int = 64,
+    velocity_percentile_range: tuple[float, float] = (0.5, 99.5),
+) -> dict[str, Any]:
+    """Compare data/model spherical-velocity marginals in spatial bins.
+
+    For a given conditioning coordinate (r, theta, or phi), the other two
+    spatial coordinates and the other two velocity coordinates are marginalized
+    by selecting Monte Carlo samples and drawing a one-dimensional histogram.
+    """
+    reference_eta = np.asarray(reference_eta, dtype=np.float64)
+    model_eta = np.asarray(model_eta, dtype=np.float64)
+    if model_eta.ndim == 2:
+        model_eta = model_eta[None, ...]
+    if model_eta.ndim != 3 or model_eta.shape[2] != 6:
+        raise ValueError("model_eta must have shape (n_models, n_samples, 6).")
+    if n_velocity_bins < 4:
+        raise ValueError("n_velocity_bins must be at least 4.")
+    if reference_weights is None:
+        reference_weights = np.ones(reference_eta.shape[0], dtype=np.float64)
+    else:
+        reference_weights = np.asarray(reference_weights, dtype=np.float64)
+    if reference_weights.shape != (reference_eta.shape[0],):
+        raise ValueError(
+            f"Expected reference_weights shape ({reference_eta.shape[0]},)."
+        )
+    if (
+        not np.all(np.isfinite(reference_weights))
+        or np.any(reference_weights <= 0)
+    ):
+        raise ValueError("reference_weights must be finite and positive.")
+
+    requested = ("r", "theta", "phi")
+    missing = [name for name in requested if name not in conditioning_edges]
+    if missing:
+        raise ValueError(f"Missing conditioning edges for {missing}.")
+    resolved_edges = {
+        name: _validate_edges(conditioning_edges[name], name=f"{name}_edges")
+        for name in requested
+    }
+
+    reference_spherical = cartesian_to_spherical_phase_space(reference_eta)
+    model_spherical = np.stack(
+        [cartesian_to_spherical_phase_space(rows) for rows in model_eta],
+        axis=0,
+    )
+    n_models = model_spherical.shape[0]
+    lower_pct, upper_pct = velocity_percentile_range
+    if not 0 <= lower_pct < upper_pct <= 100:
+        raise ValueError("velocity_percentile_range must lie within [0, 100].")
+
+    velocity_edges = np.empty((3, int(n_velocity_bins) + 1), dtype=np.float64)
+    for velocity_index in range(3):
+        ref_values = reference_spherical[:, 3 + velocity_index]
+        ref_lower = _weighted_quantile(
+            ref_values, reference_weights, lower_pct / 100.0
+        )
+        ref_upper = _weighted_quantile(
+            ref_values, reference_weights, upper_pct / 100.0
+        )
+        model_values = model_spherical[:, :, 3 + velocity_index]
+        model_lower, model_upper = np.percentile(
+            model_values[np.isfinite(model_values)],
+            [lower_pct, upper_pct],
+        )
+        lower = float(min(ref_lower, model_lower))
+        upper = float(max(ref_upper, model_upper))
+        if not np.isfinite(lower) or not np.isfinite(upper):
+            raise ValueError("No finite spherical velocities are available.")
+        if upper <= lower:
+            padding = max(abs(lower) * 1.0e-3, 1.0)
+            lower -= padding
+            upper += padding
+        velocity_edges[velocity_index] = np.linspace(
+            lower,
+            upper,
+            int(n_velocity_bins) + 1,
+        )
+
+    result: dict[str, Any] = {"velocity_edges": velocity_edges}
+    total_reference_weight = float(np.sum(reference_weights))
+    for coordinate_index, name in enumerate(requested):
+        edges = resolved_edges[name]
+        n_condition_bins = edges.size - 1
+        reference_hist = np.full(
+            (n_condition_bins, 3, int(n_velocity_bins)),
+            np.nan,
+            dtype=np.float64,
+        )
+        model_hist = np.full(
+            (n_models, n_condition_bins, 3, int(n_velocity_bins)),
+            np.nan,
+            dtype=np.float64,
+        )
+        reference_count = np.zeros(n_condition_bins, dtype=np.int64)
+        reference_effective_count = np.zeros(
+            n_condition_bins,
+            dtype=np.float64,
+        )
+        model_count = np.zeros((n_models, n_condition_bins), dtype=np.int64)
+        reference_probability = np.zeros(n_condition_bins, dtype=np.float64)
+        model_probability = np.zeros(
+            (n_models, n_condition_bins),
+            dtype=np.float64,
+        )
+        wasserstein = np.full(
+            (n_models, n_condition_bins, 3),
+            np.nan,
+            dtype=np.float64,
+        )
+        ks_histogram = np.full_like(wasserstein, np.nan)
+        js_divergence = np.full_like(wasserstein, np.nan)
+        mean_bias = np.full_like(wasserstein, np.nan)
+        dispersion_bias = np.full_like(wasserstein, np.nan)
+
+        reference_coordinate = reference_spherical[:, coordinate_index]
+        for bin_index in range(n_condition_bins):
+            ref_mask = _bin_mask(reference_coordinate, edges, bin_index)
+            ref_weights = reference_weights[ref_mask]
+            reference_count[bin_index] = int(np.count_nonzero(ref_mask))
+            weight_sum = float(np.sum(ref_weights))
+            reference_probability[bin_index] = (
+                weight_sum / total_reference_weight
+                if total_reference_weight > 0
+                else np.nan
+            )
+            reference_effective_count[bin_index] = (
+                weight_sum**2 / float(np.sum(ref_weights**2))
+                if ref_weights.size and np.sum(ref_weights**2) > 0
+                else 0.0
+            )
+
+            for velocity_index in range(3):
+                velocity_bin_edges = velocity_edges[velocity_index]
+                ref_values = reference_spherical[
+                    ref_mask,
+                    3 + velocity_index,
+                ]
+                ref_density, ref_probability = _normalized_histogram(
+                    ref_values,
+                    velocity_bin_edges,
+                    weights=ref_weights,
+                )
+                reference_hist[bin_index, velocity_index] = ref_density
+                ref_mean, ref_std = _weighted_mean_std(
+                    ref_values,
+                    ref_weights,
+                )
+
+                for model_index in range(n_models):
+                    model_coordinate = model_spherical[
+                        model_index,
+                        :,
+                        coordinate_index,
+                    ]
+                    model_mask = _bin_mask(
+                        model_coordinate,
+                        edges,
+                        bin_index,
+                    )
+                    if velocity_index == 0:
+                        model_count[model_index, bin_index] = int(
+                            np.count_nonzero(model_mask)
+                        )
+                        model_probability[model_index, bin_index] = float(
+                            np.mean(model_mask)
+                        )
+                    model_values = model_spherical[
+                        model_index,
+                        model_mask,
+                        3 + velocity_index,
+                    ]
+                    model_density, model_probability_bins = (
+                        _normalized_histogram(
+                            model_values,
+                            velocity_bin_edges,
+                        )
+                    )
+                    model_hist[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = model_density
+                    if (
+                        ref_values.size == 0
+                        or model_values.size == 0
+                        or not np.all(np.isfinite(ref_probability))
+                        or not np.all(np.isfinite(model_probability_bins))
+                    ):
+                        continue
+
+                    from scipy.stats import wasserstein_distance
+
+                    wasserstein[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = wasserstein_distance(
+                        ref_values,
+                        model_values,
+                        u_weights=ref_weights,
+                    )
+                    ks_histogram[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = float(
+                        np.max(
+                            np.abs(
+                                np.cumsum(ref_probability)
+                                - np.cumsum(model_probability_bins)
+                            )
+                        )
+                    )
+                    midpoint = 0.5 * (
+                        ref_probability + model_probability_bins
+                    )
+                    ref_positive = ref_probability > 0
+                    model_positive = model_probability_bins > 0
+                    js_divergence[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = 0.5 * float(
+                        np.sum(
+                            ref_probability[ref_positive]
+                            * np.log(
+                                ref_probability[ref_positive]
+                                / midpoint[ref_positive]
+                            )
+                        )
+                        + np.sum(
+                            model_probability_bins[model_positive]
+                            * np.log(
+                                model_probability_bins[model_positive]
+                                / midpoint[model_positive]
+                            )
+                        )
+                    )
+                    model_mean, model_std = _weighted_mean_std(model_values)
+                    mean_bias[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = model_mean - ref_mean
+                    dispersion_bias[
+                        model_index,
+                        bin_index,
+                        velocity_index,
+                    ] = model_std - ref_std
+
+        result[name] = {
+            "edges": edges,
+            "reference_hist": reference_hist,
+            "model_hist": model_hist,
+            "reference_count": reference_count,
+            "reference_effective_count": reference_effective_count,
+            "model_count": model_count,
+            "reference_probability": reference_probability,
+            "model_probability": model_probability,
+            "wasserstein": wasserstein,
+            "ks_histogram": ks_histogram,
+            "js_divergence": js_divergence,
+            "mean_bias": mean_bias,
+            "dispersion_bias": dispersion_bias,
+        }
+    return result
+
+
+def cylindrical_rz_density_by_phi(
+    reference_positions: np.ndarray,
+    model_positions: np.ndarray,
+    *,
+    reference_weights: np.ndarray | None,
+    phi_edges: np.ndarray,
+    cylindrical_radius_edges: np.ndarray,
+    z_edges: np.ndarray,
+    min_cell_count: int = 5,
+) -> dict[str, np.ndarray]:
+    """Estimate normalized 3D density in cylindrical ``(phi, R, z)`` cells."""
+    reference_positions = np.asarray(reference_positions, dtype=np.float64)
+    model_positions = np.asarray(model_positions, dtype=np.float64)
+    if reference_positions.ndim != 2 or reference_positions.shape[1] != 3:
+        raise ValueError("reference_positions must have shape (N, 3).")
+    if model_positions.ndim == 2:
+        model_positions = model_positions[None, ...]
+    if model_positions.ndim != 3 or model_positions.shape[2] != 3:
+        raise ValueError(
+            "model_positions must have shape (n_models, n_samples, 3)."
+        )
+    phi_edges = _validate_edges(phi_edges, name="phi_edges")
+    cylindrical_radius_edges = _validate_edges(
+        cylindrical_radius_edges,
+        name="cylindrical_radius_edges",
+    )
+    z_edges = _validate_edges(z_edges, name="z_edges")
+    if cylindrical_radius_edges[0] < 0:
+        raise ValueError("cylindrical_radius_edges must be non-negative.")
+    if min_cell_count < 1:
+        raise ValueError("min_cell_count must be positive.")
+    if reference_weights is None:
+        reference_weights = np.ones(
+            reference_positions.shape[0],
+            dtype=np.float64,
+        )
+    else:
+        reference_weights = np.asarray(reference_weights, dtype=np.float64)
+    if reference_weights.shape != (reference_positions.shape[0],):
+        raise ValueError(
+            f"Expected reference_weights shape ({reference_positions.shape[0]},)."
+        )
+    if (
+        not np.all(np.isfinite(reference_weights))
+        or np.any(reference_weights <= 0)
+    ):
+        raise ValueError("reference_weights must be finite and positive.")
+
+    def coordinates(positions: np.ndarray) -> np.ndarray:
+        return np.column_stack(
+            [
+                np.arctan2(positions[:, 1], positions[:, 0]),
+                np.hypot(positions[:, 0], positions[:, 1]),
+                positions[:, 2],
+            ]
+        )
+
+    bins = [phi_edges, cylindrical_radius_edges, z_edges]
+    reference_coordinates = coordinates(reference_positions)
+    reference_weight_grid, _ = np.histogramdd(
+        reference_coordinates,
+        bins=bins,
+        weights=reference_weights,
+    )
+    reference_count, _ = np.histogramdd(reference_coordinates, bins=bins)
+
+    delta_phi = np.diff(phi_edges)[:, None, None]
+    annular_area = (
+        0.5
+        * (
+            cylindrical_radius_edges[1:] ** 2
+            - cylindrical_radius_edges[:-1] ** 2
+        )[None, :, None]
+    )
+    delta_z = np.diff(z_edges)[None, None, :]
+    cell_volume = delta_phi * annular_area * delta_z
+    total_reference_weight = float(np.sum(reference_weights))
+    reference_density = (
+        reference_weight_grid / total_reference_weight / cell_volume
+    )
+
+    model_count = np.empty(
+        (model_positions.shape[0],) + reference_count.shape,
+        dtype=np.float64,
+    )
+    model_density = np.empty_like(model_count)
+    for model_index, positions in enumerate(model_positions):
+        counts, _ = np.histogramdd(coordinates(positions), bins=bins)
+        model_count[model_index] = counts
+        model_density[model_index] = counts / positions.shape[0] / cell_volume
+
+    model_median_density = np.median(model_density, axis=0)
+    log10_rmse_by_model_phi = np.full(
+        (model_positions.shape[0], phi_edges.size - 1),
+        np.nan,
+        dtype=np.float64,
+    )
+    for model_index in range(model_positions.shape[0]):
+        for phi_index in range(phi_edges.size - 1):
+            valid = (
+                (reference_count[phi_index] >= int(min_cell_count))
+                & (model_count[model_index, phi_index] >= int(min_cell_count))
+                & (reference_density[phi_index] > 0)
+                & (model_density[model_index, phi_index] > 0)
+            )
+            if np.any(valid):
+                log_ratio = np.log10(
+                    model_density[model_index, phi_index][valid]
+                    / reference_density[phi_index][valid]
+                )
+                log10_rmse_by_model_phi[model_index, phi_index] = float(
+                    np.sqrt(np.mean(log_ratio**2))
+                )
+
+    return {
+        "phi_edges": phi_edges,
+        "cylindrical_radius_edges": cylindrical_radius_edges,
+        "z_edges": z_edges,
+        "cell_volume": cell_volume,
+        "reference_density": reference_density,
+        "model_density": model_density,
+        "model_median_density": model_median_density,
+        "reference_count": reference_count.astype(np.int64),
+        "model_count": model_count.astype(np.int64),
+        "log10_rmse_by_model_phi": log10_rmse_by_model_phi,
+        "min_cell_count": np.asarray(min_cell_count, dtype=np.int64),
+    }
+
+
 def _finite_pair(
     predicted: np.ndarray,
     truth: np.ndarray,

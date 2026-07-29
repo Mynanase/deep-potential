@@ -17,6 +17,10 @@ from dpjax.data import (
 )
 from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi, phi_apply
 from dpjax.physics.analytic import plummer_ar, plummer_phi
+from dpjax.physics.units import (
+    density_from_laplacian,
+    gravitational_constant_for_system,
+)
 from dpjax.plotting.diagnostics import plot_potential_density_overview
 
 
@@ -48,10 +52,28 @@ def _ensure_slice(
     grid: int,
     batch: int,
     recompute: bool,
+    system: str,
+    gravitational_constant: float,
 ) -> Path:
     slice_path = out_dir / "phi_slice_xy.npz"
     if slice_path.exists() and not recompute:
-        return slice_path
+        with np.load(slice_path) as cached:
+            cached_g = (
+                float(cached["density_gravitational_constant"])
+                if "density_gravitational_constant" in cached.files
+                else None
+            )
+        if cached_g is not None and np.isclose(
+            cached_g,
+            gravitational_constant,
+            rtol=1.0e-12,
+            atol=0.0,
+        ):
+            return slice_path
+        print(
+            "[plot_potential_overview] Recomputing stale density slice: "
+            f"cached G={cached_g}, requested G={gravitational_constant}."
+        )
 
     cmd = [
         sys.executable,
@@ -70,6 +92,10 @@ def _ensure_slice(
         str(int(grid)),
         "--batch",
         str(int(batch)),
+        "--system",
+        str(system),
+        "--gravitational-constant",
+        str(float(gravitational_constant)),
     ]
     subprocess.run(cmd, check=True)
     if not slice_path.exists():
@@ -103,6 +129,7 @@ def _compute_radial(
     r_max: float,
     n_r: int,
     r_ref: float,
+    gravitational_constant: float,
 ) -> dict[str, np.ndarray]:
     normalizer = _load_physics_normalizer(df_run_dir)
     phi_model, phi_params, _ = load_phi(phi_run_dir)
@@ -119,7 +146,10 @@ def _compute_radial(
     grad_phi_phys = grad_phi_std / std_x[None, :]
     ar_learned = -grad_phi_phys[:, 0]
     lap_phys = np.asarray(laplacian_phi_apply(phi_model, phi_params, x_std_j, std_x=jnp.asarray(std_x)), dtype=np.float32)
-    rho_learned = lap_phys / (4.0 * np.pi)
+    rho_learned = density_from_laplacian(
+        lap_phys,
+        gravitational_constant=gravitational_constant,
+    )
 
     i_ref = int(np.argmin(np.abs(r - float(r_ref))))
     phi_learned_shift = phi_learned - phi_learned[i_ref]
@@ -165,6 +195,7 @@ def main() -> int:
     parser.add_argument("--n-contour-points", type=int, default=200000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--recompute-slice", action="store_true")
+    parser.add_argument("--gravitational-constant", type=float, default=None)
     args = parser.parse_args()
 
     df_run_dir = _resolve_path(args.df_run_dir)
@@ -175,6 +206,10 @@ def main() -> int:
     data_xy = _load_data_xy(args.data, args.dataset, int(args.n_contour_points), int(args.seed))
     rmax_slice = float(args.rmax_slice) if args.rmax_slice is not None else _auto_rmax(data_xy, 5.0)
     r_max = float(args.r_max) if args.r_max is not None else rmax_slice
+    density_g = gravitational_constant_for_system(
+        args.system,
+        args.gravitational_constant,
+    )
 
     radial = _compute_radial(
         df_run_dir,
@@ -183,6 +218,7 @@ def main() -> int:
         r_max=r_max,
         n_r=int(args.n_r),
         r_ref=float(args.r_ref),
+        gravitational_constant=density_g,
     )
     truth = _plummer_truth(radial, float(args.r_ref)) if args.system == "plummer" else {}
     slice_path = _ensure_slice(
@@ -193,6 +229,8 @@ def main() -> int:
         grid=int(args.grid),
         batch=int(args.batch),
         recompute=bool(args.recompute_slice),
+        system=args.system,
+        gravitational_constant=density_g,
     )
     slice_data = np.load(slice_path)
 
@@ -209,6 +247,11 @@ def main() -> int:
         ar_learned=radial["ar_learned"],
         data_xy=data_xy,
         title=title,
+        density_label=(
+            r"$\rho_{\rm total}=\nabla^2\Phi/(4\pi G)$"
+            if args.system == "halo"
+            else r"$\rho=\nabla^2\Phi/(4\pi G)$"
+        ),
         fig_dir=out_dir,
         fig_fmt=tuple(args.formats),
         dpi=int(args.dpi),

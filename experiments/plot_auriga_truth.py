@@ -193,7 +193,7 @@ def main() -> int:
             ax.set_ylabel(r"$|a_{model}|$")
             ax.set_title(
                 f"Accel magnitude scatter (median rel err="
-                f"{am.get('median_relative_l2', float('nan')):.3f})"
+                f"{am.get('median_relative_error', float('nan')):.3f})"
             )
             ax.legend(loc="upper left")
             ax.grid(True, alpha=0.3)
@@ -205,16 +205,39 @@ def main() -> int:
             # radial profile
             if "radial_acceleration" in metrics:
                 ra = metrics["radial_acceleration"]
-                r_edges = np.asarray(ra["radial_edges"])
-                r_centers = np.sqrt(r_edges[:-1] * r_edges[1:])
-                truth_prof = np.asarray(ra["truth_median"])
-                pred_prof = np.asarray(ra["model_median"])
+                rows = ra["bins"]
+                r_centers = np.sqrt(
+                    np.asarray([row["r_left"] for row in rows])
+                    * np.asarray([row["r_right"] for row in rows])
+                )
+                median_relative = np.asarray(
+                    [row["median_relative_error"] for row in rows]
+                )
+                p90_relative = np.asarray(
+                    [row["p90_relative_error"] for row in rows]
+                )
                 fig, ax = plt.subplots(1, 1, figsize=(7, 4.5), dpi=args.dpi)
-                ax.plot(r_centers, truth_prof, "k-o", lw=2, ms=4, label="truth")
-                ax.plot(r_centers, pred_prof, "--", color="tab:green", lw=1.8, ms=4, label="model")
+                ax.plot(
+                    r_centers,
+                    median_relative,
+                    "o-",
+                    color="tab:green",
+                    lw=1.8,
+                    ms=4,
+                    label="median",
+                )
+                ax.plot(
+                    r_centers,
+                    p90_relative,
+                    "s--",
+                    color="tab:orange",
+                    lw=1.5,
+                    ms=4,
+                    label="p90",
+                )
                 ax.set_xlabel("r [kpc]")
-                ax.set_ylabel(r"median $|a|$")
-                ax.set_title("Radial acceleration profile")
+                ax.set_ylabel(r"$|a_{\rm model}-a_{\rm truth}|/|a_{\rm truth}|$")
+                ax.set_title("Radial acceleration relative error")
                 ax.legend()
                 ax.grid(True, alpha=0.3)
                 fig.tight_layout()

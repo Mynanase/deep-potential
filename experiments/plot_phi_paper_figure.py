@@ -1,18 +1,12 @@
-"""Paper-style figure: potential & density comparison (Halo12).
+"""Paper-style Halo12 potential and density-context figure.
 
-Recreates the figure described in the Deep Potential paper:
-  Left panels (3 stacked):
-    - Phi_model vs Phi_truth scatter at random positions
-    - rho_model vs rho_truth scatter at random positions
-    - rho residuals (model - truth) vs truth
-  Right panels (2):
-    - 2D Phi_model slice at z=0
-    - 2D rho_model slice at z=0 with truth density contours
+The stellar-particle histogram is explicitly kept separate from the total
+gravitating density inferred through the Poisson equation.  They are useful
+together as morphological context, but are not a model/truth density pair.
 """
 from __future__ import annotations
 
 import h5py
-import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib
@@ -21,16 +15,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from dpjax.data import load_run_preprocessing
+from dpjax.data import (
+    load_run_preprocessing,
+    require_physics_compatible_transform,
+)
 from dpjax.models.potential import (
     phi_apply,
     laplacian_phi_apply,
     load_phi,
 )
-
-# Physical constant: G in (km/s)^2 kpc / Msun
-G = 4.302e-6
-FOUR_PI_G = 4.0 * np.pi * G
+from dpjax.physics.units import (
+    G_KPC_KMS2_PER_MSUN,
+    density_from_laplacian,
+)
 
 
 def main():
@@ -41,7 +38,11 @@ def main():
     out_dir.mkdir(exist_ok=True)
 
     # Load normalizer from DF run
-    normalizer, _ = load_run_preprocessing(df_run_dir)
+    normalizer, coordinate_transform = load_run_preprocessing(df_run_dir)
+    require_physics_compatible_transform(
+        coordinate_transform,
+        operation="Halo12 paper-figure rendering",
+    )
     mean = np.asarray(normalizer.mean)
     std = np.asarray(normalizer.std)
     std_x = std[:3]
@@ -63,8 +64,6 @@ def main():
     idx = rng.choice(N, size=5000, replace=False)
     pos_sample = pos[idx]
     pot_truth_sample = pot_truth[idx]
-    mass_sample = mass[idx]
-
     # Standardize positions for model input
     pos_std = (pos_sample - mean[:3]) / std_x
 
@@ -80,34 +79,40 @@ def main():
             phi_model, phi_params, jnp.asarray(pos_std), std_x=jnp.asarray(std_x)
         )
     )
-    rho_model = lap_model / FOUR_PI_G  # Msun/kpc^3
+    rho_total_model = density_from_laplacian(
+        lap_model,
+        gravitational_constant=G_KPC_KMS2_PER_MSUN,
+    )
 
-    # Truth density: 3D histogram of all particles weighted by mass
-    print("Computing 3D density histogram...")
+    # Stellar-tracer density is not the total-density truth.
+    print("Computing stellar-tracer 3D density histogram...")
     bins = np.arange(-77.5, 78.5, 2.0)  # 2 kpc bins
     hist, edges = np.histogramdd(pos, bins=[bins, bins, bins], weights=mass)
     bin_vol = 2.0 ** 3  # kpc^3
-    rho_truth_3d = hist / bin_vol  # Msun/kpc^3
+    rho_star_3d = hist / bin_vol  # Msun/kpc^3
 
     # Interpolate truth density at sample points
     # Find bin indices for each sample point
     ix = np.clip(np.digitize(pos_sample[:, 0], edges[0]) - 1, 0, hist.shape[0] - 1)
     iy = np.clip(np.digitize(pos_sample[:, 1], edges[1]) - 1, 0, hist.shape[1] - 1)
     iz = np.clip(np.digitize(pos_sample[:, 2], edges[2]) - 1, 0, hist.shape[2] - 1)
-    rho_truth_sample = rho_truth_3d[ix, iy, iz]
+    rho_star_sample = rho_star_3d[ix, iy, iz]
 
     print(
-        f"rho_model:  min={rho_model.min():.2f} max={rho_model.max():.2f} "
-        f"median={np.median(rho_model):.2f}"
+        f"rho_total_model: min={rho_total_model.min():.2f} "
+        f"max={rho_total_model.max():.2f} "
+        f"median={np.median(rho_total_model):.2f}"
     )
     print(
-        f"rho_truth:  min={rho_truth_sample.min():.2f} max={rho_truth_sample.max():.2f} "
-        f"median={np.median(rho_truth_sample):.2f}"
+        f"rho_star: min={rho_star_sample.min():.2f} "
+        f"max={rho_star_sample.max():.2f} "
+        f"median={np.median(rho_star_sample):.2f}"
     )
 
     # ---- 2D slice at z=0 ----
     print("Computing 2D slices...")
-    grid_1d = np.linspace(-75, 75, 200)
+    grid_edges = np.linspace(-75.0, 75.0, 201)
+    grid_1d = 0.5 * (grid_edges[:-1] + grid_edges[1:])
     gx, gy = np.meshgrid(grid_1d, grid_1d, indexing="ij")
     gz = np.zeros_like(gx)
     grid_pos = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=-1)
@@ -130,16 +135,27 @@ def main():
                 std_x=jnp.asarray(std_x),
             )
         )
-    rho_grid = (lap_grid / FOUR_PI_G).reshape(200, 200)
+    rho_total_grid = density_from_laplacian(
+        lap_grid,
+        gravitational_constant=G_KPC_KMS2_PER_MSUN,
+    ).reshape(200, 200)
 
-    # Truth 2D density: histogram of particles near z=0
-    z_mask = np.abs(pos[:, 2]) < 1.0  # ±1 kpc slab
+    # Stellar-tracer density in a finite z slab.  The exact cell volume uses
+    # the histogram edges rather than a hard-coded pixel size.
+    z_half_width = 1.0
+    z_mask = np.abs(pos[:, 2]) < z_half_width
     pos_slab = pos[z_mask]
     mass_slab = mass[z_mask]
     truth_2d, _, _ = np.histogram2d(
-        pos_slab[:, 0], pos_slab[:, 1], bins=[grid_1d, grid_1d], weights=mass_slab
+        pos_slab[:, 0],
+        pos_slab[:, 1],
+        bins=[grid_edges, grid_edges],
+        weights=mass_slab,
     )
-    truth_2d = truth_2d / (4.0 * 4.0)  # bin area * z-slab width = 2*2*2 kpc^3
+    dx = np.diff(grid_edges)[:, None]
+    dy = np.diff(grid_edges)[None, :]
+    stellar_cell_volume = dx * dy * (2.0 * z_half_width)
+    rho_star_2d = truth_2d / stellar_cell_volume
 
     # ---- Plotting ----
     print("Plotting...")
@@ -175,32 +191,58 @@ def main():
     ax1.legend(fontsize=8, markerscale=4)
     ax1.grid(True, alpha=0.3)
 
-    # --- Left middle: rho vs r ---
-    pos_mask = rho_truth_sample > 0
-    ax2.scatter(r_sample[pos_mask], rho_truth_sample[pos_mask], s=2, alpha=0.25, color="k", label="truth")
-    ax2.scatter(r_sample[pos_mask], np.clip(rho_model[pos_mask], 1e-1, None), s=2, alpha=0.25, color="tab:cyan", label="model")
-    # Median profiles (only positive model values)
-    m_rho = np.array([np.median(np.clip(rho_model[(r_idx == i) & pos_mask], 1e-1, None)) if ((r_idx == i) & pos_mask).sum() > 10 else np.nan for i in range(1, len(r_bins))])
-    t_rho = np.array([np.median(rho_truth_sample[(r_idx == i) & pos_mask]) if ((r_idx == i) & pos_mask).sum() > 10 else np.nan for i in range(1, len(r_bins))])
-    ax2.plot(r_bc, t_rho, "k-", lw=2)
-    ax2.plot(r_bc, m_rho, "--", color="tab:cyan", lw=2)
+    # --- Left middle: total gravitating density inferred from Phi ---
+    total_positive = rho_total_model > 0
+    ax2.scatter(
+        r_sample[total_positive],
+        rho_total_model[total_positive],
+        s=2,
+        alpha=0.25,
+        color="tab:cyan",
+        label=r"$\nabla^2\Phi_{\rm model}/(4\pi G)$",
+    )
+    total_median = np.array(
+        [
+            np.median(
+                rho_total_model[(r_idx == i) & total_positive]
+            )
+            if np.count_nonzero((r_idx == i) & total_positive) > 10
+            else np.nan
+            for i in range(1, len(r_bins))
+        ]
+    )
+    ax2.plot(r_bc, total_median, color="tab:cyan", lw=2)
     ax2.set_yscale("log")
     ax2.set_xlabel("r [kpc]")
-    ax2.set_ylabel(r"$\rho$ ($M_\odot$/kpc$^3$)")
-    ax2.set_title("Density vs radius")
+    ax2.set_ylabel(r"$\rho_{\rm total,model}$ ($M_\odot$/kpc$^3$)")
+    ax2.set_title("Total gravitating density inferred from model")
     ax2.legend(fontsize=8, markerscale=4)
     ax2.grid(True, alpha=0.3)
 
-    # --- Left bottom: rho residual vs r ---
-    resid = rho_model[pos_mask] - rho_truth_sample[pos_mask]
-    ax3.scatter(r_sample[pos_mask], resid, s=2, alpha=0.25, color="tab:red")
-    ax3.axhline(0, color="k", ls="--", lw=1)
-    # Median residual profile
-    med_resid = np.array([np.median(resid[(r_idx == i)[pos_mask]]) if ((r_idx == i) & pos_mask).sum() > 10 else np.nan for i in range(1, len(r_bins))])
-    ax3.plot(r_bc, med_resid, "-", color="darkred", lw=2)
+    # --- Left bottom: stellar tracer density (context, not total truth) ---
+    stellar_positive = rho_star_sample > 0
+    ax3.scatter(
+        r_sample[stellar_positive],
+        rho_star_sample[stellar_positive],
+        s=2,
+        alpha=0.25,
+        color="tab:purple",
+        label="stellar particles",
+    )
+    stellar_median = np.array(
+        [
+            np.median(rho_star_sample[(r_idx == i) & stellar_positive])
+            if np.count_nonzero((r_idx == i) & stellar_positive) > 10
+            else np.nan
+            for i in range(1, len(r_bins))
+        ]
+    )
+    ax3.plot(r_bc, stellar_median, color="tab:purple", lw=2)
+    ax3.set_yscale("log")
     ax3.set_xlabel("r [kpc]")
-    ax3.set_ylabel(r"$\rho_{\rm model} - \rho_{\rm truth}$")
-    ax3.set_title("Density residuals vs radius")
+    ax3.set_ylabel(r"$\rho_\star$ ($M_\odot$/kpc$^3$)")
+    ax3.set_title("Stellar-tracer density (not total-density truth)")
+    ax3.legend(fontsize=8, markerscale=4)
     ax3.grid(True, alpha=0.3)
 
     # --- Right middle: 2D Phi slice ---
@@ -218,7 +260,7 @@ def main():
 
     # --- Right right: 2D rho slice with truth contours ---
     # Clip rho for display (can have negative values from Laplacian noise)
-    rho_disp = np.clip(rho_grid, 1e-2, None)
+    rho_disp = np.clip(rho_total_grid, 1e-2, None)
     im5 = ax5.imshow(
         rho_disp.T,
         origin="lower",
@@ -227,9 +269,9 @@ def main():
         aspect="equal",
         norm=plt.matplotlib.colors.LogNorm(vmin=1e-1, vmax=rho_disp.max()),
     )
-    # Truth density contours
-    truth_disp = truth_2d.T
-    truth_disp = np.clip(truth_disp, 1e-10, None)
+    # Stellar density contours provide morphology only; they are not truth
+    # contours for the total gravitating density.
+    truth_disp = np.clip(rho_star_2d.T, 1e-10, None)
     contour_levels = np.logspace(
         np.log10(truth_disp[truth_disp > 0].max() * 1e-3),
         np.log10(truth_disp[truth_disp > 0].max()),
@@ -245,11 +287,15 @@ def main():
     )
     ax5.set_xlabel("x [kpc]")
     ax5.set_ylabel("y [kpc]")
-    ax5.set_title(r"$\rho_{\rm model}(x, y, z{=}0)$ + truth contours")
+    ax5.set_title(
+        r"$\rho_{\rm total,model}(x,y,z{=}0)$"
+        "\ncyan: stellar-tracer density"
+    )
     plt.colorbar(im5, cax=cax5, orientation="horizontal")
 
     plt.suptitle(
-        "Halo12: Potential & Density Recovery (Phi MSE-v3, frozen DF seed_43)",
+        "Halo12: Potential Recovery and Density Context "
+        "(total model density is not compared to stellar density as truth)",
         fontsize=14,
         y=0.98,
     )
