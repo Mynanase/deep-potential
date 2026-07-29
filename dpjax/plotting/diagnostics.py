@@ -1195,6 +1195,8 @@ def plot_auriga_df_ensemble(
     # ── score consistency ───────────────────────────────────────────
     scores = d["scores"]  # (n_models, N, 6)
     n_models, n_pts, dim = scores.shape
+    if len(model_labels) < n_models:
+        model_labels = [f"model_{i}" for i in range(n_models)]
     labels = ["x", "y", "z", "vx", "vy", "vz"]
     se = m.get("score_ensemble")
 

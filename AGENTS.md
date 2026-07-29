@@ -6,6 +6,13 @@
 conda activate dp-jax
 ```
 
+## GPU 环境
+
+- 8x NVIDIA A100-PCIE-40GB (GPU 0-7)
+- 驱动 570.158.01 / CUDA 12.8
+- JAX 0.9.0 可正常使用 GPU（`jax.default_backend()` 返回 `gpu`）
+- 注意：Trae 沙盒环境无法访问 GPU，GPU 相关任务需在用户终端运行
+
 ## Changelog 提醒规则
 
 仅在以下情况下，在回复末尾加一句提醒：
