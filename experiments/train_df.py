@@ -17,10 +17,13 @@ import yaml
 
 from dpjax.data import (
     CoordinateTransform,
+    DFDataSelection,
     fit_normalizer,
     iter_batches,
     load_eta_h5,
     load_h5_vector,
+    phase_space_sha256,
+    sigma_clip_mask,
 )
 from dpjax.flows.api import build_flow, init_flow, log_prob_apply, log_prob_reg_apply, score_apply
 from dpjax.paths import ensure_dir, resolve_path
@@ -130,12 +133,13 @@ def run_df_training(
     run_dir = ensure_dir(run_dir)
     (run_dir / "ckpt").mkdir(parents=True, exist_ok=True)
 
-    # Save config snapshot
-    (run_dir / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
-
     data_cfg = config.get("data", {})
 
-    eta = load_eta_h5(data_path, dataset=data_cfg.get("dataset", "eta"))
+    dataset = str(data_cfg.get("dataset", "eta"))
+    eta = load_eta_h5(data_path, dataset=dataset)
+    source_size = int(eta.shape[0])
+    source_sha256 = phase_space_sha256(eta)
+    support_indices = np.arange(source_size, dtype=np.int64)
     weight_dataset = data_cfg.get("weight_dataset")
     weights = None
     if weight_dataset:
@@ -170,12 +174,9 @@ def run_df_training(
     # the normalizer's mean/std reflect the clipped distribution.
     clip_sigma = float(data_cfg.get("clip_sigma", 0.0))
     if clip_sigma > 0.0:
-        clip_normalizer = fit_normalizer(eta, weights=weights)
-        clip_mean = clip_normalizer.mean
-        clip_std = clip_normalizer.std
-        clip_std = np.maximum(clip_std, 1e-6)
-        mask = np.all(np.abs(eta - clip_mean) < clip_sigma * clip_std, axis=1)
+        mask = sigma_clip_mask(eta, clip_sigma, weights=weights)
         n_before = eta.shape[0]
+        support_indices = support_indices[mask]
         eta = eta[mask]
         if weights is not None:
             weights = weights[mask]
@@ -204,6 +205,47 @@ def run_df_training(
     split_order = np.random.default_rng(split_seed).permutation(n_total)
     val_indices = split_order[:n_val]
     train_indices = split_order[n_val:]
+    selection = DFDataSelection(
+        source_size=source_size,
+        dataset=dataset,
+        source_sha256=source_sha256,
+        clip_sigma=clip_sigma,
+        split_seed=split_seed,
+        support_indices=support_indices,
+        train_indices=support_indices[train_indices],
+        val_indices=support_indices[val_indices],
+    )
+    selection_path = run_dir / "data_selection.npz"
+    if resume and selection_path.exists():
+        existing_selection = DFDataSelection.load_npz(selection_path)
+        scalar_fields_match = (
+            existing_selection.source_size == selection.source_size
+            and existing_selection.dataset == selection.dataset
+            and existing_selection.source_sha256 == selection.source_sha256
+            and existing_selection.clip_sigma == selection.clip_sigma
+            and existing_selection.split_seed == selection.split_seed
+        )
+        index_fields_match = all(
+            np.array_equal(
+                getattr(existing_selection, name),
+                getattr(selection, name),
+            )
+            for name in ("support_indices", "train_indices", "val_indices")
+        )
+        if not scalar_fields_match or not index_fields_match:
+            raise ValueError(
+                "Current data preprocessing/split does not match the persisted "
+                f"DF selection in {selection_path}; refusing an unsafe resume."
+            )
+    else:
+        selection.save_npz(selection_path)
+
+    # Persist the config only after an existing run has passed the
+    # data-selection compatibility check.  A rejected resume must not
+    # overwrite the provenance of the checkpoint it refused to load.
+    (run_dir / "config.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False)
+    )
 
     if n_val > 0:
         eta_train = eta_std[train_indices]

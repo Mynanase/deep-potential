@@ -20,15 +20,24 @@ import yaml
 from tqdm.auto import tqdm
 
 from dpjax.data import (
+    DFDataSelection,
     iter_batches,
     load_eta_h5,
+    load_h5_vector,
+    phase_space_sha256,
     require_physics_compatible_transform,
+    resolve_run_support_indices,
 )
 from dpjax.config import load_config
 from dpjax.flows.api import load_df, log_prob_apply, score_apply
 from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi
 from dpjax.paths import ensure_dir, resolve_path
-from dpjax.physics.cbe import loss_cbe_robust, residual_A
+from dpjax.physics.cbe import (
+    loss_cbe_mse,
+    loss_cbe_robust,
+    loss_negative_density,
+    residual_A,
+)
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
 from dpjax.utils.tree import mean_square
 
@@ -106,7 +115,66 @@ def run_joint_finetuning(
     joint_cfg.setdefault("data", cfg_in.get("data", df_cfg.get("data", {"dataset": "eta"})))
     (run_dir / "config.yaml").write_text(yaml.safe_dump(joint_cfg, sort_keys=False))
 
-    eta = load_eta_h5(data_path, dataset=joint_cfg.get("data", {}).get("dataset", "eta"))
+    df_data_cfg = df_cfg.get("data", {})
+    df_dataset = str(df_data_cfg.get("dataset", "eta"))
+    requested_dataset = str(
+        joint_cfg.get("data", {}).get("dataset", df_dataset)
+    )
+    if requested_dataset != df_dataset:
+        raise ValueError(
+            "Joint fine-tuning must use the same row-aligned dataset as the DF "
+            f"({df_dataset!r}); got {requested_dataset!r}."
+        )
+    eta = load_eta_h5(data_path, dataset=df_dataset)
+    support_weights = None
+    input_selection_path = Path(df_run_dir) / "data_selection.npz"
+    if (
+        not input_selection_path.exists()
+        and float(df_data_cfg.get("clip_sigma", 0.0)) > 0.0
+        and df_data_cfg.get("weight_dataset")
+    ):
+        support_weights = load_h5_vector(
+            data_path,
+            dataset=str(df_data_cfg["weight_dataset"]),
+        )
+    source_size = int(eta.shape[0])
+    source_sha256 = phase_space_sha256(eta)
+    support_indices, support_source = resolve_run_support_indices(
+        df_run_dir,
+        eta,
+        data_config=df_data_cfg,
+        coordinate_transform=coord_transform,
+        weights=support_weights,
+    )
+    if input_selection_path.exists():
+        shutil.copy2(input_selection_path, df_out / "data_selection.npz")
+    else:
+        val_frac = float(np.clip(df_data_cfg.get("val_frac", 0.1), 0.0, 0.5))
+        n_val = min(
+            max(int(round(support_indices.size * val_frac)), 0),
+            max(support_indices.size - 1, 0),
+        )
+        split_seed = int(df_data_cfg.get("split_seed", df_cfg.get("seed", 0)))
+        split_order = np.random.default_rng(split_seed).permutation(
+            support_indices.size
+        )
+        val_local = split_order[:n_val]
+        train_local = split_order[n_val:]
+        DFDataSelection(
+            source_size=source_size,
+            dataset=df_dataset,
+            source_sha256=source_sha256,
+            clip_sigma=float(df_data_cfg.get("clip_sigma", 0.0)),
+            split_seed=split_seed,
+            support_indices=support_indices,
+            train_indices=support_indices[train_local],
+            val_indices=support_indices[val_local],
+        ).save_npz(df_out / "data_selection.npz")
+    eta = eta[support_indices]
+    print(
+        "[finetune_joint] DF support: "
+        f"source={support_source}, kept={eta.shape[0]}/{source_size}"
+    )
     eta_std = normalizer.transform(eta)
 
     train_cfg = joint_cfg.get("train", {})
@@ -136,6 +204,19 @@ def run_joint_finetuning(
         raise ValueError(f"Unknown train.mode={mode!r}; expected 'both' or 'alt'.")
     if loss_type not in {"robust", "mse"}:
         raise ValueError(f"Unknown train.loss_type={loss_type!r}; expected 'robust' or 'mse'.")
+    if not np.isfinite(beta) or beta <= 0.0:
+        raise ValueError(f"train.beta must be finite and > 0, got {beta}.")
+    if not np.isfinite(lambda_mass) or lambda_mass < 0.0:
+        raise ValueError(
+            "train.lambda_mass must be finite and >= 0, "
+            f"got {lambda_mass}."
+        )
+    mass_batch_size = int(train_cfg.get("mass_batch_size", batch_size))
+    if mass_batch_size <= 0:
+        raise ValueError(
+            "train.mass_batch_size must be positive, "
+            f"got {mass_batch_size}."
+        )
 
     seed = int(joint_cfg.get("seed", 2))
     np_rng = np.random.default_rng(seed=seed)
@@ -171,17 +252,34 @@ def run_joint_finetuning(
         residual = residual_A(eta_std_b, score_std, grad_phi_std, normalizer)
 
         if loss_type == "mse":
-            cbe = jnp.mean(residual**2)
+            residual_loss = loss_cbe_mse(residual)
         else:
-            std_x = jnp.asarray(normalizer.std[:3], dtype=eta_std_b.dtype)
-            laplacian_phi_phys = laplacian_phi_apply(phi_model, phi_p, eta_std_b[:, :3], std_x=std_x)
-            cbe = loss_cbe_robust(
+            residual_loss = loss_cbe_robust(
                 residual,
-                laplacian_phi_phys,
+                jnp.zeros_like(residual),
                 alpha=alpha,
                 beta=beta,
-                lambda_mass=lambda_mass,
+                lambda_mass=0.0,
             )
+
+        mass_loss = jnp.zeros((), dtype=residual.dtype)
+        if lambda_mass > 0.0:
+            n_mass = min(mass_batch_size, eta_std_b.shape[0])
+            std_x = jnp.asarray(
+                normalizer.std[:3],
+                dtype=eta_std_b.dtype,
+            )
+            laplacian_phi_phys = laplacian_phi_apply(
+                phi_model,
+                phi_p,
+                eta_std_b[:n_mass, :3],
+                std_x=std_x,
+            )
+            mass_loss = loss_negative_density(
+                laplacian_phi_phys,
+                beta=beta,
+            )
+        cbe = residual_loss + lambda_mass * mass_loss
 
         l2 = l2_reg * mean_square(phi_p)
 

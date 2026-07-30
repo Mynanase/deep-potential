@@ -33,8 +33,13 @@ train:
   # Switch to robust only for fine-tuning from a converged MSE checkpoint.
   loss_type: mse
   alpha: 1.0
+  # The negative-density penalty is independent of loss_type: MSE remains the
+  # CBE residual objective while lambda_mass constrains nabla^2 Phi >= 0.
   beta: 1.0
   lambda_mass: 1.0
+  # Hessian backpropagation is substantially more expensive than the CBE
+  # gradient. Each shuffled batch uses this many rows for the mass constraint.
+  mass_batch_size: 4096
   # Plummer-proven value. Works with output_scale since network weights stay
   # O(1) and l2 penalises normalised weights, not physical-scale outputs.
   l2_reg: 0.001

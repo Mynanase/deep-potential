@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -236,6 +237,201 @@ class Normalizer:
         if mean.shape != (6,) or std.shape != (6,):
             raise ValueError(f"Invalid normalizer shapes: mean={mean.shape}, std={std.shape}")
         return Normalizer(mean=mean, std=std)
+
+
+@dataclass(frozen=True)
+class DFDataSelection:
+    """Row selection used to train a DF from a source phase-space table.
+
+    All indices refer to rows in the original source dataset.  Persisting this
+    contract lets downstream CBE/Phi stages reuse the exact sigma-clipped
+    support instead of evaluating DF scores on rows the flow never saw.
+    """
+
+    source_size: int
+    dataset: str
+    source_sha256: str
+    clip_sigma: float
+    split_seed: int
+    support_indices: np.ndarray
+    train_indices: np.ndarray
+    val_indices: np.ndarray
+
+    def __post_init__(self) -> None:
+        source_size = int(self.source_size)
+        if source_size < 1:
+            raise ValueError("source_size must be positive.")
+        dataset = str(self.dataset)
+        if not dataset:
+            raise ValueError("dataset must be non-empty.")
+        source_sha256 = str(self.source_sha256).lower()
+        if len(source_sha256) != 64 or any(
+            char not in "0123456789abcdef" for char in source_sha256
+        ):
+            raise ValueError("source_sha256 must be a lowercase SHA-256 hex digest.")
+
+        arrays: dict[str, np.ndarray] = {}
+        for name in ("support_indices", "train_indices", "val_indices"):
+            values = np.asarray(getattr(self, name), dtype=np.int64)
+            if values.ndim != 1:
+                raise ValueError(f"{name} must be one-dimensional.")
+            if values.size and (
+                np.any(values < 0) or np.any(values >= source_size)
+            ):
+                raise ValueError(
+                    f"{name} contains indices outside [0, {source_size})."
+                )
+            if np.unique(values).size != values.size:
+                raise ValueError(f"{name} contains duplicate row indices.")
+            arrays[name] = values
+
+        support = arrays["support_indices"]
+        train = arrays["train_indices"]
+        val = arrays["val_indices"]
+        if np.intersect1d(train, val).size:
+            raise ValueError("train_indices and val_indices must be disjoint.")
+        if not np.array_equal(
+            np.sort(np.concatenate([train, val])),
+            np.sort(support),
+        ):
+            raise ValueError(
+                "train_indices and val_indices must partition support_indices."
+            )
+
+        object.__setattr__(self, "source_size", source_size)
+        object.__setattr__(self, "dataset", dataset)
+        object.__setattr__(self, "source_sha256", source_sha256)
+        object.__setattr__(self, "clip_sigma", float(self.clip_sigma))
+        object.__setattr__(self, "split_seed", int(self.split_seed))
+        for name, values in arrays.items():
+            object.__setattr__(self, name, values)
+
+    def save_npz(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            schema_version=np.array(1, dtype=np.int32),
+            source_size=np.array(self.source_size, dtype=np.int64),
+            dataset=np.array(self.dataset),
+            source_sha256=np.array(self.source_sha256),
+            clip_sigma=np.array(self.clip_sigma, dtype=np.float64),
+            split_seed=np.array(self.split_seed, dtype=np.int64),
+            support_indices=self.support_indices,
+            train_indices=self.train_indices,
+            val_indices=self.val_indices,
+        )
+
+    @staticmethod
+    def load_npz(path: str | Path) -> "DFDataSelection":
+        path = Path(path)
+        with np.load(path) as data:
+            schema_version = int(data["schema_version"])
+            if schema_version != 1:
+                raise ValueError(
+                    f"Unsupported DF data-selection schema {schema_version} "
+                    f"in {path}."
+                )
+            return DFDataSelection(
+                source_size=int(data["source_size"]),
+                dataset=str(data["dataset"]),
+                source_sha256=str(data["source_sha256"]),
+                clip_sigma=float(data["clip_sigma"]),
+                split_seed=int(data["split_seed"]),
+                support_indices=np.asarray(
+                    data["support_indices"],
+                    dtype=np.int64,
+                ),
+                train_indices=np.asarray(data["train_indices"], dtype=np.int64),
+                val_indices=np.asarray(data["val_indices"], dtype=np.int64),
+            )
+
+
+def sigma_clip_mask(
+    eta: np.ndarray,
+    clip_sigma: float,
+    *,
+    weights: np.ndarray | None = None,
+) -> np.ndarray:
+    """Return the row mask used by DF sigma clipping."""
+    eta = np.asarray(eta, dtype=np.float32)
+    clip_sigma = float(clip_sigma)
+    if clip_sigma <= 0.0:
+        return np.ones(eta.shape[0], dtype=bool)
+    clip_normalizer = fit_normalizer(eta, weights=weights)
+    clip_std = np.maximum(clip_normalizer.std, np.float32(1.0e-6))
+    return np.all(
+        np.abs(eta - clip_normalizer.mean)
+        < clip_sigma * clip_std,
+        axis=1,
+    )
+
+
+def phase_space_sha256(eta: np.ndarray) -> str:
+    """Return a stable digest for the ordered float32 phase-space rows."""
+    contiguous = np.ascontiguousarray(eta, dtype=np.float32)
+    return hashlib.sha256(memoryview(contiguous)).hexdigest()
+
+
+def resolve_run_support_indices(
+    run_dir: str | Path,
+    eta: np.ndarray,
+    *,
+    data_config: Dict[str, Any],
+    coordinate_transform: CoordinateTransform | None = None,
+    weights: np.ndarray | None = None,
+) -> tuple[np.ndarray, str]:
+    """Resolve the source rows on which a DF was trained.
+
+    New runs use the persisted ``data_selection.npz`` contract.  For legacy
+    runs, deterministically reconstruct the sigma-clip mask from the saved DF
+    preprocessing and config so existing checkpoints remain usable.
+    """
+    run_dir = Path(run_dir)
+    eta = np.asarray(eta, dtype=np.float32)
+    selection_path = run_dir / "data_selection.npz"
+    if selection_path.exists():
+        selection = DFDataSelection.load_npz(selection_path)
+        expected_dataset = str(data_config.get("dataset", "eta"))
+        if selection.dataset != expected_dataset:
+            raise ValueError(
+                f"DF data selection targets dataset {selection.dataset!r}, but "
+                f"the supplied config requests {expected_dataset!r}."
+            )
+        if selection.source_size != eta.shape[0]:
+            raise ValueError(
+                "DF data selection was created for "
+                f"{selection.source_size} source rows, but the supplied data "
+                f"contains {eta.shape[0]} rows."
+            )
+        supplied_sha256 = phase_space_sha256(eta)
+        if selection.source_sha256 != supplied_sha256:
+            raise ValueError(
+                "The supplied phase-space rows do not match the ordered data "
+                "used to create the DF selection (SHA-256 mismatch)."
+            )
+        return selection.support_indices, "persisted"
+
+    clip_sigma = float(data_config.get("clip_sigma", 0.0))
+    if clip_sigma <= 0.0:
+        return np.arange(eta.shape[0], dtype=np.int64), "all_rows"
+
+    transformed = np.array(eta, dtype=np.float32, copy=True)
+    if coordinate_transform is not None:
+        transformed = coordinate_transform.transform(transformed)
+    mask = sigma_clip_mask(
+        transformed,
+        clip_sigma,
+        weights=weights,
+    )
+    warnings.warn(
+        f"Missing {selection_path}; reconstructed the DF sigma-clip support "
+        "from its saved preprocessing and config. Retrain the DF to persist "
+        "the exact row-selection contract.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    return np.flatnonzero(mask).astype(np.int64, copy=False), "reconstructed"
 
 
 def load_run_preprocessing(

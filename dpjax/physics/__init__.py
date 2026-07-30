@@ -5,7 +5,13 @@ from dpjax.physics.analytic import (  # noqa: F401
     plummer_score_phys_batch,
     plummer_score_std_batch,
 )
-from dpjax.physics.cbe import loss_cbe_A, loss_cbe_robust, residual_A  # noqa: F401
+from dpjax.physics.cbe import (  # noqa: F401
+    loss_cbe_A,
+    loss_cbe_mse,
+    loss_cbe_robust,
+    loss_negative_density,
+    residual_A,
+)
 from dpjax.physics.units import (  # noqa: F401
     G_KPC_KMS2_PER_MSUN,
     density_from_laplacian,

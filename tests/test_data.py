@@ -6,15 +6,19 @@ import pytest
 
 from dpjax.data import (
     CoordinateTransform,
+    DFDataSelection,
     fit_normalizer,
     inverse_preprocess_eta,
     iter_batches,
     load_eta_h5,
     load_h5_vector,
     load_run_preprocessing,
+    phase_space_sha256,
     preprocess_eta,
     require_physics_compatible_transform,
+    resolve_run_support_indices,
     save_eta_h5,
+    sigma_clip_mask,
 )
 
 
@@ -179,3 +183,81 @@ def test_iter_batches_handles_partial_final_batch():
 
     assert [len(batch) for batch in batches] == [2, 2, 1]
     np.testing.assert_array_equal(np.concatenate(batches), eta)
+
+
+def test_df_data_selection_round_trip_preserves_source_indices(tmp_path):
+    eta = np.arange(30, dtype=np.float32).reshape(5, 6)
+    selection = DFDataSelection(
+        source_size=5,
+        dataset="eta",
+        source_sha256=phase_space_sha256(eta),
+        clip_sigma=4.5,
+        split_seed=1042,
+        support_indices=np.array([0, 2, 3, 4]),
+        train_indices=np.array([2, 4]),
+        val_indices=np.array([0, 3]),
+    )
+    path = tmp_path / "data_selection.npz"
+
+    selection.save_npz(path)
+    restored = DFDataSelection.load_npz(path)
+
+    assert restored.source_size == 5
+    assert restored.dataset == "eta"
+    assert restored.source_sha256 == phase_space_sha256(eta)
+    assert restored.clip_sigma == 4.5
+    assert restored.split_seed == 1042
+    np.testing.assert_array_equal(restored.support_indices, [0, 2, 3, 4])
+    np.testing.assert_array_equal(restored.train_indices, [2, 4])
+    np.testing.assert_array_equal(restored.val_indices, [0, 3])
+
+
+def test_resolve_run_support_indices_validates_data_identity(tmp_path):
+    eta = np.arange(24, dtype=np.float32).reshape(4, 6)
+    DFDataSelection(
+        source_size=4,
+        dataset="eta",
+        source_sha256=phase_space_sha256(eta),
+        clip_sigma=4.5,
+        split_seed=7,
+        support_indices=np.array([0, 2]),
+        train_indices=np.array([2]),
+        val_indices=np.array([0]),
+    ).save_npz(tmp_path / "data_selection.npz")
+
+    indices, source = resolve_run_support_indices(
+        tmp_path,
+        eta,
+        data_config={"dataset": "eta", "clip_sigma": 4.5},
+    )
+    np.testing.assert_array_equal(indices, [0, 2])
+    assert source == "persisted"
+
+    with pytest.raises(ValueError, match="targets dataset"):
+        resolve_run_support_indices(
+            tmp_path,
+            eta,
+            data_config={"dataset": "other", "clip_sigma": 4.5},
+        )
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        resolve_run_support_indices(
+            tmp_path,
+            eta[[1, 0, 2, 3]],
+            data_config={"dataset": "eta", "clip_sigma": 4.5},
+        )
+
+
+def test_resolve_run_support_indices_reconstructs_legacy_clip(tmp_path):
+    eta = np.zeros((8, 6), dtype=np.float32)
+    eta[-1] = 100.0
+    expected = np.flatnonzero(sigma_clip_mask(eta, 2.0))
+
+    with pytest.warns(RuntimeWarning, match="reconstructed"):
+        indices, source = resolve_run_support_indices(
+            tmp_path,
+            eta,
+            data_config={"dataset": "eta", "clip_sigma": 2.0},
+        )
+
+    np.testing.assert_array_equal(indices, expected)
+    assert source == "reconstructed"

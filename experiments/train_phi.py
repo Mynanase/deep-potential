@@ -17,12 +17,19 @@ import yaml
 from dpjax.data import (
     iter_batches,
     load_eta_h5,
+    load_h5_vector,
     require_physics_compatible_transform,
+    resolve_run_support_indices,
 )
 from dpjax.flows.api import load_df, score_apply
 from dpjax.models.potential import PotentialConfig, PotentialMLP, grad_phi_apply, laplacian_phi_apply
 from dpjax.paths import ensure_dir, resolve_path
-from dpjax.physics.cbe import loss_cbe_A, loss_cbe_robust, residual_A
+from dpjax.physics.cbe import (
+    loss_cbe_mse,
+    loss_cbe_robust,
+    loss_negative_density,
+    residual_A,
+)
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
 from dpjax.utils.tree import mean_square
 from experiments._cli import (
@@ -92,7 +99,42 @@ def run_phi_training(
     )
     flow_cfg = df_cfg.get("flow", {})
 
-    eta = load_eta_h5(data_path, dataset=config.get("data", {}).get("dataset", "eta"))
+    df_data_cfg = df_cfg.get("data", {})
+    df_dataset = str(df_data_cfg.get("dataset", "eta"))
+    requested_dataset = str(
+        config.get("data", {}).get("dataset", df_dataset)
+    )
+    if requested_dataset != df_dataset:
+        raise ValueError(
+            "Phi training must use the same row-aligned dataset as the DF "
+            f"({df_dataset!r}); got {requested_dataset!r}."
+        )
+    eta = load_eta_h5(data_path, dataset=df_dataset)
+    support_weights = None
+    selection_path = Path(df_run_dir) / "data_selection.npz"
+    if (
+        not selection_path.exists()
+        and float(df_data_cfg.get("clip_sigma", 0.0)) > 0.0
+        and df_data_cfg.get("weight_dataset")
+    ):
+        support_weights = load_h5_vector(
+            data_path,
+            dataset=str(df_data_cfg["weight_dataset"]),
+        )
+    source_n = int(eta.shape[0])
+    support_indices, support_source = resolve_run_support_indices(
+        df_run_dir,
+        eta,
+        data_config=df_data_cfg,
+        coordinate_transform=coord_transform,
+        weights=support_weights,
+    )
+    eta = eta[support_indices]
+    print(
+        "[train_phi] DF support: "
+        f"source={support_source}, kept={eta.shape[0]}/"
+        f"{source_n}"
+    )
     eta_std = normalizer.transform(eta)
 
     pot_cfg = config.get("potential", {})
@@ -123,6 +165,13 @@ def run_phi_training(
         raise ValueError(f"train.reweight.gamma must be >= 0, got {rw_gamma}.")
     if rw_r_ref <= 0.0:
         raise ValueError(f"train.reweight.r_ref must be > 0, got {rw_r_ref}.")
+    if not np.isfinite(beta) or beta <= 0.0:
+        raise ValueError(f"train.beta must be finite and > 0, got {beta}.")
+    if not np.isfinite(lambda_mass) or lambda_mass < 0.0:
+        raise ValueError(
+            "train.lambda_mass must be finite and >= 0, "
+            f"got {lambda_mass}."
+        )
 
     if use_sharding:
         if batch_size < n_devices:
@@ -151,6 +200,12 @@ def run_phi_training(
 
     if loss_type not in {"robust", "mse"}:
         raise ValueError(f"Unknown train.loss_type={loss_type!r}; expected 'robust' or 'mse'.")
+    mass_batch_size = int(train_cfg.get("mass_batch_size", batch_size))
+    if mass_batch_size <= 0:
+        raise ValueError(
+            "train.mass_batch_size must be positive, "
+            f"got {mass_batch_size}."
+        )
 
     seed = int(config.get("seed", 1))
     rng = jax.random.key(seed)
@@ -192,6 +247,11 @@ def run_phi_training(
     print(
         "[train_phi] reweight: "
         f"gamma={rw_gamma}, r_ref={rw_r_ref}"
+    )
+    print(
+        "[train_phi] mass constraint: "
+        f"lambda_mass={lambda_mass}, beta={beta}, "
+        f"mass_batch_size={min(mass_batch_size, batch_size)}"
     )
 
     # Configure learning rate
@@ -269,34 +329,107 @@ def run_phi_training(
                 raw_w = (r_phys / rw_r_ref) ** rw_gamma
                 weights = raw_w / jnp.mean(raw_w)  # normalize so mean(w)=1
 
+            residual = residual_A(
+                eta_std_batch,
+                score_std,
+                grad_phi_std,
+                normalizer,
+            )
             if loss_type == "mse":
-                cbe_loss = loss_cbe_A(eta_std_batch, score_std, grad_phi_std, normalizer, weights=weights)
-            else:
-                residual = residual_A(eta_std_batch, score_std, grad_phi_std, normalizer)
-                laplacian_phi_phys = laplacian_phi_apply(phi_model, p, x_std, std_x=std_x)
-                cbe_loss = loss_cbe_robust(
+                residual_loss = loss_cbe_mse(
                     residual,
-                    laplacian_phi_phys,
+                    weights=weights,
+                )
+            else:
+                residual_loss = loss_cbe_robust(
+                    residual,
+                    jnp.zeros_like(residual),
                     alpha=alpha,
                     beta=beta,
-                    lambda_mass=lambda_mass,
+                    lambda_mass=0.0,
                     weights=weights,
                 )
 
-            return cbe_loss + l2_reg * mean_square(p)
+            mass_loss = jnp.zeros((), dtype=residual.dtype)
+            negative_fraction = jnp.zeros((), dtype=residual.dtype)
+            if lambda_mass > 0.0:
+                n_mass = min(mass_batch_size, x_std.shape[0])
+                x_mass = x_std[:n_mass]
+                mass_weights = None if weights is None else weights[:n_mass]
+                laplacian_phi_phys = laplacian_phi_apply(
+                    phi_model,
+                    p,
+                    x_mass,
+                    std_x=std_x,
+                )
+                mass_loss = loss_negative_density(
+                    laplacian_phi_phys,
+                    beta=beta,
+                    weights=mass_weights,
+                )
+                negative_fraction = jnp.mean(laplacian_phi_phys < 0.0)
 
-        loss, grads = jax.value_and_grad(loss_fn)(phi_params)
+            total_loss = (
+                residual_loss
+                + lambda_mass * mass_loss
+                + l2_reg * mean_square(p)
+            )
+            return total_loss, (
+                residual_loss,
+                mass_loss,
+                negative_fraction,
+            )
+
+        (loss, aux), grads = jax.value_and_grad(
+            loss_fn,
+            has_aux=True,
+        )(phi_params)
+        residual_loss, mass_loss, negative_fraction = aux
         updates, opt_state2 = opt.update(grads, opt_state, phi_params)
         phi_params2 = optax.apply_updates(phi_params, updates)
-        return phi_params2, opt_state2, loss
+        return (
+            phi_params2,
+            opt_state2,
+            loss,
+            residual_loss,
+            mass_loss,
+            negative_fraction,
+        )
 
     metrics_path = run_dir / "metrics.csv"
+    expected_header = [
+        "step",
+        "epoch",
+        "loss",
+        "residual_loss",
+        "mass_penalty",
+        "negative_laplacian_fraction",
+        "residual_mean",
+        "residual_std",
+        "residual_p99_abs",
+    ]
+    if resume and metrics_path.exists():
+        with metrics_path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            existing_header = reader.fieldnames or []
+            rows = list(reader)
+        if existing_header != expected_header:
+            with metrics_path.open("w", newline="") as f:
+                dict_writer = csv.DictWriter(
+                    f,
+                    fieldnames=expected_header,
+                )
+                dict_writer.writeheader()
+                for row in rows:
+                    dict_writer.writerow(
+                        {key: row.get(key, "nan") for key in expected_header}
+                    )
     write_header = not metrics_path.exists() or not resume
     open_mode = "a" if resume else "w"
     with metrics_path.open(open_mode, newline="") as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(["step", "epoch", "loss", "residual_mean", "residual_std", "residual_p99_abs"])
+            writer.writerow(expected_header)
 
         global_step = step0
         np_rng = np.random.default_rng(seed=seed)
@@ -322,12 +455,24 @@ def run_phi_training(
                 eta_b = jnp.asarray(batch_np)
                 if use_sharding:
                     eta_b = jax.device_put(eta_b, batch_sharding)
-                phi_params, opt_state, loss = train_step(
+                (
+                    phi_params,
+                    opt_state,
+                    loss,
+                    residual_loss,
+                    mass_loss,
+                    negative_fraction,
+                ) = train_step(
                     phi_params,
                     opt_state,
                     eta_b,
                 )
                 loss_scalar = float(jax.device_get(loss))
+                residual_loss_scalar = float(jax.device_get(residual_loss))
+                mass_loss_scalar = float(jax.device_get(mass_loss))
+                negative_fraction_scalar = float(
+                    jax.device_get(negative_fraction)
+                )
 
                 need_host_state = (global_step % log_every) == 0
                 if ckpt_every and (global_step % ckpt_every) == 0 and global_step != step0:
@@ -348,16 +493,35 @@ def run_phi_training(
                     r_mean = float(jnp.mean(r))
                     r_std = float(jnp.std(r))
                     r_p99 = float(jnp.percentile(jnp.abs(r), 99.0))
-                    writer.writerow([global_step, epoch, loss_scalar, r_mean, r_std, r_p99])
+                    writer.writerow(
+                        [
+                            global_step,
+                            epoch,
+                            loss_scalar,
+                            residual_loss_scalar,
+                            mass_loss_scalar,
+                            negative_fraction_scalar,
+                            r_mean,
+                            r_std,
+                            r_p99,
+                        ]
+                    )
                     f.flush()
                     if logger is not None:
                         logger.log_scalars(global_step, {
                             "epoch": epoch, "loss": loss_scalar,
+                            "residual_loss": residual_loss_scalar,
+                            "mass_penalty": mass_loss_scalar,
+                            "negative_laplacian_fraction": (
+                                negative_fraction_scalar
+                            ),
                             "residual_mean": r_mean, "residual_std": r_std,
                             "residual_p99_abs": r_p99,
                         })
                     pbar.set_postfix(
                         loss=loss_scalar,
+                        mass=mass_loss_scalar,
+                        neg_frac=negative_fraction_scalar,
                         r_std=r_std,
                         r_p99=r_p99,
                         epoch=epoch,

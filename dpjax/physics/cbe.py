@@ -60,6 +60,49 @@ def loss_cbe_A(
     return jnp.mean(weights * r**2)
 
 
+def loss_negative_density(
+    laplacian_phi_phys: jnp.ndarray,
+    *,
+    beta: float = 1.0,
+    weights: jnp.ndarray | None = None,
+) -> jnp.ndarray:
+    """Penalize negative gravitating density in physical coordinates."""
+    per_sample = jnp.arcsinh(
+        beta * jnp.maximum(-laplacian_phi_phys, 0.0)
+    )
+    if weights is None:
+        return jnp.mean(per_sample)
+    return jnp.mean(weights * per_sample)
+
+
+def loss_cbe_mse(
+    residual_phys: jnp.ndarray,
+    laplacian_phi_phys: jnp.ndarray | None = None,
+    *,
+    beta: float = 1.0,
+    lambda_mass: float = 0.0,
+    weights: jnp.ndarray | None = None,
+) -> jnp.ndarray:
+    """MSE CBE loss with an optional, independently controlled mass penalty."""
+    residual_values = residual_phys**2
+    if weights is None:
+        loss = jnp.mean(residual_values)
+    else:
+        loss = jnp.mean(weights * residual_values)
+
+    if lambda_mass != 0.0:
+        if laplacian_phi_phys is None:
+            raise ValueError(
+                "laplacian_phi_phys is required when lambda_mass is non-zero."
+            )
+        loss = loss + lambda_mass * loss_negative_density(
+            laplacian_phi_phys,
+            beta=beta,
+            weights=weights,
+        )
+    return loss
+
+
 def loss_cbe_robust(
     residual_phys: jnp.ndarray,
     laplacian_phi_phys: jnp.ndarray,
@@ -76,8 +119,12 @@ def loss_cbe_robust(
     """
 
     non_stationarity = jnp.arcsinh(alpha * jnp.abs(residual_phys))
-    neg_density_penalty = jnp.arcsinh(beta * jnp.maximum(-laplacian_phi_phys, 0.0))
-    per_sample = non_stationarity + lambda_mass * neg_density_penalty
     if weights is None:
-        return jnp.mean(per_sample)
-    return jnp.mean(weights * per_sample)
+        loss = jnp.mean(non_stationarity)
+    else:
+        loss = jnp.mean(weights * non_stationarity)
+    return loss + lambda_mass * loss_negative_density(
+        laplacian_phi_phys,
+        beta=beta,
+        weights=weights,
+    )
