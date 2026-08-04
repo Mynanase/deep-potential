@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import argparse
 import csv
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-from tqdm.auto import tqdm
+from typing import Any
 
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
 import numpy as np
 import optax
 import yaml
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from tqdm.auto import tqdm
 
 from dpjax.data import (
     iter_batches,
@@ -22,7 +20,12 @@ from dpjax.data import (
     resolve_run_support_indices,
 )
 from dpjax.flows.api import load_df, score_apply
-from dpjax.models.potential import PotentialConfig, PotentialMLP, grad_phi_apply, laplacian_phi_apply
+from dpjax.models.potential import (
+    PotentialConfig,
+    PotentialMLP,
+    grad_phi_apply,
+    laplacian_phi_apply,
+)
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.cbe import (
     loss_cbe_mse,
@@ -32,28 +35,22 @@ from dpjax.physics.cbe import (
 )
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
 from dpjax.utils.tree import mean_square
-from experiments._cli import (
-    add_config_override_argument,
-    add_logging_arguments,
-    load_experiment_config,
-)
-from experiments.logger import ExperimentLogger
-
+from dpjax.workflows.logging import ExperimentLogger
 
 # ---------------------------------------------------------------------------
-# Core training function – callable from both CLI and Jupyter
+# Core training workflow – called by the run entry point
 # ---------------------------------------------------------------------------
 
 def run_phi_training(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     data_path: str | Path,
     df_run_dir: str | Path,
     run_dir: str | Path,
     *,
     resume: bool = False,
-    init_params_dir: Optional[str | Path] = None,
-    logger: Optional["ExperimentLogger"] = None,
-) -> Dict[str, Any]:
+    init_params_dir: str | Path | None = None,
+    logger: ExperimentLogger | None = None,
+) -> dict[str, Any]:
     """Train the potential network Phi with a frozen DF using CBE residual.
 
     Parameters
@@ -551,50 +548,3 @@ def run_phi_training(
         "normalizer": normalizer,
         "final_step": global_step,
     }
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Train Phi with frozen DF using CBE residual A.")
-    parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--df-run-dir", type=str, required=True)
-    parser.add_argument("--run-dir", type=str, required=True)
-    parser.add_argument("--resume", action="store_true")
-    parser.add_argument(
-        "--init-params",
-        type=str,
-        default=None,
-        help="Initialize Phi params from another run_dir checkpoint (weights-only init).",
-    )
-    add_config_override_argument(
-        parser,
-        example='{"train": {"epochs": 32}}',
-    )
-    add_logging_arguments(parser)
-    args = parser.parse_args()
-    if args.resume and args.init_params:
-        parser.error("--resume and --init-params cannot be used together.")
-
-    cfg = load_experiment_config(args.config, args.override)
-
-    run_dir = Path(args.run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    with ExperimentLogger(
-        run_dir, project=args.project, run_name=args.run_name,
-        backend=args.logger, config=cfg,
-    ) as logger:
-        run_phi_training(
-            cfg, args.data, args.df_run_dir, run_dir,
-            resume=args.resume, init_params_dir=args.init_params, logger=logger,
-        )
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

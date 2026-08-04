@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 from typing import Any
 
 import jax
 import jax.numpy as jnp
+import matplotlib
 import numpy as np
 
-import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 
 from dpjax.data import inverse_preprocess_eta, load_eta_h5, preprocess_eta
 from dpjax.datasets.plummer import sample_plummer
-from dpjax.flows.api import load_df, score_apply, sample_apply
+from dpjax.flows.api import load_df, sample_apply, score_apply
 from dpjax.paths import ensure_dir, resolve_path
-from dpjax.physics.analytic import plummer_score_std_batch, plummer_rv_ideal_grid
+from dpjax.physics.analytic import plummer_rv_ideal_grid, plummer_score_std_batch
 from dpjax.plotting.flow_projections import (
     calc_coords,
     plot_1d_marginals,
@@ -25,9 +24,8 @@ from dpjax.plotting.flow_projections import (
     plot_2d_marginals_grid,
 )
 
-
 # ---------------------------------------------------------------------------
-# Core evaluation function – callable from both CLI and Jupyter
+# Core evaluation workflow – called by run_eval or Marimo
 # ---------------------------------------------------------------------------
 
 def run_eval_df(
@@ -373,37 +371,3 @@ def _plummer_diagnostics(
         "r2": dict(zip(dim_labels, r2s)),
         "resid_stats": resid_stats,
     }
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Evaluate DF by comparing marginals: train vs flow samples.")
-    parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--df-run-dir", type=str, required=True)
-    parser.add_argument("--out-dir", type=str, default=None)
-    parser.add_argument("--dataset", type=str, default="eta")
-    parser.add_argument("--coordsys", type=str, default="cart", choices=["cart", "cyl", "sph"])
-    parser.add_argument("--n-samples", type=int, default=262144)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--dim1", type=str, default="x")
-    parser.add_argument("--dim2", type=str, default="y")
-    parser.add_argument("--logscale", action="store_true")
-    parser.add_argument("--plummer-diag", action="store_true", help="Enable Plummer-specific diagnostics (gradient, r-v, residuals).")
-    parser.add_argument("--n-diag-points", type=int, default=16384, help="Number of points for gradient comparison.")
-    args = parser.parse_args()
-
-    run_eval_df(
-        args.data, args.df_run_dir,
-        out_dir=args.out_dir, dataset=args.dataset, coordsys=args.coordsys,
-        n_samples=args.n_samples, seed=args.seed,
-        dim1=args.dim1, dim2=args.dim2, logscale=args.logscale,
-        plummer_diag=args.plummer_diag, n_diag_points=args.n_diag_points,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

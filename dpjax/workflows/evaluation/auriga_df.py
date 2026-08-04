@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 
@@ -21,7 +20,6 @@ from dpjax.evaluation import (
     stein_score_metrics,
 )
 from dpjax.flows.api import load_df, sample_apply, score_apply
-
 
 DEFAULT_RADIAL_EDGES = np.array(
     [0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0, 30.0, 50.0, 75.0],
@@ -356,73 +354,3 @@ def evaluate_auriga_df(
         **diagnostics,
     )
     return result
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Evaluate Halo12 stellar-tracer marginals and 6D score stability."
-        )
-    )
-    parser.add_argument("--data", type=Path, required=True)
-    parser.add_argument(
-        "--run-dir",
-        type=Path,
-        action="append",
-        required=True,
-        help=(
-            "DF run directory. One run is sufficient for distribution and "
-            "Stein diagnostics; repeat for score-ensemble diagnostics."
-        ),
-    )
-    parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--n-samples-per-model", type=int, default=262_144)
-    parser.add_argument("--n-score-points", type=int, default=32_768)
-    parser.add_argument("--score-batch-size", type=int, default=1_024)
-    parser.add_argument("--n-theta-bins", type=int, default=6)
-    parser.add_argument("--n-phi-bins", type=int, default=8)
-    parser.add_argument("--n-velocity-bins", type=int, default=64)
-    parser.add_argument("--spatial-r-bins", type=int, default=48)
-    parser.add_argument("--spatial-z-bins", type=int, default=48)
-    parser.add_argument("--spatial-r-max", type=float, default=75.0)
-    parser.add_argument("--spatial-z-max", type=float, default=75.0)
-    parser.add_argument("--spatial-min-cell-count", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-    theta_edges = np.arccos(
-        np.linspace(1.0, -1.0, int(args.n_theta_bins) + 1)
-    )
-    phi_edges = np.linspace(
-        -np.pi,
-        np.pi,
-        int(args.n_phi_bins) + 1,
-    )
-    result = evaluate_auriga_df(
-        args.data,
-        args.run_dir,
-        args.output_dir,
-        n_samples_per_model=args.n_samples_per_model,
-        n_score_points=args.n_score_points,
-        score_batch_size=args.score_batch_size,
-        seed=args.seed,
-        theta_edges=theta_edges,
-        phi_edges=phi_edges,
-        n_velocity_bins=args.n_velocity_bins,
-        spatial_r_edges=np.linspace(
-            0.0,
-            float(args.spatial_r_max),
-            int(args.spatial_r_bins) + 1,
-        ),
-        spatial_z_edges=np.linspace(
-            -float(args.spatial_z_max),
-            float(args.spatial_z_max),
-            int(args.spatial_z_bins) + 1,
-        ),
-        spatial_min_cell_count=args.spatial_min_cell_count,
-    )
-    print(json.dumps(result, indent=2))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

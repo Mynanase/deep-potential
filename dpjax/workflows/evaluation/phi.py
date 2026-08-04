@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -17,7 +16,12 @@ from dpjax.data import (
     resolve_run_support_indices,
 )
 from dpjax.flows.api import load_df, score_apply
-from dpjax.models.potential import grad_phi_apply, laplacian_phi_apply, load_phi, phi_apply
+from dpjax.models.potential import (
+    grad_phi_apply,
+    laplacian_phi_apply,
+    load_phi,
+    phi_apply,
+)
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.physics.analytic import plummer_ar, plummer_phi
 from dpjax.physics.cbe import residual_A
@@ -30,7 +34,6 @@ from dpjax.plotting.diagnostics import (
     plot_laplacian_density_diagnostics,
     plot_potential_density_overview,
 )
-
 
 # ---------------------------------------------------------------------------
 # Core evaluation function – callable from both CLI and Jupyter
@@ -159,7 +162,6 @@ def run_eval_phi(
         "density_semantics": "total_gravitating_density",
         "density_gravitational_constant": density_g,
     }
-
     (out_dir / "eval_stats.json").write_text(json.dumps(stats, indent=2) + "\n")
     print(json.dumps(stats, indent=2))
 
@@ -341,53 +343,3 @@ def run_eval_phi(
         "out_dir": out_dir,
         "plots_dir": plots_dir,
     }
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.")
-    parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--df-run-dir", type=str, required=True)
-    parser.add_argument("--phi-run-dir", type=str, required=True)
-    parser.add_argument("--out-dir", type=str, default=None)
-    parser.add_argument("--n-eval", type=int, default=32768)
-    parser.add_argument("--batch-size", type=int, default=4096)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--r-min", type=float, default=1.0e-3)
-    parser.add_argument("--r-max", type=float, default=10.0)
-    parser.add_argument("--n-r", type=int, default=256)
-    parser.add_argument("--r-ref", type=float, default=1.0)
-    parser.add_argument("--system", choices=["generic", "plummer", "halo"], default="generic")
-    parser.add_argument("--no-overview", action="store_true")
-    parser.add_argument("--slice-grid", type=int, default=128)
-    parser.add_argument("--slice-rmax", type=float, default=None)
-    parser.add_argument("--fig-formats", nargs="+", default=["png", "pdf"])
-    parser.add_argument("--dpi", type=int, default=180)
-    parser.add_argument(
-        "--gravitational-constant",
-        type=float,
-        default=None,
-        help=(
-            "Override G in the active unit system. Halo defaults to "
-            "4.300917e-6 (km/s)^2 kpc / Msun; other systems default to G=1."
-        ),
-    )
-    args = parser.parse_args()
-
-    run_eval_phi(
-        args.data, args.df_run_dir, args.phi_run_dir,
-        out_dir=args.out_dir, n_eval=args.n_eval, batch_size=args.batch_size,
-        seed=args.seed, r_min=args.r_min, r_max=args.r_max,
-        n_r=args.n_r, r_ref=args.r_ref, system=args.system,
-        plot_overview=not args.no_overview, slice_grid=args.slice_grid,
-        slice_rmax=args.slice_rmax, fig_fmt=tuple(args.fig_formats), dpi=args.dpi,
-        gravitational_constant=args.gravitational_constant,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

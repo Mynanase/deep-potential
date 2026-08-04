@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from experiments.run_config import (
+from dpjax.workflows.config import (
     load_run_spec,
     prepare_run,
     validate_stage_start,

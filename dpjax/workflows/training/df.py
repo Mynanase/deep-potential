@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import argparse
 import csv
 import math
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-from tqdm.auto import tqdm
+from typing import Any
 
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
 import numpy as np
 import optax
 import yaml
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from tqdm.auto import tqdm
 
 from dpjax.data import (
     CoordinateTransform,
@@ -25,15 +23,15 @@ from dpjax.data import (
     phase_space_sha256,
     sigma_clip_mask,
 )
-from dpjax.flows.api import build_flow, init_flow, log_prob_apply, log_prob_reg_apply, score_apply
+from dpjax.flows.api import (
+    build_flow,
+    init_flow,
+    log_prob_reg_apply,
+    score_apply,
+)
 from dpjax.paths import ensure_dir, resolve_path
 from dpjax.utils.ckpt import create_manager, finalize, restore_latest, save
-from experiments._cli import (
-    add_config_override_argument,
-    add_logging_arguments,
-    load_experiment_config,
-)
-from experiments.logger import ExperimentLogger
+from dpjax.workflows.logging import ExperimentLogger
 
 # ---------------------------------------------------------------------------
 # ReduceLROnPlateau state
@@ -100,17 +98,17 @@ class _PlateauState:
 
 
 # ---------------------------------------------------------------------------
-# Core training function – callable from both CLI and Jupyter
+# Core training workflow – called by the run entry point
 # ---------------------------------------------------------------------------
 
 def run_df_training(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     data_path: str | Path,
     run_dir: str | Path,
     *,
     resume: bool = False,
-    logger: Optional["ExperimentLogger"] = None,
-) -> Dict[str, Any]:
+    logger: ExperimentLogger | None = None,
+) -> dict[str, Any]:
     """Train the DF (RealNVP / FFJORD) normalizing flow.
 
     Parameters
@@ -199,7 +197,7 @@ def run_df_training(
     val_frac = float(np.clip(val_frac, 0.0, 0.5))
 
     n_total = int(eta_std.shape[0])
-    n_val = int(round(n_total * val_frac))
+    n_val = round(n_total * val_frac)
     n_val = min(max(n_val, 0), max(n_total - 1, 0))
     split_seed = int(data_cfg.get("split_seed", config.get("seed", 0)))
     split_order = np.random.default_rng(split_seed).permutation(n_total)
@@ -636,7 +634,13 @@ def run_df_training(
                             "val_loss": val_loss, "val_score_p99": val_score_p99,
                             "lr": current_effective_lr,
                         })
-                    postfix = dict(nll=loss_scalar, p99=p99, smax=smax, epoch=epoch, lr=current_effective_lr)
+                    postfix = {
+                        "nll": loss_scalar,
+                        "p99": p99,
+                        "smax": smax,
+                        "epoch": epoch,
+                        "lr": current_effective_lr,
+                    }
                     if not math.isnan(val_loss):
                         postfix["val_nll"] = val_loss
                     pbar.set_postfix(**postfix)
@@ -717,38 +721,3 @@ def run_df_training(
         "model": model,
         "final_step": global_step,
     }
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Train DF (RealNVP / FFJORD) on eta.")
-    parser.add_argument("--config", type=str, required=True)
-    parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--run-dir", type=str, required=True)
-    parser.add_argument("--resume", action="store_true")
-    add_config_override_argument(
-        parser,
-        example='{"train": {"epochs": 64}}',
-    )
-    add_logging_arguments(parser)
-    args = parser.parse_args()
-
-    cfg = load_experiment_config(args.config, args.override)
-
-    run_dir = Path(args.run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    with ExperimentLogger(
-        run_dir, project=args.project, run_name=args.run_name,
-        backend=args.logger, config=cfg,
-    ) as logger:
-        run_df_training(cfg, args.data, run_dir, resume=args.resume, logger=logger)
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

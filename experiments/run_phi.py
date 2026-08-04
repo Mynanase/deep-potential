@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from experiments.logger import ExperimentLogger
-from experiments.run_config import (
+from dpjax.workflows.config import (
     load_run_spec,
     prepare_run,
     validate_stage_start,
 )
-from experiments.train_phi import run_phi_training
+from dpjax.workflows.logging import ExperimentLogger
+from dpjax.workflows.training.phi import run_phi_training
 
 
 def run(config_path: str | Path) -> None:

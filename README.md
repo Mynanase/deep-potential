@@ -1,22 +1,26 @@
 # deep-potential
-Deep learning for gravitational potentials, based on a snapshot of well-mixed
-tracer particles in phase space.
 
-The basic idea of this approach is to first model the distribution function of
-the tracers using a normalizing flow. One can then calculate gradients of the
-distribution function at a large number of points in phase space. Then, we
-find the potential that renders the distribution function stationary at these
-points. We model the potential using a feed-forward neural network, which is
-both extremely flexible and easily differentiable. This latter property is
-critical, as the collisionless Boltzmann equation contains gradients of the
-potential (and of the distribution function).
+JAX/Flax implementation of a two-stage method for recovering gravitational
+potentials from phase-space snapshots:
 
-See `docs/operations_maintenance_guide.md` for current operation and maintenance
-procedures, `docs/pipeline_guide.md` for the end-to-end workflow,
-`notebooks/07_analysis.ipynb` for post-training analysis, and `README_JAX.md`
-for detailed setup instructions.
+1. fit a distribution function (DF) with a normalizing flow;
+2. freeze the DF and fit a potential network with the collisionless Boltzmann
+   equation.
 
-The active implementation uses JAX/Flax. Historical TensorFlow/Sonnet code is
-kept under `archive/legacy_tensorflow/` and is not part of the supported runtime.
-There is an out-of-date PyTorch implementation at
-[tingyuansen/deep-potential](https://github.com/tingyuansen/deep-potential).
+Experiments use one checked-in run YAML and three stable entry points:
+
+```bash
+python -m experiments.run_df configs/runs/halo12_static_v1.yaml
+python -m experiments.run_phi configs/runs/halo12_static_v1.yaml
+python -m experiments.run_eval configs/runs/halo12_static_v1.yaml
+```
+
+The expensive stages are standalone processes. Post-training exploration uses
+the git-friendly Marimo app at `analysis/halo12.py` and only reads saved
+artifacts.
+
+See `README_JAX.md` for setup, `PROJECT_STRUCTURE.md` for architecture, and
+`docs/server_agent_run_guide.md` for the server workflow.
+
+Historical TensorFlow/Sonnet code under `archive/legacy_tensorflow/` is not part
+of the supported runtime.

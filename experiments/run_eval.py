@@ -9,17 +9,17 @@ from typing import Any
 import numpy as np
 
 from dpjax.plotting import plot_auriga_df_ensemble
-from experiments.eval_auriga_df import evaluate_auriga_df
-from experiments.eval_auriga_truth import run_eval_auriga_truth
-from experiments.eval_df import run_eval_df
-from experiments.eval_phi import run_eval_phi
-from experiments.run_config import (
+from dpjax.workflows.config import (
     RunSpec,
     TrialSpec,
     load_run_spec,
     prepare_run,
     write_evaluation_config,
 )
+from dpjax.workflows.evaluation.auriga_df import evaluate_auriga_df
+from dpjax.workflows.evaluation.auriga_truth import run_eval_auriga_truth
+from dpjax.workflows.evaluation.df import run_eval_df
+from dpjax.workflows.evaluation.phi import run_eval_phi
 
 
 def _enabled(config: dict[str, Any]) -> bool:

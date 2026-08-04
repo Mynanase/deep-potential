@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -335,59 +334,3 @@ def run_eval_auriga_truth(
     print(json.dumps(_json_safe(metrics), indent=2))
     print(f"Wrote {metrics_path}")
     return metrics
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Evaluate learned Phi and acceleration against a prepared Auriga "
-            "mock with simulator truth."
-        )
-    )
-    parser.add_argument("--data", type=Path, required=True)
-    parser.add_argument("--df-run-dir", type=Path, required=True)
-    parser.add_argument("--phi-run-dir", type=Path, required=True)
-    parser.add_argument("--out-dir", type=Path, default=None)
-    parser.add_argument("--n-eval", type=int, default=65536)
-    parser.add_argument("--batch-size", type=int, default=4096)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--truth-potential-scale", type=float, default=1.0)
-    parser.add_argument("--truth-acceleration-scale", type=float, default=1.0)
-    parser.add_argument("--radial-bins", type=int, default=12)
-    parser.add_argument("--no-plots", action="store_true")
-    parser.add_argument("--slice-phi-bins", type=int, default=6)
-    parser.add_argument("--slice-r-bins", type=int, default=40)
-    parser.add_argument("--slice-z-bins", type=int, default=40)
-    parser.add_argument("--slice-min-count", type=int, default=3)
-    parser.add_argument("--slice-r-max", type=float, default=None)
-    parser.add_argument("--slice-z-max", type=float, default=None)
-    parser.add_argument("--fig-formats", nargs="+", default=["png", "pdf"])
-    parser.add_argument("--dpi", type=int, default=180)
-    args = parser.parse_args()
-
-    run_eval_auriga_truth(
-        args.data,
-        args.df_run_dir,
-        args.phi_run_dir,
-        out_dir=args.out_dir,
-        n_eval=args.n_eval,
-        batch_size=args.batch_size,
-        seed=args.seed,
-        truth_potential_scale=args.truth_potential_scale,
-        truth_acceleration_scale=args.truth_acceleration_scale,
-        radial_bins=args.radial_bins,
-        plot_truth=not args.no_plots,
-        slice_phi_bins=args.slice_phi_bins,
-        slice_r_bins=args.slice_r_bins,
-        slice_z_bins=args.slice_z_bins,
-        slice_min_count=args.slice_min_count,
-        slice_r_max=args.slice_r_max,
-        slice_z_max=args.slice_z_max,
-        fig_fmt=tuple(args.fig_formats),
-        dpi=args.dpi,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

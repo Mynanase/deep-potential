@@ -1,7 +1,7 @@
 """Load and visualize persisted experiment diagnostics.
 
-These helpers deliberately do not launch training.  They are shared by
-standalone plotting commands and marimo analysis notebooks.
+These helpers deliberately do not launch training. They are consumed by
+marimo analysis notebooks and other read-only clients.
 """
 
 from dpjax.diagnostics.df import load_df_evaluation, plot_density_profile

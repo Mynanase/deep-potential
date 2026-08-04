@@ -1423,7 +1423,7 @@ def plot_auriga_df_ensemble(
 ):
     """Render Halo DF diagnostics from ``eval_auriga_df`` outputs.
 
-    Consumes the JSON + NPZ written by ``experiments.eval_auriga_df`` and
+    Consumes the JSON + NPZ written by the Auriga DF evaluation workflow and
     produces radial density, local spatial density, conditional velocity, and
     score figures.  Distribution and Stein diagnostics work with one DF;
     score-repeatability plots are added when at least two models are present.

@@ -1,9 +1,4 @@
-"""Minimal, config-driven orchestration for DF -> Phi experiment runs.
-
-The existing experiment modules remain the numerical implementation and CLI
-compatibility layer.  This module adds one small run-level configuration that
-binds data, DF, Phi, evaluation, and output paths together.
-"""
+"""Run-level configuration, artifact layout, and overwrite protection."""
 
 from __future__ import annotations
 

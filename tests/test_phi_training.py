@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from dpjax.data import DFDataSelection, Normalizer, phase_space_sha256
-from experiments import train_phi
+from dpjax.workflows.training import phi as train_phi
 
 
 def test_phi_training_reuses_persisted_df_support(tmp_path, monkeypatch):

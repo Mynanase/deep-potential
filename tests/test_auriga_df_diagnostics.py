@@ -6,7 +6,7 @@ import numpy as np
 
 from dpjax.data import Normalizer
 from dpjax.plotting import plot_auriga_df_ensemble
-from experiments import eval_auriga_df
+from dpjax.workflows.evaluation import auriga_df as eval_auriga_df
 
 
 def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):

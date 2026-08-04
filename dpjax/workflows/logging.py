@@ -1,4 +1,4 @@
-"""Unified experiment logger with W&B, TensorBoard, and CSV backends.
+"""Unified workflow logger with W&B, TensorBoard, and CSV backends.
 
 Usage
 -----
@@ -15,9 +15,9 @@ from __future__ import annotations
 import csv
 import json
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Thin backend wrappers
@@ -43,7 +43,7 @@ class _CSVBackend:
         if self._path.stat().st_size == 0:
             self._writer.writeheader()
 
-    def log_scalars(self, step: int, metrics: Dict[str, Any]) -> None:
+    def log_scalars(self, step: int, metrics: dict[str, Any]) -> None:
         row = {"step": step, **metrics}
         self._ensure_open(list(row.keys()))
         self._writer.writerow(row)  # type: ignore[union-attr]
@@ -64,10 +64,10 @@ class _WandbBackend:
         self,
         run_dir: Path,
         project: str,
-        run_name: Optional[str],
-        config: Optional[Dict[str, Any]],
+        run_name: str | None,
+        config: dict[str, Any] | None,
     ):
-        import wandb  # noqa: F811
+        import wandb
 
         self._wandb = wandb
         self._run = wandb.init(
@@ -78,7 +78,7 @@ class _WandbBackend:
             reinit=True,
         )
 
-    def log_scalars(self, step: int, metrics: Dict[str, Any]) -> None:
+    def log_scalars(self, step: int, metrics: dict[str, Any]) -> None:
         self._run.log(metrics, step=step)
 
     def log_image(self, step: int, tag: str, fig_or_path: Any) -> None:
@@ -104,7 +104,7 @@ class _TensorBoardBackend:
             from tensorboardX import SummaryWriter  # type: ignore[no-redef]
         self._writer = SummaryWriter(log_dir=str(log_dir))
 
-    def log_scalars(self, step: int, metrics: Dict[str, Any]) -> None:
+    def log_scalars(self, step: int, metrics: dict[str, Any]) -> None:
         for k, v in metrics.items():
             if isinstance(v, (int, float)):
                 self._writer.add_scalar(k, v, global_step=step)
@@ -160,9 +160,9 @@ class ExperimentLogger:
         run_dir: str | Path,
         *,
         project: str = "dp-plummer",
-        run_name: Optional[str] = None,
+        run_name: str | None = None,
         backend: str = "csv",
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         csv_fieldnames: Sequence[str] = (),
     ):
         self.run_dir = Path(run_dir)
@@ -183,13 +183,13 @@ class ExperimentLogger:
                 self._backends.append(
                     _WandbBackend(self.run_dir, project, run_name, config)
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - optional backend failures degrade to CSV
                 warnings.warn(f"W&B init failed ({exc}); falling back to CSV-only.")
 
         if want_tb:
             try:
                 self._backends.append(_TensorBoardBackend(self.run_dir))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - optional backend failures degrade to CSV
                 warnings.warn(f"TensorBoard init failed ({exc}); falling back to CSV-only.")
 
         # Save config snapshot
@@ -197,7 +197,7 @@ class ExperimentLogger:
             cfg_path = self.run_dir / "config.json"
             cfg_path.write_text(json.dumps(config, indent=2, default=str))
 
-    def log_scalars(self, step: int, metrics: Dict[str, Any]) -> None:
+    def log_scalars(self, step: int, metrics: dict[str, Any]) -> None:
         """Log scalar metrics to all active backends."""
         for b in self._backends:
             b.log_scalars(step, metrics)
