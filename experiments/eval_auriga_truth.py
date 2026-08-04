@@ -47,6 +47,7 @@ def run_eval_auriga_truth(
     phi_run_dir: str | Path,
     *,
     out_dir: str | Path | None = None,
+    plots_dir: str | Path | None = None,
     n_eval: int | None = 65536,
     batch_size: int = 4096,
     seed: int = 0,
@@ -68,6 +69,7 @@ def run_eval_auriga_truth(
     df_run_dir = resolve_path(df_run_dir)
     phi_run_dir = resolve_path(phi_run_dir)
     out_dir = ensure_dir(out_dir or phi_run_dir / "eval" / "auriga_truth")
+    plots_dir = ensure_dir(plots_dir or out_dir)
 
     snapshot = load_auriga_snapshot(data_path)
     if snapshot.potential is None and snapshot.acceleration is None:
@@ -172,7 +174,7 @@ def run_eval_auriga_truth(
             truth_potential,
             aligned_predicted_potential,
             metrics=metrics["potential"],
-            fig_dir=out_dir,
+            fig_dir=plots_dir,
             fig_fmt=fig_fmt,
             dpi=int(dpi),
         )
@@ -291,7 +293,7 @@ def run_eval_auriga_truth(
             truth_potential=truth_slices["truth_median"],
             truth_count=truth_slices["count"],
             min_cell_count=int(slice_min_count),
-            fig_dir=out_dir,
+            fig_dir=plots_dir,
             fig_fmt=fig_fmt,
             dpi=int(dpi),
         )

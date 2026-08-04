@@ -1,4 +1,14 @@
-# Notebooks
+# Legacy Jupyter notebooks
+
+New post-training analysis uses the git-friendly marimo entry points under
+`analysis/`. Start with:
+
+```bash
+marimo edit analysis/halo12.py
+```
+
+The `.ipynb` files in this directory are retained for compatibility while
+analysis is migrated. Training remains a standalone process.
 
 Interactive Jupyter notebooks for the Deep Potential (JAX) project.
 

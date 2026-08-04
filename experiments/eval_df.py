@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import yaml
 
 import matplotlib
 matplotlib.use("Agg")
@@ -35,7 +34,9 @@ def run_eval_df(
     data_path: str | Path,
     df_run_dir: str | Path,
     *,
-    out_dir: Optional[str | Path] = None,
+    out_dir: str | Path | None = None,
+    plots_dir: str | Path | None = None,
+    dataset: str = "eta",
     coordsys: str = "cart",
     n_samples: int = 262144,
     seed: int = 0,
@@ -44,7 +45,7 @@ def run_eval_df(
     logscale: bool = False,
     plummer_diag: bool = False,
     n_diag_points: int = 16384,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate DF by comparing marginals: train data vs flow samples.
 
     Returns
@@ -59,8 +60,9 @@ def run_eval_df(
     flow_cfg = df_cfg.get("flow", {})
 
     out_dir = ensure_dir(out_dir or (Path(df_run_dir) / "plots"))
+    plots_dir = ensure_dir(plots_dir or out_dir)
 
-    eta = load_eta_h5(data_path, dataset="eta")
+    eta = load_eta_h5(data_path, dataset=dataset)
     eta_coords = calc_coords(eta)
 
     # Sample from flow in standardized coordinates, then inverse-transform to physical
@@ -73,11 +75,11 @@ def run_eval_df(
     )
     samp_coords = calc_coords(eta_samp)
 
-    plot_1d_marginals(eta_coords, samp_coords, fig_dir=str(out_dir), coordsys=coordsys, fig_fmt=("png",))
+    plot_1d_marginals(eta_coords, samp_coords, fig_dir=str(plots_dir), coordsys=coordsys, fig_fmt=("png",))
     plot_2d_marginal(
         eta_coords,
         samp_coords,
-        fig_dir=str(out_dir),
+        fig_dir=str(plots_dir),
         dim1=dim1,
         dim2=dim2,
         fig_fmt=("png",),
@@ -85,7 +87,7 @@ def run_eval_df(
     )
 
     # 2D marginal grid (train vs sample): x-y, x-z, vx-vy
-    _plot_2d_grid(eta, eta_samp, out_dir)
+    _plot_2d_grid(eta, eta_samp, plots_dir)
 
     # Save sample data for offline notebook plotting
     np.savez(
@@ -95,8 +97,11 @@ def run_eval_df(
     )
     print(f"  Saved df_samples.npz ({eta.shape[0]} train, {eta_samp.shape[0]} sample)")
 
-    result: Dict[str, Any] = {
-        "eta_coords": eta_coords, "samp_coords": samp_coords, "out_dir": out_dir,
+    result: dict[str, Any] = {
+        "eta_coords": eta_coords,
+        "samp_coords": samp_coords,
+        "out_dir": out_dir,
+        "plots_dir": plots_dir,
     }
 
     # Plummer-specific diagnostics
@@ -104,11 +109,15 @@ def run_eval_df(
         diag = _plummer_diagnostics(
             df_model, df_params, normalizer, flow_cfg,
             coordinate_transform=coord_transform,
-            n_points=n_diag_points, n_rv_samples=n_samples, seed=seed, out_dir=out_dir,
+            n_points=n_diag_points,
+            n_rv_samples=n_samples,
+            seed=seed,
+            data_dir=out_dir,
+            plots_dir=plots_dir,
         )
         result["plummer_diag"] = diag
 
-    print(f"Wrote DF plots to {out_dir}")
+    print(f"Wrote DF evaluation data to {out_dir} and plots to {plots_dir}")
     return result
 
 
@@ -157,8 +166,9 @@ def _plummer_diagnostics(
     n_points: int = 16384,
     n_rv_samples: int = 262144,
     seed: int = 0,
-    out_dir: Path | None = None,
-) -> Dict[str, Any]:
+    data_dir: Path | None = None,
+    plots_dir: Path | None = None,
+) -> dict[str, Any]:
     """Generate Plummer-specific diagnostic plots.
 
     Returns dict with slope/R² per dimension and residual stats.
@@ -169,7 +179,8 @@ def _plummer_diagnostics(
             "coordinates and cannot be combined with a nonlinear transform."
         )
 
-    out_dir = ensure_dir(out_dir or Path("."))
+    data_dir = ensure_dir(data_dir or Path("."))
+    plots_dir = ensure_dir(plots_dir or data_dir)
 
     # ---- 1. Gradient comparison: flow score vs analytic Plummer score ----
     eta_phys = sample_plummer(
@@ -224,7 +235,8 @@ def _plummer_diagnostics(
         ax.text(
             0.05, 0.95, f"slope={slope:.3f}\nR\u00b2={r2:.3f}",
             ha="left", va="top", transform=ax.transAxes,
-            fontsize=9, bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+            fontsize=9,
+            bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none"},
         )
         ax.set_xlabel("true")
         ax.set_ylabel("normalizing flow")
@@ -232,17 +244,17 @@ def _plummer_diagnostics(
 
     fig.subplots_adjust(hspace=0.25, wspace=0.3, top=0.91, bottom=0.06)
     fig.suptitle("Performance of normalizing flow score gradients", fontsize=20)
-    fig.savefig(out_dir / "flow_gradients_comparison.png", dpi=100)
+    fig.savefig(plots_dir / "flow_gradients_comparison.png", dpi=100)
     plt.close(fig)
-    print(f"  Wrote gradient comparison plot")
+    print("  Wrote gradient comparison plot")
 
     # Save gradient data for offline notebook plotting
     np.savez(
-        out_dir / "gradient_comparison.npz",
+        data_dir / "gradient_comparison.npz",
         score_true=score_true,
         score_est=score_est,
     )
-    print(f"  Saved gradient_comparison.npz")
+    print("  Saved gradient_comparison.npz")
 
     # ---- 2. Score residual histograms ----
     score_resid = score_est - score_true
@@ -269,9 +281,9 @@ def _plummer_diagnostics(
 
     fig.subplots_adjust(hspace=0.25, wspace=0.3, top=0.91, bottom=0.06)
     fig.suptitle("Score-gradient residual histograms", fontsize=20)
-    fig.savefig(out_dir / "flow_gradients_comparison_hist.png", dpi=100)
+    fig.savefig(plots_dir / "flow_gradients_comparison_hist.png", dpi=100)
     plt.close(fig)
-    print(f"  Wrote gradient residual histogram plot")
+    print("  Wrote gradient residual histogram plot")
 
     # ---- 3. r-v distribution comparison ----
     r_lim, v_lim, bins_rv = (0.0, 5.0), (0.0, 1.5), (50, 50)
@@ -341,20 +353,20 @@ def _plummer_diagnostics(
     ax_arr[0, 0].set_title("Linear Scale", fontsize=16)
     ax_arr[0, 1].set_title("Log Scale", fontsize=16)
 
-    fig.savefig(out_dir / "df_rv_comparison.png", dpi=100)
+    fig.savefig(plots_dir / "df_rv_comparison.png", dpi=100)
     plt.close(fig)
-    print(f"  Wrote r-v comparison plot")
+    print("  Wrote r-v comparison plot")
 
     # Save r-v data for offline notebook plotting
     np.savez(
-        out_dir / "rv_comparison.npz",
+        data_dir / "rv_comparison.npz",
         r=r_grid,
         v=v_grid,
         n_ideal=n_ideal,
         n_samp=n_samp,
         n_flow_total=len(r_samp),
     )
-    print(f"  Saved rv_comparison.npz")
+    print("  Saved rv_comparison.npz")
 
     return {
         "slopes": dict(zip(dim_labels, slopes)),
@@ -372,6 +384,7 @@ def main() -> int:
     parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--df-run-dir", type=str, required=True)
     parser.add_argument("--out-dir", type=str, default=None)
+    parser.add_argument("--dataset", type=str, default="eta")
     parser.add_argument("--coordsys", type=str, default="cart", choices=["cart", "cyl", "sph"])
     parser.add_argument("--n-samples", type=int, default=262144)
     parser.add_argument("--seed", type=int, default=0)
@@ -384,7 +397,7 @@ def main() -> int:
 
     run_eval_df(
         args.data, args.df_run_dir,
-        out_dir=args.out_dir, coordsys=args.coordsys,
+        out_dir=args.out_dir, dataset=args.dataset, coordsys=args.coordsys,
         n_samples=args.n_samples, seed=args.seed,
         dim1=args.dim1, dim2=args.dim2, logscale=args.logscale,
         plummer_diag=args.plummer_diag, n_diag_points=args.n_diag_points,

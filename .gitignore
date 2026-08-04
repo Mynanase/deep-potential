@@ -153,7 +153,7 @@ references/
 # Custom dirs
 data/
 paper_barmodel_202306/
-runs/
+/runs/
 
 # ARC research workflow caches; keep only curated top-level Markdown reports.
 2205.02244_x_2507.03742/domain/

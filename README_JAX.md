@@ -258,9 +258,10 @@ python -m experiments.smoke_dpjax
 - `run-dir/ckpt/`（Orbax）
 - `run-dir/metrics.csv`
 
-## Jupyter Notebook 交互式开发
+## marimo 交互式分析
 
-项目支持通过 Jupyter Notebook 进行交互式调试和训练。所有训练/评估脚本均已重构为可导入的函数，可以在 Notebook 中直接调用。
+训练与昂贵评估使用独立后台进程；marimo 只读取持久化结果并进行轻量绘图与展示。
+Notebook 保存为普通 Python 文件，入口见 `analysis/halo12.py`。
 
 ### 安装 Notebook 依赖
 
@@ -268,36 +269,23 @@ python -m experiments.smoke_dpjax
 pip install -e ".[notebook]"
 ```
 
-### 启动 JupyterLab
+### 启动 marimo
 
 ```bash
-# 本地 CPU 调试模式（秒级编译，适合原型验证）
-JAX_PLATFORM_NAME=cpu jupyter lab
-
-# GPU 模式
-XLA_PYTHON_CLIENT_PREALLOCATE=false jupyter lab
+marimo edit analysis/halo12.py
 ```
 
-### Notebook 索引
+### 推荐执行顺序
 
-`notebooks/` 只保留训练后分析入口：
-
-| Notebook | 说明 |
-|----------|------|
-| `07_analysis.ipynb` | 加载已完成的训练结果并生成分析图；训练流程使用独立 CLI 脚本 |
-
-### 在 Notebook 中调用训练
-
-```python
-from dpjax.config import load_config, merge_config
-from dpjax.paths import DATA_DIR, RUNS_DIR
-from experiments.train_df import run_df_training
-
-cfg = load_config("configs/df_plummer.yaml")
-cfg = merge_config(cfg, {"train": {"epochs": 4, "batch_size": 256}})
-
-result = run_df_training(cfg, DATA_DIR / "plummer_n131072.h5", RUNS_DIR / "plummer/df")
+```bash
+python -m experiments.run_df configs/runs/halo12_static_v1.yaml
+python -m experiments.run_phi configs/runs/halo12_static_v1.yaml
+python -m experiments.run_eval configs/runs/halo12_static_v1.yaml
+marimo edit analysis/halo12.py
 ```
+
+旧 Jupyter notebook 暂时保留作为历史分析入口；新的分析功能应放入 `analysis/`
+中的 marimo 文件或 `dpjax/diagnostics/` 可测试函数。
 
 ### 远程 GPU 服务器（Docker）
 

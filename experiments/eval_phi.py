@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -41,7 +41,8 @@ def run_eval_phi(
     df_run_dir: str | Path,
     phi_run_dir: str | Path,
     *,
-    out_dir: Optional[str | Path] = None,
+    out_dir: str | Path | None = None,
+    plots_dir: str | Path | None = None,
     n_eval: int = 32768,
     batch_size: int = 4096,
     seed: int = 0,
@@ -52,11 +53,11 @@ def run_eval_phi(
     system: str = "generic",
     plot_overview: bool = True,
     slice_grid: int = 128,
-    slice_rmax: Optional[float] = None,
+    slice_rmax: float | None = None,
     fig_fmt: tuple[str, ...] = ("png", "pdf"),
     dpi: int = 180,
     gravitational_constant: float | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.
 
     Returns
@@ -77,7 +78,7 @@ def run_eval_phi(
     phi_model, phi_params, _ = load_phi(phi_run_dir)
 
     out_dir = ensure_dir(out_dir or phi_run_dir)
-    plots_dir = ensure_dir(out_dir / "plots")
+    plots_dir = ensure_dir(plots_dir or (out_dir / "plots"))
     system = str(system).lower()
     density_g = gravitational_constant_for_system(
         system,
@@ -221,7 +222,7 @@ def run_eval_phi(
             rho_analytic=rho_analytic,
         )
 
-    slice_data: Optional[Dict[str, np.ndarray]] = None
+    slice_data: dict[str, np.ndarray] | None = None
     if plot_overview:
         r_xy = np.sqrt(eta_eval_phys[:, 0] ** 2 + eta_eval_phys[:, 1] ** 2)
         rmax_slice = float(slice_rmax) if slice_rmax is not None else float(max(np.percentile(r_xy, 99.0), 1.0e-6))
