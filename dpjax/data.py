@@ -434,6 +434,50 @@ def resolve_run_support_indices(
     return np.flatnonzero(mask).astype(np.int64, copy=False), "reconstructed"
 
 
+def load_df_support_eta(
+    data_path: str | Path,
+    df_run_dir: str | Path,
+    df_data_cfg: Dict[str, Any],
+    *,
+    coordinate_transform: CoordinateTransform | None = None,
+) -> tuple[np.ndarray, str, int]:
+    """Load the source rows on which a DF was trained (its support).
+
+    Uses the persisted ``data_selection.npz`` contract when available; for
+    legacy runs the sigma-clip support is reconstructed from the saved DF
+    preprocessing and config.
+
+    Returns ``(support_eta, support_source, source_n)`` where ``support_eta``
+    is the raw (physical) phase-space rows restricted to the DF support,
+    ``support_source`` is ``"persisted"`` or ``"reconstructed"``, and
+    ``source_n`` is the total number of rows in the source dataset.
+    """
+    data_path = Path(data_path)
+    df_run_dir = Path(df_run_dir)
+    dataset = str(df_data_cfg.get("dataset", "eta"))
+    eta = load_eta_h5(data_path, dataset=dataset)
+    support_weights = None
+    selection_path = df_run_dir / "data_selection.npz"
+    if (
+        not selection_path.exists()
+        and float(df_data_cfg.get("clip_sigma", 0.0)) > 0.0
+        and df_data_cfg.get("weight_dataset")
+    ):
+        support_weights = load_h5_vector(
+            data_path,
+            dataset=str(df_data_cfg["weight_dataset"]),
+        )
+    source_n = int(eta.shape[0])
+    support_indices, support_source = resolve_run_support_indices(
+        df_run_dir,
+        eta,
+        data_config=df_data_cfg,
+        coordinate_transform=coordinate_transform,
+        weights=support_weights,
+    )
+    return eta[support_indices], support_source, source_n
+
+
 def load_run_preprocessing(
     run_dir: str | Path,
 ) -> tuple[Normalizer, CoordinateTransform | None]:

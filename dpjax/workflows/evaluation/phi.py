@@ -10,10 +10,8 @@ import numpy as np
 
 from dpjax.data import (
     iter_batches,
-    load_eta_h5,
-    load_h5_vector,
+    load_df_support_eta,
     require_physics_compatible_transform,
-    resolve_run_support_indices,
 )
 from dpjax.flows.api import load_df, score_apply
 from dpjax.models.potential import (
@@ -89,34 +87,18 @@ def run_eval_phi(
     )
 
     df_data_cfg = df_cfg.get("data", {})
-    dataset = str(df_data_cfg.get("dataset", "eta"))
-    eta = load_eta_h5(data_path, dataset=dataset)
-    support_weights = None
-    selection_path = Path(df_run_dir) / "data_selection.npz"
-    if (
-        not selection_path.exists()
-        and float(df_data_cfg.get("clip_sigma", 0.0)) > 0.0
-        and df_data_cfg.get("weight_dataset")
-    ):
-        support_weights = load_h5_vector(
-            data_path,
-            dataset=str(df_data_cfg["weight_dataset"]),
-        )
-    source_n = int(eta.shape[0])
-    support_indices, support_source = resolve_run_support_indices(
+    support_eta, support_source, source_n = load_df_support_eta(
+        data_path,
         df_run_dir,
-        eta,
-        data_config=df_data_cfg,
+        df_data_cfg,
         coordinate_transform=coord_transform,
-        weights=support_weights,
     )
-    eta = eta[support_indices]
     print(
         "[eval_phi] DF support: "
-        f"source={support_source}, kept={eta.shape[0]}/"
+        f"source={support_source}, kept={support_eta.shape[0]}/"
         f"{source_n}"
     )
-    eta_std = normalizer.transform(eta)
+    eta_std = normalizer.transform(support_eta)
 
     n_total = eta_std.shape[0]
     n_eval = int(min(n_eval, n_total))
