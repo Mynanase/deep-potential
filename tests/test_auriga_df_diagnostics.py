@@ -4,9 +4,9 @@ import h5py
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.data import Normalizer
-from dpjax.plotting import plot_auriga_df_ensemble
-from dpjax.workflows.evaluation import auriga_df as eval_auriga_df
+from dpjax.normalization import Normalizer
+from experiments.plotting import plot_auriga_df_ensemble
+from experiments.workflows.evaluation import auriga_df as eval_auriga_df
 
 
 def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):

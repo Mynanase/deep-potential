@@ -8,6 +8,11 @@ import jax
 import jax.numpy as jnp
 
 
+def count_parameters(tree: Any) -> int:
+    """Return the total number of scalar values in a parameter pytree."""
+    return sum(int(leaf.size) for leaf in jax.tree_util.tree_leaves(tree))
+
+
 def mean_square(tree: Any) -> jnp.ndarray:
     """Return the element-wise mean square across all leaves of a pytree."""
     leaves = jax.tree_util.tree_leaves(tree)

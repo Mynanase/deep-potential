@@ -8,18 +8,18 @@ from typing import Any
 
 import numpy as np
 
-from dpjax.plotting import plot_auriga_df_ensemble
-from dpjax.workflows.config import (
+from experiments.plotting import plot_auriga_df_ensemble
+from experiments.validation.auriga_truth import run_eval_auriga_truth
+from experiments.workflows.config import (
     RunSpec,
     TrialSpec,
     load_run_spec,
     prepare_run,
     write_evaluation_config,
 )
-from dpjax.workflows.evaluation.auriga_df import evaluate_auriga_df
-from dpjax.workflows.evaluation.auriga_truth import run_eval_auriga_truth
-from dpjax.workflows.evaluation.df import run_eval_df
-from dpjax.workflows.evaluation.phi import run_eval_phi
+from experiments.workflows.evaluation.auriga_df import evaluate_auriga_df
+from experiments.workflows.evaluation.df import run_eval_df
+from experiments.workflows.evaluation.phi import run_eval_phi
 
 
 def _enabled(config: dict[str, Any]) -> bool:
@@ -29,8 +29,26 @@ def _enabled(config: dict[str, Any]) -> bool:
 def _fig_formats(config: dict[str, Any]) -> tuple[str, ...]:
     value = config.get("fig_formats", ["png"])
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError("evaluation.*.fig_formats must be a list of strings.")
+        raise ValueError("plots.*.formats must be a list of strings.")
     return tuple(value)
+
+
+def _with_plot_options(
+    config: dict[str, Any],
+    plots: dict[str, Any],
+    section: str,
+) -> dict[str, Any]:
+    """Merge run-level plot defaults into one evaluation/validation section."""
+    merged = dict(config)
+    common = {key: plots[key] for key in ("dpi", "formats") if key in plots}
+    section_value = plots.get(section, {})
+    if not isinstance(section_value, dict):
+        raise TypeError(f"plots.{section} must be a mapping.")
+    common.update(section_value)
+    if "formats" in common:
+        common["fig_formats"] = common.pop("formats")
+    merged.update(common)
+    return merged
 
 
 def _require_stage(path: Path, label: str) -> None:
@@ -168,8 +186,8 @@ def _run_truth(
     config: dict[str, Any],
 ) -> None:
     layout = spec.layout(trial)
-    output_dir = layout.eval_dir / "truth"
-    plots_dir = layout.plots_dir / "truth"
+    output_dir = layout.validation_dir / "auriga_truth"
+    plots_dir = output_dir / "plots"
     write_evaluation_config(output_dir, config)
     n_eval = config.get("n_eval", 65_536)
     run_eval_auriga_truth(
@@ -205,9 +223,21 @@ def run(config_path: str | Path) -> None:
     if system not in {"generic", "plummer", "halo"}:
         raise ValueError("evaluation.system must be generic, plummer, or halo.")
 
-    df_config = dict(evaluation.get("df", {}))
-    phi_config = dict(evaluation.get("phi", {}))
-    truth_config = dict(evaluation.get("truth", {"enabled": False}))
+    df_config = _with_plot_options(
+        dict(evaluation.get("df", {})),
+        spec.plots,
+        "df",
+    )
+    phi_config = _with_plot_options(
+        dict(evaluation.get("phi", {})),
+        spec.plots,
+        "phi",
+    )
+    truth_config = _with_plot_options(
+        dict(spec.validation.get("auriga_truth", {"enabled": False})),
+        spec.plots,
+        "auriga_truth",
+    )
 
     if _enabled(df_config):
         if system == "halo":

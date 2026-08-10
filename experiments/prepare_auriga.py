@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Sequence
 
-from dpjax.datasets.auriga import (
+from experiments.datasets.auriga import (
     AurigaSnapshot,
     align_snapshot,
     center_snapshot,

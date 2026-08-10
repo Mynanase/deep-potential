@@ -5,7 +5,7 @@ import numpy as np
 
 matplotlib.use("Agg")
 
-from dpjax.plotting.diagnostics import (
+from experiments.plotting.diagnostics import (
     plot_auriga_potential_comparison,
     plot_laplacian_density_diagnostics,
     plot_potential_rz_by_phi,

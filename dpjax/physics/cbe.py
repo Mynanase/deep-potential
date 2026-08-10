@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from dpjax.data import Normalizer
+from dpjax.normalization import Normalizer
 
 
 def residual_A(

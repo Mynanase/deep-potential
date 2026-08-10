@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from dpjax.data import load_eta_h5
+from experiments.datasets.phase_space import load_eta_h5
 
 _LABELS = ("x", "y", "z", "vx", "vy", "vz")
 

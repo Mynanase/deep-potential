@@ -4,7 +4,7 @@
 
 ```bash
 conda activate dp-jax
-pip install -e ".[notebook,tracking]"
+pip install -e ".[operations,notebook,tracking]"
 python -c "import jax; print(jax.default_backend()); print(jax.devices())"
 ```
 
@@ -15,9 +15,13 @@ example before changing scientific parameters:
 cp configs/runs/halo12_static_v1.yaml configs/runs/my_run.yaml
 ```
 
-Set `name`, `output_dir`, `data.path`, trial seeds, stage config paths and
-overrides in that file. Model-specific hyperparameters remain in the referenced
-DF and Phi YAML files. Do not pass model parameters as shell arguments.
+Set `name`, `output_dir`, `data`, trial seeds, execution, evaluation and plots
+in that file. Each trial references reusable model recipes under
+`configs/models/{df,phi}`. Model files contain architecture, loss, optimizer and
+training hyperparameters only. Do not pass model parameters as shell arguments.
+
+The complete field ownership and extension workflow is documented in
+`docs/architecture_operation_guide.md`.
 
 ## Run the stages
 
@@ -30,6 +34,10 @@ python -m experiments.run_eval configs/runs/my_run.yaml
 Each entry point accepts only the run YAML path. `run_phi` automatically uses
 the DF from the same trial. `run_eval` persists metrics and arrays before they
 are displayed by Marimo.
+
+The reusable `dpjax` package accepts six-dimensional arrays only. HDF5 and
+dataset-specific preparation live in `experiments.datasets`; adding another
+data source or plot does not change the numerical core.
 
 For a disconnected SSH session, launch one stage per background process:
 
@@ -52,7 +60,8 @@ runs/<run-name>/
 │   ├── df/       # checkpoint, preprocessing, config, metrics
 │   ├── phi/      # checkpoint, config, metrics
 │   ├── eval/     # persisted JSON/NPZ diagnostics
-│   └── plots/    # rendered figures
+│   ├── plots/    # rendered figures
+│   └── validation/ # optional simulator-truth checks
 └── summary/      # multi-trial DF summaries
 ```
 

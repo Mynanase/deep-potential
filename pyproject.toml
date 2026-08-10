@@ -12,20 +12,22 @@ authors = [{ name = "deep-potential contributors" }]
 dependencies = [
   "numpy>=1.23",
   "scipy>=1.10",
-  "h5py>=3.8",
-  "pyyaml>=6.0",
-  "tqdm>=4.66",
-  "matplotlib>=3.7",
   "jax>=0.4.25",
   "jaxlib>=0.4.25",
   "flax>=0.8.2",
   "optax>=0.2.2",
-  "orbax-checkpoint>=0.5.0",
   "chex>=0.1.86",
   "diffrax>=0.5.0",
 ]
 
 [project.optional-dependencies]
+operations = [
+  "h5py>=3.8",
+  "pyyaml>=6.0",
+  "tqdm>=4.66",
+  "matplotlib>=3.7",
+  "orbax-checkpoint>=0.5.0",
+]
 notebook = [
   "marimo>=0.19",
   "jupyter>=1.0",

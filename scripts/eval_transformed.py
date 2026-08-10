@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Evaluate FFJORD runs in transformed space (after power+zscore, before inverse).
 
 This bypasses the inverse coord_transform to isolate:
@@ -17,14 +16,16 @@ import argparse
 import os
 
 import jax
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy import stats as sp_stats
 
-from dpjax.flows.api import load_df, sample_apply
-from dpjax.data import load_eta_h5
+from dpjax.flows.api import sample_apply
+from experiments.datasets.phase_space import load_eta_h5
+from experiments.workflows.artifacts import load_df
 
 
 def _stats_1d(x, w=None):
@@ -129,7 +130,6 @@ def main():
     # by mass weight of each sample cell — which here is unknown a priori, so
     # we keep equal-weight samples, exactly as the model is trained!)
 
-    labels = ["x_std", "y_std", "z_std", "vx_std", "vy_std", "vz_std"]
     raw_labels = ["x", "y", "z", "vx", "vy", "vz"]
 
     # ---- Statistics table (equal-weight + mass-weighted) ----
@@ -198,10 +198,9 @@ def main():
             ax.legend(loc='upper right', fontsize=8)
             if log_scale:
                 ax.set_yscale("log")
-        return
 
     # ---- Marginal histograms (equal-weight) ----
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
     _draw_marginal_panel(axes.flatten(), data_power, samples_power,
                          weights_data=None, log_scale=True)
     plt.suptitle(f"{os.path.basename(args.run_dir)}: Transformed space (equal-weight, log)")
@@ -211,7 +210,7 @@ def main():
     plt.close()
     print(f"\nSaved: {out_path}")
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
     _draw_marginal_panel(axes.flatten(), data_power, samples_power,
                          weights_data=None, log_scale=False)
     plt.suptitle(f"{os.path.basename(args.run_dir)}: Transformed space (equal-weight, linear)")
@@ -223,7 +222,7 @@ def main():
 
     # ---- Marginal histograms (mass-weighted data) ----
     if mass_raw is not None:
-        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+        _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
         _draw_marginal_panel(axes.flatten(), data_power, samples_power,
                              weights_data=mass_raw, log_scale=True,
                              data_color="seagreen", data_label="data (mass-weighted)")
@@ -234,7 +233,7 @@ def main():
         plt.close()
         print(f"Saved: {out_path}")
 
-        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+        _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
         _draw_marginal_panel(axes.flatten(), data_power, samples_power,
                              weights_data=mass_raw, log_scale=False,
                              data_color="seagreen", data_label="data (mass-weighted)")
@@ -247,7 +246,7 @@ def main():
 
     # ---- QQ plots (transformed space) ----
     # Equal-weight QQ: sort both, take equal-quantile indices.
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
     axes = axes.flatten()
     for i, ax in enumerate(axes):
         d_sorted = np.sort(data_power[:, i])
@@ -272,7 +271,7 @@ def main():
 
     # Mass-weighted QQ: data side uses mass CDF to get quantiles.
     if mass_raw is not None:
-        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+        _fig, axes = plt.subplots(2, 3, figsize=(15, 8))
         axes = axes.flatten()
         for i, ax in enumerate(axes):
             s_sorted = np.sort(samples_power[:, i])
@@ -295,7 +294,7 @@ def main():
         print(f"Saved: {out_path}")
 
     # ---- z-dimension focus in transformed space ----
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    _fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     i = 2  # z dimension
     axes[0].hist(data_power[:, i], bins=300, density=True, alpha=0.5, label="data", color="steelblue")
     axes[0].hist(samples_power[:, i], bins=300, density=True, alpha=0.5, label="model", color="coral")
@@ -318,7 +317,7 @@ def main():
 
     # Mass-weighted z focus
     if mass_raw is not None:
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        _fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         i = 2
         w_n = mass_raw / mass_raw.sum()
         axes[0].hist(data_power[:, i], bins=300, density=True, weights=w_n,

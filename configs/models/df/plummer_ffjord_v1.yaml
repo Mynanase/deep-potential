@@ -1,0 +1,31 @@
+schema: dpjax.model.v1
+kind: df
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: ffjord
+  dim: 6
+  ffjord:
+    hidden_sizes: [256, 256, 256]
+    n_blocks: 3
+    solver: tsit5
+    rtol: 1.0e-5
+    atol: 1.0e-5
+    trace_type: exact
+    dt0: 0.01
+    max_steps: 4096
+    kin_reg: 1.0e-4
+    jac_reg: 1.0e-4
+
+train:
+  optimizer: radam
+  batch_size: 8192
+  epochs: 32
+  lr:
+    schedule: cosine
+    max: 0.003
+    final: 1.0e-4
+    warmup_frac: 0.1
+  grad_clip: 1.0

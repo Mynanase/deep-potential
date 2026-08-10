@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dpjax.workflows.config import (
+from experiments.workflows.config import (
     load_run_spec,
     prepare_run,
     validate_stage_start,
 )
-from dpjax.workflows.logging import ExperimentLogger
-from dpjax.workflows.training.df import run_df_training
+from experiments.workflows.logging import ExperimentLogger
+from experiments.workflows.training.df import run_df_training
 
 
 def run(config_path: str | Path) -> None:
@@ -22,7 +22,7 @@ def run(config_path: str | Path) -> None:
 
     for trial in spec.selected_trials():
         layout = spec.layout(trial)
-        config = trial.df.resolve_config(dataset=spec.dataset)
+        config = spec.resolve_stage_config(trial, "df")
         validate_stage_start(layout.df_dir, config, resume=spec.resume)
         run_name = f"{spec.name}-{trial.name}-df"
         print(f"[run_df] trial={trial.name} output={layout.df_dir}")

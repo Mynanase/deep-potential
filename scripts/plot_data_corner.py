@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Generate a 6x6 corner plot of the training data (x, y, z, vx, vy, vz)."""
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
 
-from dpjax.data import load_eta_h5
+from experiments.datasets.phase_space import load_eta_h5
 
 
 def corner_plot(

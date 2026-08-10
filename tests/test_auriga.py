@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import pytest
 
-from dpjax.datasets.auriga import (
+from experiments.datasets.auriga import (
     AURIGA_SCHEMA,
     AurigaSnapshot,
     align_indices_by_eta,
@@ -16,7 +16,7 @@ from dpjax.datasets.auriga import (
     save_auriga_snapshot,
     select_snapshot,
 )
-from dpjax.evaluation import (
+from experiments.diagnostics.evaluation import (
     acceleration_error_metrics,
     binned_potential_truth_by_phi,
     cartesian_to_spherical_phase_space,

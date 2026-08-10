@@ -1,0 +1,46 @@
+# 配置文件约定
+
+本目录只包含两类 YAML：模型配方和运行配置。
+
+```text
+configs/
+├── models/
+│   ├── df/       # DF 网络、loss、optimizer 与训练超参数
+│   └── phi/      # Phi 网络、loss、optimizer 与训练超参数
+└── runs/         # 数据、预处理、trial、运行、评估、绘图与验证
+```
+
+## 模型配方
+
+模型文件必须声明：
+
+```yaml
+schema: dpjax.model.v1
+kind: df  # 或 phi
+```
+
+允许放置网络结构、normalization 数值参数、loss、optimizer、学习率、
+batch size、epochs 和正则化。不得放置数据路径、数据筛选、seed、日志、GPU、
+checkpoint、绘图或输出目录。加载器会检查这些边界。
+
+参数量不手工配置；程序根据实际初始化后的参数树计算，并写入训练目录中的
+`model_summary.yaml`，避免声明值与真实网络不一致。
+
+## 运行配置
+
+运行文件必须声明：
+
+```yaml
+schema: dpjax.run.v1
+```
+
+它负责引用模型文件，并保存一次实验的数据、预处理、seed、运行环境、评估、
+绘图和可选 truth 验证。三个正式入口都只接收一个 run YAML：
+
+```bash
+python -m experiments.run_df configs/runs/<run>.yaml
+python -m experiments.run_phi configs/runs/<run>.yaml
+python -m experiments.run_eval configs/runs/<run>.yaml
+```
+
+完整修改路线见 `docs/architecture_operation_guide.md`。

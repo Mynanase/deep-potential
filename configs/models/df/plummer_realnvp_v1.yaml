@@ -1,0 +1,23 @@
+schema: dpjax.model.v1
+kind: df
+
+normalizer:
+  eps: 1.0e-6
+
+flow:
+  type: realnvp
+  dim: 6
+  n_coupling: 8
+  hidden_sizes: [16, 16, 16]
+  s_max: 2.0
+
+train:
+  optimizer: radam
+  batch_size: 8192
+  epochs: 256
+  lr:
+    schedule: cosine
+    max: 0.02
+    final: 0.001
+    warmup_frac: 0.1
+  grad_clip: 1.0

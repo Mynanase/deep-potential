@@ -3,34 +3,23 @@
 All experiment scripts should import from here instead of directly from
 ``dpjax.flows.realnvp`` (or future ``dpjax.flows.ffjord``).
 
-Usage
------
->>> from dpjax.flows.api import build_flow, init_flow, log_prob_apply, score_apply, sample_apply, load_df
+The API is array-only. Loading a model from a run directory belongs to the
+operational artifact layer.
 """
 
 from __future__ import annotations
 
 from numbers import Integral
-from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import jax
 import jax.numpy as jnp
-import yaml
 from flax import linen as nn
-
-from dpjax.data import (
-    CoordinateTransform,
-    Normalizer,
-    load_run_preprocessing,
-)
-from dpjax.utils.ckpt import create_manager, restore_latest
-
 
 # ── Registry ──────────────────────────────────────────────────────────
 # Maps flow.type string → (build_fn, init_fn, log_prob_fn, score_fn, sample_fn)
 
-_REGISTRY: Dict[str, Dict[str, Any]] = {}
+_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
 def register_flow(name: str, *, build, init, log_prob, score, sample, log_prob_reg=None):
@@ -180,15 +169,14 @@ def _resolve_type(flow_cfg: dict) -> str:
         import warnings
         warnings.warn(
             "RealNVP is deprecated and will be removed in a future release. "
-            "Migrate to FFJORD by setting flow.type='ffjord'. "
-            "See configs/df_plummer_ffjord.yaml for an example.",
+            "Migrate to FFJORD by setting flow.type='ffjord'.",
             FutureWarning,
             stacklevel=4,
         )
     return name
 
 
-def _backend(flow_cfg: dict) -> Dict[str, Any]:
+def _backend(flow_cfg: dict) -> dict[str, Any]:
     name = _resolve_type(flow_cfg)
     if name not in _REGISTRY:
         raise ValueError(
@@ -308,30 +296,3 @@ def sample_apply(
 
     name = _dispatch_name(model, resolved_flow_cfg)
     return _REGISTRY[name]["sample"](model, params, rng_key, n_samples)
-
-
-# ── Unified loader ───────────────────────────────────────────────────────
-
-def load_df(df_run_dir: str | Path) -> Tuple[nn.Module, dict, Normalizer, dict, CoordinateTransform | None]:
-    """Load a trained DF from *df_run_dir* (backend-agnostic).
-
-    Returns ``(model, params, normalizer, full_config_dict, coord_transform)``.
-    ``coord_transform`` is ``None`` when no coordinate preprocessing was used.
-    """
-    df_run_dir = Path(df_run_dir)
-    cfg_path = df_run_dir / "config.yaml"
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Missing {cfg_path}")
-
-    cfg = yaml.safe_load(cfg_path.read_text())
-    flow_cfg = cfg.get("flow", {})
-
-    model = build_flow(flow_cfg)
-
-    norm, coord_transform = load_run_preprocessing(df_run_dir)
-
-    ckpt_mgr = create_manager(df_run_dir / "ckpt")
-    restored = restore_latest(ckpt_mgr)
-    params = restored["params"]
-
-    return model, params, norm, cfg, coord_transform

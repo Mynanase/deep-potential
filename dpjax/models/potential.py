@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 import jax
 import jax.numpy as jnp
-import yaml
 from flax import linen as nn
-
-from dpjax.utils.ckpt import create_manager, restore_latest
 
 
 @dataclass(frozen=True)
@@ -69,32 +64,3 @@ def laplacian_phi_apply(
 
     std_x = jnp.asarray(std_x, dtype=x.dtype)
     return jnp.sum(diag / (std_x[None, :] ** 2), axis=-1)
-
-
-def load_phi(phi_run_dir: str | Path) -> tuple[PotentialMLP, dict, dict[str, Any]]:
-    """Load a trained Phi model from *phi_run_dir*.
-
-    Returns ``(model, params, full_config_dict)``.
-    """
-
-    phi_run_dir = Path(phi_run_dir)
-    cfg_path = phi_run_dir / "config.yaml"
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Missing {cfg_path}")
-
-    cfg = yaml.safe_load(cfg_path.read_text())
-    pot_cfg = cfg.get("potential", {})
-    model = PotentialMLP(
-        PotentialConfig(
-            hidden_sizes=tuple(
-                int(x) for x in pot_cfg.get("hidden_sizes", [512, 512, 512, 512])
-            ),
-            output_scale=float(pot_cfg.get("output_scale", 1.0)),
-        )
-    )
-
-    ckpt_mgr = create_manager(phi_run_dir / "ckpt")
-    restored = restore_latest(ckpt_mgr)
-    params = restored["params"]
-
-    return model, params, cfg

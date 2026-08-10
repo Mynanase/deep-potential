@@ -11,10 +11,15 @@ def _():
     import marimo as mo
     import yaml
 
-    from dpjax.diagnostics.df import load_df_evaluation, plot_density_profile
-    from dpjax.diagnostics.phi import load_phi_evaluation, plot_radial_curves
-    from dpjax.diagnostics.training import load_metrics, plot_training_metrics
-    from dpjax.paths import resolve_path
+    from experiments.diagnostics import (
+        load_df_evaluation,
+        load_metrics,
+        load_phi_evaluation,
+        plot_density_profile,
+        plot_radial_curves,
+        plot_training_metrics,
+    )
+    from experiments.paths import resolve_path
 
     return (
         Path,
@@ -38,7 +43,6 @@ def _(mo):
     This notebook reads completed run artifacts. Training and expensive
     evaluation remain independent background jobs.
     """)
-    return
 
 
 @app.cell
@@ -49,7 +53,7 @@ def _(mo):
         label="Run directory",
         full_width=True,
     )
-    run_dir_input
+    run_dir_input  # noqa: B018 - final expression is rendered by Marimo
     return (run_dir_input,)
 
 
@@ -120,7 +124,6 @@ def _(load_df_evaluation, mo, plot_density_profile, run_path, trial_path):
         else mo.callout("No DF evaluation is available yet.", kind="info")
     )
     mo.vstack([mo.md("## DF diagnostics"), df_output])
-    return
 
 
 @app.cell
@@ -147,14 +150,17 @@ def _(load_phi_evaluation, mo, plot_radial_curves, trial_path):
             radial_output,
         ]
     )
-    return
 
 
 @app.cell
 def _(Path, mo, trial_path):
     image_paths = sorted(
         path
-        for root in (trial_path / "plots", trial_path / "eval")
+        for root in (
+            trial_path / "plots",
+            trial_path / "eval",
+            trial_path / "validation",
+        )
         if root.exists()
         for path in root.rglob("*.png")
     )
@@ -168,7 +174,6 @@ def _(Path, mo, trial_path):
         else mo.callout("No saved diagnostic figures are available yet.", kind="info")
     )
     mo.vstack([mo.md("## Saved diagnostic figures"), gallery_output])
-    return
 
 
 if __name__ == "__main__":

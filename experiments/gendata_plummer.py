@@ -17,9 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
-from dpjax.data import save_eta_h5
-from dpjax.datasets.plummer import sample_plummer, split_train_test
-
+from experiments.datasets.phase_space import save_eta_h5
+from experiments.datasets.plummer import sample_plummer, split_train_test
 
 # ---------------------------------------------------------------------------
 # Main
@@ -70,7 +69,7 @@ def main() -> int:
         if args.test_n is not None:
             n_test = args.test_n
         else:
-            n_test = int(round(eta_all.shape[0] * args.test_frac))
+            n_test = round(eta_all.shape[0] * args.test_frac)
             n_test = min(max(n_test, 1), eta_all.shape[0] - 1)
 
         eta_train, eta_test = split_train_test(eta_all, test_n=n_test, rng=rng)

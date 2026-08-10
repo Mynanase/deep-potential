@@ -4,10 +4,10 @@ import h5py
 import numpy as np
 import pytest
 
-from dpjax.data import (
+from dpjax.normalization import fit_normalizer
+from experiments.datasets.phase_space import (
     CoordinateTransform,
     DFDataSelection,
-    fit_normalizer,
     inverse_preprocess_eta,
     iter_batches,
     load_eta_h5,
@@ -18,6 +18,7 @@ from dpjax.data import (
     require_physics_compatible_transform,
     resolve_run_support_indices,
     save_eta_h5,
+    save_normalizer_npz,
     sigma_clip_mask,
 )
 
@@ -48,7 +49,7 @@ def test_load_h5_vector_and_weighted_normalizer(tmp_path):
         handle.create_dataset("tracer_weight", data=[1.0, 3.0])
 
     weights = load_h5_vector(path, "tracer_weight")
-    normalizer = fit_normalizer(eta, weights=weights)
+    normalizer = fit_normalizer(eta, sample_weight=weights)
 
     np.testing.assert_allclose(normalizer.mean, np.full(6, 7.5))
     np.testing.assert_allclose(
@@ -144,7 +145,7 @@ def test_legacy_coordinate_transform_file_is_safely_disabled(tmp_path):
 
 def test_load_run_preprocessing_and_physics_guard(tmp_path):
     normalizer = fit_normalizer(np.arange(60, dtype=np.float32).reshape(10, 6))
-    normalizer.save_npz(tmp_path / "normalizer.npz")
+    save_normalizer_npz(normalizer, tmp_path / "normalizer.npz")
 
     loaded_normalizer, coordinate_transform = load_run_preprocessing(tmp_path)
     np.testing.assert_array_equal(loaded_normalizer.mean, normalizer.mean)

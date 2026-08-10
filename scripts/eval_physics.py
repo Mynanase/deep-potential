@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Evaluate v21: density profile rho(r) and other physical diagnostics.
 
 Compares data vs model:
@@ -11,13 +10,15 @@ import argparse
 import os
 
 import jax
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from dpjax.flows.api import load_df, sample_apply
-from dpjax.data import inverse_preprocess_eta, load_eta_h5
+from dpjax.flows.api import sample_apply
+from experiments.datasets.phase_space import inverse_preprocess_eta, load_eta_h5
+from experiments.workflows.artifacts import load_df
 
 
 def spherical_coords(pos, vel):
@@ -131,7 +132,7 @@ def main():
             print(f"{r_mid[i]:6.1f}  {rho_data[i]:12.4e}  {rho_model[i]:12.4e}  {ratio:8.2f}  {sigma_v_data[i]:12.1f}  {sigma_v_model[i]:12.1f}")
 
     # ---- Plot: density profile ----
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    _fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # Linear scale
     valid = rho_data > 0
@@ -159,7 +160,7 @@ def main():
     print(f"\nSaved: {out_path}")
 
     # ---- Plot: density ratio ----
-    fig, ax = plt.subplots(figsize=(10, 5))
+    _fig, ax = plt.subplots(figsize=(10, 5))
     ratio = np.where(rho_data > 0, rho_model / rho_data, np.nan)
     valid = (rho_data > 0) & (data_counts > 50) & (model_counts > 50)
     ax.plot(r_mid[valid], ratio[valid], 'ko-', ms=3, lw=1.5)
@@ -175,7 +176,7 @@ def main():
     print(f"Saved: {out_path}")
 
     # ---- Plot: velocity dispersion profiles ----
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    _fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     valid_d = np.isfinite(sigma_vr_data) & (data_counts > 50)
     valid_m = np.isfinite(sigma_vr_model) & (model_counts > 50)
 
@@ -208,7 +209,7 @@ def main():
     print(f"Saved: {out_path}")
 
     # ---- Plot: anisotropy profile ----
-    fig, ax = plt.subplots(figsize=(10, 5))
+    _fig, ax = plt.subplots(figsize=(10, 5))
     valid_d = np.isfinite(beta_data) & (data_counts > 100)
     valid_m = np.isfinite(beta_model) & (model_counts > 100)
     ax.plot(r_mid[valid_d], beta_data[valid_d], 'b-', lw=2, label='data')
@@ -230,7 +231,7 @@ def main():
     cum_data = np.cumsum(data_counts).astype(float) / len(r_data)
     cum_model = np.cumsum(model_counts).astype(float) / len(r_model)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    _fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(r_mid, cum_data, 'b-', lw=2, label='data')
     ax.plot(r_mid, cum_model, 'r--', lw=2, label='model')
     ax.set_xlabel('r [kpc]')

@@ -855,26 +855,19 @@ dependencies = [
     { name = "diffrax", version = "0.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "flax", version = "0.10.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "flax", version = "0.12.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "h5py" },
     { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "jaxlib", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "optax" },
-    { name = "orbax-checkpoint", version = "0.11.39", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "orbax-checkpoint", version = "0.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pyyaml" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -889,6 +882,15 @@ notebook = [
     { name = "marimo" },
     { name = "nbstripout" },
 ]
+operations = [
+    { name = "h5py" },
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "orbax-checkpoint", version = "0.11.39", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "orbax-checkpoint", version = "0.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyyaml" },
+    { name = "tqdm" },
+]
 tracking = [
     { name = "tensorboard" },
     { name = "tensorboardx" },
@@ -900,28 +902,28 @@ requires-dist = [
     { name = "chex", specifier = ">=0.1.86" },
     { name = "diffrax", specifier = ">=0.5.0" },
     { name = "flax", specifier = ">=0.8.2" },
-    { name = "h5py", specifier = ">=3.8" },
+    { name = "h5py", marker = "extra == 'operations'", specifier = ">=3.8" },
     { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.0" },
     { name = "jax", specifier = ">=0.4.25" },
     { name = "jaxlib", specifier = ">=0.4.25" },
     { name = "jupyter", marker = "extra == 'notebook'", specifier = ">=1.0" },
     { name = "jupyterlab", marker = "extra == 'notebook'", specifier = ">=4.0" },
     { name = "marimo", marker = "extra == 'notebook'", specifier = ">=0.19" },
-    { name = "matplotlib", specifier = ">=3.7" },
+    { name = "matplotlib", marker = "extra == 'operations'", specifier = ">=3.7" },
     { name = "nbstripout", marker = "extra == 'notebook'", specifier = ">=0.6" },
     { name = "numpy", specifier = ">=1.23" },
     { name = "optax", specifier = ">=0.2.2" },
-    { name = "orbax-checkpoint", specifier = ">=0.5.0" },
+    { name = "orbax-checkpoint", marker = "extra == 'operations'", specifier = ">=0.5.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'operations'", specifier = ">=6.0" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "tensorboard", marker = "extra == 'tracking'", specifier = ">=2.14" },
     { name = "tensorboardx", marker = "extra == 'tracking'", specifier = ">=2.6" },
-    { name = "tqdm", specifier = ">=4.66" },
+    { name = "tqdm", marker = "extra == 'operations'", specifier = ">=4.66" },
     { name = "wandb", marker = "extra == 'tracking'", specifier = ">=0.16" },
 ]
-provides-extras = ["notebook", "tracking", "dev"]
+provides-extras = ["operations", "notebook", "tracking", "dev"]
 
 [[package]]
 name = "equinox"

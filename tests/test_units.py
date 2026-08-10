@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 from dpjax.physics.units import (
-    G_KPC_KMS2_PER_MSUN,
     density_from_laplacian,
-    gravitational_constant_for_system,
     summarize_density_sign,
+)
+from experiments.validation.units import (
+    G_KPC_KMS2_PER_MSUN,
+    gravitational_constant_for_system,
 )
 
 

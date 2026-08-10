@@ -1,71 +1,91 @@
 # Project structure
 
-The active code has a deliberately small public surface: three run entry points,
-one workflow package and one Marimo analysis app.
+The repository separates the array-only numerical library from data and
+experiment operations.
 
 ```text
 deep-potential/
-├── analysis/
-│   └── halo12.py
-├── configs/
-│   ├── runs/                  # complete experiment specifications
-│   └── *.yaml                 # model/stage hyperparameters
-├── dpjax/
-│   ├── diagnostics/           # read-only artifact readers and lightweight plots
-│   ├── workflows/
-│   │   ├── config.py          # run schema, layout and safety checks
-│   │   ├── logging.py         # CSV/W&B/TensorBoard logging
-│   │   ├── training/          # DF and Phi implementations
-│   │   └── evaluation/        # DF, Phi and Auriga truth implementations
-│   ├── data.py
-│   ├── datasets/
-│   ├── flows/
-│   ├── models/
-│   ├── physics/
-│   └── plotting/
-├── experiments/
+├── dpjax/                         # reusable numerical core
+│   ├── normalization.py           # (N, 6) validation and model normalization
+│   ├── diagnostics/df.py          # reference vs generated six-dimensional data
+│   ├── flows/                     # DF models and array-level APIs
+│   ├── models/                    # potential model and derivatives
+│   ├── physics/                   # CBE and generic physical calculations
+│   └── utils/                     # numerical tree helpers
+├── experiments/                   # repository-specific operational layer
+│   ├── datasets/                  # HDF5, Auriga, Plummer and row selection
+│   ├── workflows/                 # YAML, logging, checkpoints and run layout
+│   ├── diagnostics/               # persisted artifact readers and metrics
+│   ├── plotting/                  # all matplotlib figure builders
+│   ├── validation/                # optional simulator/analytic truth checks
 │   ├── run_df.py
 │   ├── run_phi.py
-│   ├── run_eval.py
-│   └── <data and smoke utilities>
-├── jobs/                      # environment bootstrap and data preparation only
+│   └── run_eval.py
+├── analysis/halo12.py             # read-only Marimo application
+├── configs/
+│   ├── models/{df,phi}/           # reusable model/training recipes
+│   └── runs/                      # data, execution, evaluation and plots
 ├── tests/
-└── runs/                      # generated artifacts; not source code
+└── runs/                          # generated artifacts
 ```
+
+## Core contract
+
+The core accepts a finite floating-point array with shape `(N, 6)` and column
+order `[x, y, z, vx, vy, vz]`. It does not know the source dataset, file
+format, directory layout, simulator truth, or plotting convention.
+
+`dpjax.normalization` is model state rather than upstream data preparation.
+Its mean/std values are needed to train stably and convert scores and potential
+gradients back to physical coordinates. Persistence of those values belongs to
+`experiments.datasets.phase_space`.
 
 ## Dependency direction
 
 ```text
-configs/runs/*.yaml
-        │
-        ▼
-experiments.run_{df,phi,eval}       analysis/halo12.py
-        │                                  │
-        ▼                                  ▼
-dpjax.workflows                    dpjax.diagnostics
-        │                                  │
-        └──────────────► dpjax core ◄──────┘
+configs / files / datasets
+            │
+            ▼
+experiments.workflows ─────► dpjax
+            │                  ▲
+            ▼                  │
+experiments.diagnostics        │
+experiments.plotting ──────────┘
+            │
+            ▼
+analysis/halo12.py
 ```
 
-`experiments/` contains orchestration only. It must not contain numerical
-training/evaluation implementations. `dpjax.workflows` must not import
-`experiments`. `analysis/` reads persisted results and must not invoke a
-training workflow.
+The dependency is one-way: `experiments -> dpjax`. Core code must not import
+`experiments`, HDF5, YAML, Matplotlib, Orbax, W&B, or filesystem path helpers.
 
-## Experiment lifecycle
+## Configuration contract
 
-For every trial, DF and Phi live under the same directory. This makes their
-pairing explicit and prevents accidentally evaluating a Phi checkpoint against
-an unrelated DF:
+Configuration files have exactly two roles:
+
+- `configs/models/**/*.yaml` uses schema `dpjax.model.v1` and contains model
+  architecture, loss, optimizer, schedule, regularization, batch size and
+  epochs;
+- `configs/runs/*.yaml` uses schema `dpjax.run.v1` and contains data,
+  preprocessing, model references, seeds, execution, evaluation, plots and
+  optional validation.
+
+Model YAML is semantically aligned with `dpjax`, but it is loaded and validated
+by `experiments.workflows`; the numerical core never reads YAML. See
+`docs/architecture_operation_guide.md` for the extension workflow.
+
+## Output contract
 
 ```text
-runs/<name>/<trial>/df  ->  runs/<name>/<trial>/phi
-                         ->  runs/<name>/<trial>/eval
-                         ->  runs/<name>/<trial>/plots
+runs/<name>/<trial>/
+├── df/
+├── phi/
+├── eval/                         # ordinary DF/Phi diagnostics
+├── plots/
+└── validation/
+    └── auriga_truth/             # optional simulator-only validation
 ```
 
-Long-running stages are separate processes so they can be resumed and monitored
-independently. The resolved `run.yaml`, per-stage `config.yaml`, checkpoints and
-metrics provide the reproducibility boundary.
-
-See `docs/server_agent_run_guide.md` for concrete commands.
+Potential and acceleration truth are not part of the core phase-space input.
+They remain optional validation artifacts for synthetic/simulation development
+and are absent for real observations.

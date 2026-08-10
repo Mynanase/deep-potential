@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from dpjax.workflows.config import (
+from experiments.workflows.config import (
     load_run_spec,
     prepare_run,
     validate_stage_start,
 )
-from dpjax.workflows.logging import ExperimentLogger
-from dpjax.workflows.training.phi import run_phi_training
+from experiments.workflows.logging import ExperimentLogger
+from experiments.workflows.training.phi import run_phi_training
 
 
 def run(config_path: str | Path) -> None:
@@ -26,7 +26,7 @@ def run(config_path: str | Path) -> None:
             raise FileNotFoundError(
                 f"Missing completed DF stage for {trial.name}: {layout.df_dir}"
             )
-        config = trial.phi.resolve_config(dataset=spec.dataset)
+        config = spec.resolve_stage_config(trial, "phi")
         validate_stage_start(layout.phi_dir, config, resume=spec.resume)
         if spec.resume and trial.phi.init_params is not None:
             raise ValueError(

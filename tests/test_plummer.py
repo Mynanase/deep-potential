@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dpjax.datasets.plummer import (
+from experiments.datasets.plummer import (
     PlummerSphere,
     plummer_df,
     sample_plummer,

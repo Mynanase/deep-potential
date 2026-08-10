@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.data import Normalizer
 from dpjax.flows.api import build_flow, init_flow, log_prob_apply, score_apply
 from dpjax.models.potential import PotentialConfig, PotentialMLP, grad_phi_apply
+from dpjax.normalization import Normalizer
 from dpjax.physics.cbe import residual_A
 
 

@@ -1,14 +1,18 @@
 # 服务器 Agent 操作指南
 
-本文是当前架构的唯一操作指南。训练和评估由独立进程完成；Marimo 只读取结果。
+本文是服务器执行指南。训练和评估由独立进程完成；Marimo 只读取结果。
+新增模型、数据、诊断或绘图时，先查阅 `docs/architecture_operation_guide.md`。
 
 ## 1. 架构约束
 
 - `experiments.run_df`、`run_phi`、`run_eval` 是唯一支持的训练/评估入口；
 - 每个入口只接收一个 `configs/runs/*.yaml` 路径；
-- 训练、评估、配置与日志实现在 `dpjax.workflows`；
+- `dpjax` 只接受 `(N, 6)` 相空间数组，不读取文件或生成图表；
+- 数据适配、训练编排、评估、日志和绘图实现在 `experiments`；
 - DF 和 Phi 必须属于同一 run/trial；
 - `analysis/halo12.py` 不加载训练流程，也不写 checkpoint；
+- `configs/models` 只保存模型结构与训练配方；
+- `configs/runs` 保存数据、运行、评估、绘图和模型引用；
 - 不重新引入旧的多参数 CLI、独立绘图脚本或每个实验一份 shell wrapper。
 
 ## 2. 服务器准备
@@ -19,7 +23,7 @@ git switch codex/standalone-run-architecture
 git pull --ff-only
 
 conda activate dp-jax
-pip install -e ".[notebook,tracking]"
+pip install -e ".[operations,notebook,tracking]"
 
 python -c "import jax; print(jax.default_backend()); print(jax.devices())"
 ```
@@ -35,20 +39,31 @@ cp configs/runs/halo12_static_v1.yaml configs/runs/halo12_server_v1.yaml
 编辑复制后的文件，至少检查：
 
 ```yaml
+schema: dpjax.run.v1
 name: halo12_server_v1
 output_dir: runs/halo12_server_v1
 
 data:
   path: data/auriga/halo12_all_mass.h5
   dataset: eta
+  weight_dataset: tracer_weight
+  split:
+    validation_fraction: 0.25
+    seed: 1042
+  preprocessing:
+    clip_sigma: 4.5
+    jitter_std: 0.002
+    transform:
+      type: none
+      dims: []
 
 trials:
   trial_00:
     df:
-      config: configs/df_halo12_ffjord_v23_mass.yaml
+      model: configs/models/df/halo12_ffjord_compact_v1.yaml
       seed: 42
     phi:
-      config: configs/phi_halo12_static_v1.yaml
+      model: configs/models/phi/halo12_static_mlp_v1.yaml
       seed: 42
 
 logging:
@@ -57,11 +72,22 @@ logging:
 
 execution:
   resume: false
+  stages:
+    df:
+      multi_gpu: true
+      log_every: 25
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+    phi:
+      multi_gpu: true
+      log_every: 50
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
 ```
 
-需要修改模型参数时，优先改所引用的 stage YAML；仅针对本次 run 的小改动放入
-`df.overrides` 或 `phi.overrides`。比较多组配对时增加 `trial_01` 等，不要分别维护
-互不关联的 DF/Phi 输出路径。
+需要修改模型参数时，在 `configs/models/{df,phi}` 复制一个新模型配方；仅针对
+本次 run 的小型消融可使用 `model_overrides`。比较多组配对时增加 `trial_01` 等，
+不要分别维护互不关联的 DF/Phi 输出路径。
 
 ## 4. 后台执行
 
@@ -107,17 +133,20 @@ runs/halo12_server_v1/
 ├── trial_00/
 │   ├── df/
 │   │   ├── config.yaml
+│   │   ├── model_summary.yaml
 │   │   ├── metrics.csv
 │   │   └── ckpt/
 │   ├── phi/
 │   │   ├── config.yaml
+│   │   ├── model_summary.yaml
 │   │   ├── metrics.csv
 │   │   └── ckpt/
 │   ├── eval/
 │   │   ├── df/
-│   │   ├── phi/
-│   │   └── truth/
-│   └── plots/
+│   │   └── phi/
+│   ├── plots/
+│   └── validation/
+│       └── auriga_truth/  # 仅模拟数据且显式启用时存在
 └── summary/
 ```
 
@@ -144,9 +173,10 @@ marimo check --strict analysis/halo12.py
 Agent 操作时：
 
 1. 先读根目录 `AGENTS.md`；
-2. 先修改 run/stage YAML，再启动独立进程；
+2. 模型参数修改 `configs/models`，数据和运行参数修改 `configs/runs`；
 3. 不混用不同 trial 的模型；
 4. 不绕过配置快照与 checkpoint 保护；
 5. 不提交数据、凭据、日志和 checkpoint；
-6. 修改数值实现时同步更新 `dpjax.workflows` 测试；
-7. 保留工作区中与本任务无关的用户文件。
+6. 新数据、图表和 truth 验证只修改 `experiments`，不要放进 `dpjax`；
+7. 修改数值核心时同步更新数组级 `dpjax` 测试；
+8. 保留工作区中与本任务无关的用户文件。

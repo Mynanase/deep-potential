@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from dpjax.config import load_config, merge_config
+from pathlib import Path
+
+import pytest
+
+from experiments.workflows.model_config import (
+    load_model_config,
+    merge_config,
+    validate_model_config,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_merge_config_is_recursive_and_non_mutating():
@@ -22,7 +32,47 @@ def test_merge_config_is_recursive_and_non_mutating():
 
 
 def test_load_config_resolves_repository_config():
-    config = load_config("configs/df_halo12_ffjord_v21.yaml")
+    config = load_model_config(
+        "configs/models/df/halo12_ffjord_wide_v1.yaml",
+        expected_kind="df",
+    )
 
+    assert config["schema"] == "dpjax.model.v1"
+    assert config["kind"] == "df"
     assert config["flow"]["type"] == "ffjord"
-    assert config["data"]["transform"]["type"] == "power"
+    assert config["train"]["optimizer"] == "radam"
+    assert "data" not in config
+
+
+def test_model_config_rejects_run_level_fields():
+    with pytest.raises(ValueError, match="Run-level field"):
+        validate_model_config(
+            {
+                "schema": "dpjax.model.v1",
+                "kind": "df",
+                "data": {"dataset": "eta"},
+                "flow": {"type": "ffjord"},
+                "train": {"optimizer": "radam"},
+            }
+        )
+
+
+def test_model_config_rejects_runtime_train_fields():
+    with pytest.raises(ValueError, match="Run-time train field"):
+        validate_model_config(
+            {
+                "schema": "dpjax.model.v1",
+                "kind": "phi",
+                "potential": {"hidden_sizes": [16, 16]},
+                "train": {"optimizer": "adam", "multi_gpu": True},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((PROJECT_ROOT / "configs" / "models").rglob("*.yaml")),
+)
+def test_checked_in_model_configs_obey_schema(path):
+    config = load_model_config(path)
+    assert config["schema"] == "dpjax.model.v1"

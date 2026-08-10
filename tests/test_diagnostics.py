@@ -7,9 +7,14 @@ import numpy as np
 
 matplotlib.use("Agg")
 
-from dpjax.diagnostics.df import load_df_evaluation, plot_density_profile
-from dpjax.diagnostics.phi import load_phi_evaluation, plot_radial_curves
-from dpjax.diagnostics.training import load_metrics, plot_training_metrics
+from experiments.diagnostics import (
+    load_df_evaluation,
+    load_metrics,
+    load_phi_evaluation,
+    plot_density_profile,
+    plot_radial_curves,
+    plot_training_metrics,
+)
 
 
 def test_training_diagnostics_load_and_plot_without_writing(tmp_path):

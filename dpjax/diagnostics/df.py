@@ -1,62 +1,100 @@
-"""Readers for persisted DF diagnostic artifacts."""
+"""Self-contained comparison of generated and reference phase-space rows."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
 
 import numpy as np
 
-
-def load_df_evaluation(path: str | Path) -> dict[str, Any]:
-    """Load available DF metrics and arrays without recomputing the model."""
-    path = Path(path)
-    result: dict[str, Any] = {}
-    metrics_path = path / "auriga_df_metrics.json"
-    diagnostics_path = path / "auriga_df_diagnostics.npz"
-    samples_path = path / "df_samples.npz"
-    if metrics_path.exists():
-        result["metrics"] = json.loads(metrics_path.read_text(encoding="utf-8"))
-    if diagnostics_path.exists():
-        with np.load(diagnostics_path) as data:
-            result["diagnostics"] = {key: data[key] for key in data.files}
-    if samples_path.exists():
-        with np.load(samples_path) as data:
-            result["samples"] = {key: data[key] for key in data.files}
-    return result
+from dpjax.normalization import PHASE_SPACE_DIM, validate_phase_space
 
 
-def plot_density_profile(
-    diagnostics: dict[str, np.ndarray],
+@dataclass(frozen=True)
+class DFDiagnostics:
+    """Per-coordinate summaries and shared-bin marginal histograms."""
+
+    reference_count: int
+    generated_count: int
+    reference_mean: np.ndarray
+    generated_mean: np.ndarray
+    reference_std: np.ndarray
+    generated_std: np.ndarray
+    bin_edges: np.ndarray
+    reference_density: np.ndarray
+    generated_density: np.ndarray
+
+
+def compare_df_samples(
+    reference_eta: np.ndarray,
+    generated_eta: np.ndarray,
     *,
-    dpi: int = 150,
-) -> Any:
-    """Create a radial data/model density figure from saved DF arrays."""
-    import matplotlib.pyplot as plt
+    bins: int = 64,
+    reference_weight: np.ndarray | None = None,
+) -> DFDiagnostics:
+    """Compare two ``(N, 6)`` samples without file or dataset assumptions."""
+    reference = validate_phase_space(reference_eta, name="reference_eta")
+    generated = validate_phase_space(generated_eta, name="generated_eta")
+    bins = int(bins)
+    if bins < 2:
+        raise ValueError("bins must be at least 2.")
 
-    required = {"radial_edges", "reference_density", "model_density"}
-    missing = required.difference(diagnostics)
-    if missing:
-        raise ValueError("DF diagnostics are missing: " + ", ".join(sorted(missing)))
-    edges = np.asarray(diagnostics["radial_edges"])
-    radius = 0.5 * (edges[:-1] + edges[1:])
-    reference = np.asarray(diagnostics["reference_density"])
-    model = np.asarray(diagnostics["model_density"])
+    weights = None
+    if reference_weight is not None:
+        weights = np.asarray(reference_weight, dtype=np.float64)
+        if weights.shape != (reference.shape[0],):
+            raise ValueError(
+                f"Expected reference_weight shape ({reference.shape[0]},), "
+                f"got {weights.shape}."
+            )
+        if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+            raise ValueError(
+                "reference_weight must be finite and strictly positive."
+            )
 
-    fig, ax = plt.subplots(dpi=dpi)
-    ax.plot(radius, reference, marker="o", label="data")
-    ax.plot(radius, model, marker="o", label="DF")
-    if "model_density_by_model" in diagnostics:
-        for values in np.asarray(diagnostics["model_density_by_model"]):
-            ax.plot(radius, values, color="C1", alpha=0.2, lw=0.8)
-    if np.all(radius > 0):
-        ax.set_xscale("log")
-    if np.all(reference > 0) and np.all(model > 0):
-        ax.set_yscale("log")
-    ax.set_xlabel("r")
-    ax.set_ylabel("tracer density")
-    ax.grid(True, alpha=0.2)
-    ax.legend()
-    fig.tight_layout()
-    return fig
+    edges = np.empty((PHASE_SPACE_DIM, bins + 1), dtype=np.float64)
+    reference_density = np.empty((PHASE_SPACE_DIM, bins), dtype=np.float64)
+    generated_density = np.empty((PHASE_SPACE_DIM, bins), dtype=np.float64)
+    for dimension in range(PHASE_SPACE_DIM):
+        combined = np.concatenate(
+            [reference[:, dimension], generated[:, dimension]]
+        )
+        lower, upper = np.quantile(combined, [0.001, 0.999])
+        if not upper > lower:
+            lower -= 0.5
+            upper += 0.5
+        dimension_edges = np.linspace(lower, upper, bins + 1)
+        edges[dimension] = dimension_edges
+        reference_density[dimension] = np.histogram(
+            reference[:, dimension],
+            bins=dimension_edges,
+            weights=weights,
+            density=True,
+        )[0]
+        generated_density[dimension] = np.histogram(
+            generated[:, dimension],
+            bins=dimension_edges,
+            density=True,
+        )[0]
+
+    if weights is None:
+        reference_mean = np.mean(reference, axis=0)
+        reference_variance = np.var(reference, axis=0)
+    else:
+        reference_mean = np.average(reference, axis=0, weights=weights)
+        reference_variance = np.average(
+            (reference - reference_mean) ** 2,
+            axis=0,
+            weights=weights,
+        )
+
+    return DFDiagnostics(
+        reference_count=int(reference.shape[0]),
+        generated_count=int(generated.shape[0]),
+        reference_mean=np.asarray(reference_mean, dtype=np.float64),
+        generated_mean=np.mean(generated, axis=0, dtype=np.float64),
+        reference_std=np.sqrt(reference_variance),
+        generated_std=np.std(generated, axis=0, dtype=np.float64),
+        bin_edges=edges,
+        reference_density=reference_density,
+        generated_density=generated_density,
+    )
