@@ -19,6 +19,8 @@ def run(config_path: str | Path) -> None:
     prepare_run(spec)
     backend = str(spec.logging.get("backend", "csv"))
     project = str(spec.logging.get("project", "deep-potential"))
+    mode = spec.logging.get("mode")
+    entity = spec.logging.get("entity")
 
     for trial in spec.selected_trials():
         layout = spec.layout(trial)
@@ -40,6 +42,8 @@ def run(config_path: str | Path) -> None:
             run_name=run_name,
             backend=backend,
             config=config,
+            mode=None if mode is None else str(mode),
+            entity=None if entity is None else str(entity),
         ) as logger:
             run_phi_training(
                 config,

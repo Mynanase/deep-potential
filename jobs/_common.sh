@@ -21,7 +21,6 @@ conda activate "$conda_env"
 if [[ -n "${GPU_DEVICES:-}" ]]; then
     export CUDA_VISIBLE_DEVICES="$GPU_DEVICES"
 fi
-export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
 mkdir -p "${LOG_DIR:-logs}"
 

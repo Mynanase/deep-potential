@@ -114,6 +114,8 @@ trials:
 logging:
   backend: wandb
   project: deep-potential
+  mode: online
+  # entity: your-user-or-team
 
 execution:
   resume: false
@@ -168,17 +170,30 @@ python -m experiments.run_phi configs/runs/my_run.yaml
 python -m experiments.run_eval configs/runs/my_run.yaml
 ```
 
-服务器后台运行示例：
+服务器后台运行使用项目 launcher；它在启动 JAX 前应用项目环境默认值，并把
+stdout、stderr、warning、进度和 traceback 写到 run 自己的 `logs` 目录：
 
 ```bash
-mkdir -p logs
-nohup env CUDA_VISIBLE_DEVICES=0,1 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-  python -m experiments.run_df configs/runs/my_run.yaml \
-  > logs/my-run-df.log 2>&1 < /dev/null &
+# 先运行 DF；确认完成后再依次运行 Phi 和 eval。
+python -m experiments.launch df configs/runs/my_run.yaml
+python -m experiments.launch phi configs/runs/my_run.yaml
+python -m experiments.launch eval configs/runs/my_run.yaml
 ```
 
 DF 成功后再启动 Phi，Phi 成功后再启动 evaluation。用日志或 W&B 监控，不依赖
-SSH 会话持续连接。
+SSH 会话持续连接：
+
+```bash
+tail -f runs/my_run/logs/phi.log
+```
+
+项目默认在 JAX 导入前设置 `XLA_PYTHON_CLIENT_PREALLOCATE=false`。使用服务器分配
+的全部 GPU 时无需设置 `CUDA_VISIBLE_DEVICES`；只有调度器或父环境需要限制可见
+GPU 时才在外层设置。
+
+启用 W&B 前安装 `.[tracking]` 并在服务器账户下运行一次 `wandb login`。
+`logging.backend` 可选 `csv`、`wandb`、`tensorboard` 或 `wandb+tb`；W&B 的
+`mode` 可选 `online`、`offline` 或 `disabled`。API key 不写入 run YAML。
 
 ## 6. 输出与恢复
 
@@ -186,6 +201,8 @@ SSH 会话持续连接。
 runs/<run>/
 ├── run.yaml
 ├── logs/
+│   ├── df.log / phi.log / eval.log
+│   └── df.pid / phi.pid / eval.pid
 ├── summary/
 └── <trial>/
     ├── df/

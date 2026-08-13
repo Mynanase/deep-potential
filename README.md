@@ -7,12 +7,18 @@ potentials from phase-space snapshots:
 2. freeze the DF and fit a potential network with the collisionless Boltzmann
    equation.
 
-Experiments use one checked-in run YAML and three stable entry points:
+Experiments use one checked-in run YAML and three stable worker entry points:
 
 ```bash
 python -m experiments.run_df configs/runs/halo12_static_v1.yaml
 python -m experiments.run_phi configs/runs/halo12_static_v1.yaml
 python -m experiments.run_eval configs/runs/halo12_static_v1.yaml
+```
+
+For a detached server run with automatic console logs, use the project launcher:
+
+```bash
+python -m experiments.launch phi configs/runs/halo12_static_v1.yaml
 ```
 
 The expensive stages are standalone processes. Post-training exploration uses

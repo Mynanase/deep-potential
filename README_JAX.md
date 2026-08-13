@@ -42,20 +42,57 @@ data source or plot does not change the numerical core.
 For a disconnected SSH session, launch one stage per background process:
 
 ```bash
-mkdir -p logs
-nohup env CUDA_VISIBLE_DEVICES=0,1 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-  python -m experiments.run_df configs/runs/my_run.yaml \
-  > logs/my-run-df.log 2>&1 < /dev/null &
+# Start DF first.
+python -m experiments.launch df configs/runs/my_run.yaml
+
+# Start each later stage only after the preceding stage succeeds.
+python -m experiments.launch phi configs/runs/my_run.yaml
+python -m experiments.launch eval configs/runs/my_run.yaml
 ```
 
-Repeat with `run_phi` and `run_eval` only after the preceding stage succeeds.
-Monitor with `tail -f logs/my-run-df.log` or W&B.
+The launcher detaches from SSH, writes the PID, and captures stdout, stderr,
+warnings, progress, and tracebacks. Monitor with:
+
+```bash
+tail -f runs/my_run/logs/phi.log
+```
+
+The project defaults `XLA_PYTHON_CLIENT_PREALLOCATE=false` before JAX is
+imported. When all allocated GPUs should be used, do not set
+`CUDA_VISIBLE_DEVICES`; JAX sees all devices exposed by the server/container.
+A scheduler or parent environment may still restrict visible devices.
+
+## W&B tracking
+
+Install the tracking extra and authenticate once on each server user account:
+
+```bash
+pip install -e ".[operations,tracking]"
+wandb login
+```
+
+Enable live W&B tracking in the run YAML:
+
+```yaml
+logging:
+  backend: wandb       # wandb+tb also keeps TensorBoard output
+  project: deep-potential
+  mode: online         # online, offline, or disabled
+  # entity: your-user-or-team
+```
+
+Use `backend: csv` to disable W&B while retaining local metrics. Use
+`mode: offline` on a machine without network access and run `wandb sync` on the
+generated stage `wandb/offline-run-*` directory later. Never store
+`WANDB_API_KEY` in a checked-in YAML; use `wandb login` or a protected server
+environment variable.
 
 ## Output contract
 
 ```text
 runs/<run-name>/
 ├── run.yaml
+├── logs/          # launcher console logs and PID files
 ├── trial_00/
 │   ├── df/       # checkpoint, preprocessing, config, metrics
 │   ├── phi/      # checkpoint, config, metrics

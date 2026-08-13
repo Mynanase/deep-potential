@@ -63,7 +63,12 @@ def _write_run_config(tmp_path: Path) -> Path:
                         "phi": {"model": str(phi_config), "seed": 7},
                     }
                 },
-                "logging": {"backend": "csv"},
+                "logging": {
+                    "backend": "wandb",
+                    "project": "test-project",
+                    "mode": "offline",
+                    "entity": "test-team",
+                },
                 "execution": {
                     "resume": False,
                     "stages": {
@@ -180,6 +185,9 @@ def test_run_df_entrypoint_derives_paths_from_run_config(tmp_path, monkeypatch):
     assert captured["logger_dir"] == expected
     assert captured["config"]["seed"] == 42
     assert captured["training_kwargs"]["resume"] is False
+    assert captured["logger_kwargs"]["project"] == "test-project"
+    assert captured["logger_kwargs"]["mode"] == "offline"
+    assert captured["logger_kwargs"]["entity"] == "test-team"
 
 
 def test_run_phi_entrypoint_uses_df_from_the_same_trial(tmp_path, monkeypatch):
@@ -193,6 +201,7 @@ def test_run_phi_entrypoint_uses_df_from_the_same_trial(tmp_path, monkeypatch):
     class DummyLogger:
         def __init__(self, run_dir, **kwargs):
             captured["logger_dir"] = run_dir
+            captured["logger_kwargs"] = kwargs
 
         def __enter__(self):
             return self
@@ -215,6 +224,8 @@ def test_run_phi_entrypoint_uses_df_from_the_same_trial(tmp_path, monkeypatch):
     assert captured["run_dir"] == run_root / "phi"
     assert captured["logger_dir"] == run_root / "phi"
     assert captured["config"]["seed"] == 7
+    assert captured["logger_kwargs"]["mode"] == "offline"
+    assert captured["logger_kwargs"]["entity"] == "test-team"
 
 
 @pytest.mark.parametrize(

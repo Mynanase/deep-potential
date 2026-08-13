@@ -63,11 +63,13 @@ def test_experiments_package_keeps_a_small_supported_surface():
         "__init__.py",
         "gendata_plummer.py",
         "inspect_data.py",
+        "launch.py",
         "paths.py",
         "prepare_auriga.py",
         "run_df.py",
         "run_eval.py",
         "run_phi.py",
+        "runtime.py",
         "smoke_dpjax.py",
     }
     actual = {

@@ -18,6 +18,8 @@ deep-potential/
 │   ├── diagnostics/               # persisted artifact readers and metrics
 │   ├── plotting/                  # all matplotlib figure builders
 │   ├── validation/                # optional simulator/analytic truth checks
+│   ├── launch.py                  # detached stage launcher, logs and PID files
+│   ├── runtime.py                 # pre-JAX project environment defaults
 │   ├── run_df.py
 │   ├── run_phi.py
 │   └── run_eval.py
@@ -85,6 +87,9 @@ runs/<name>/<trial>/
 └── validation/
     └── auriga_truth/             # optional simulator-only validation
 ```
+
+Each run root also contains `logs/{df,phi,eval}.log` and matching PID files when
+stages are started through `experiments.launch`.
 
 Potential and acceleration truth are not part of the core phase-space input.
 They remain optional validation artifacts for synthetic/simulation development

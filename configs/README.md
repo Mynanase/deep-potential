@@ -43,4 +43,13 @@ python -m experiments.run_phi configs/runs/<run>.yaml
 python -m experiments.run_eval configs/runs/<run>.yaml
 ```
 
+服务器后台执行使用统一 launcher；它自动写入 run 目录中的日志：
+
+```bash
+python -m experiments.launch phi configs/runs/<run>.yaml
+```
+
+日志后端也属于 run 配置：`backend: csv` 只保存本地指标，`backend: wandb`
+启用 W&B；可用 `mode: online` 或 `mode: offline` 控制同步方式。凭据不写入 YAML。
+
 完整修改路线见 `docs/architecture_operation_guide.md`。

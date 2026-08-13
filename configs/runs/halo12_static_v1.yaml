@@ -29,6 +29,8 @@ trials:
 logging:
   backend: wandb
   project: deep-potential
+  mode: online
+  # entity: your-user-or-team
 
 execution:
   # Change to true only to continue matching checkpoints in this run directory.

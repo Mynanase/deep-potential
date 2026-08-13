@@ -5,7 +5,8 @@
 
 ## 1. 架构约束
 
-- `experiments.run_df`、`run_phi`、`run_eval` 是唯一支持的训练/评估入口；
+- `experiments.run_df`、`run_phi`、`run_eval` 是三个前台 worker；
+- `experiments.launch` 是服务器后台执行的统一入口；
 - 每个入口只接收一个 `configs/runs/*.yaml` 路径；
 - `dpjax` 只接受 `(N, 6)` 相空间数组，不读取文件或生成图表；
 - 数据适配、训练编排、评估、日志和绘图实现在 `experiments`；
@@ -69,6 +70,8 @@ trials:
 logging:
   backend: wandb
   project: deep-potential
+  mode: online
+  # entity: your-user-or-team
 
 execution:
   resume: false
@@ -91,45 +94,58 @@ execution:
 
 ## 4. 后台执行
 
-以下命令可直接用于 fish：
+以下命令可直接用于 fish，不需要手写 `nohup`、GPU 列表、XLA 设置或日志重定向：
 
 ```bash
-mkdir -p logs
-
-nohup env CUDA_VISIBLE_DEVICES=0,1 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-  python -m experiments.run_df configs/runs/halo12_server_v1.yaml \
-  > logs/halo12-server-v1-df.log 2>&1 < /dev/null &
+python -m experiments.launch df configs/runs/halo12_server_v1.yaml
 ```
 
 DF 成功后运行 Phi：
 
 ```bash
-nohup env CUDA_VISIBLE_DEVICES=0,1 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-  python -m experiments.run_phi configs/runs/halo12_server_v1.yaml \
-  > logs/halo12-server-v1-phi.log 2>&1 < /dev/null &
+python -m experiments.launch phi configs/runs/halo12_server_v1.yaml
 ```
 
 Phi 成功后运行评估：
 
 ```bash
-nohup env CUDA_VISIBLE_DEVICES=0 XLA_PYTHON_CLIENT_PREALLOCATE=false \
-  python -m experiments.run_eval configs/runs/halo12_server_v1.yaml \
-  > logs/halo12-server-v1-eval.log 2>&1 < /dev/null &
+python -m experiments.launch eval configs/runs/halo12_server_v1.yaml
 ```
 
-评估包含采样、score、梯度和 Hessian，也可能需要 GPU。查看进度：
+项目默认设置 `XLA_PYTHON_CLIENT_PREALLOCATE=false`。未设置
+`CUDA_VISIBLE_DEVICES` 时使用服务器或容器暴露的全部 GPU；如需限制设备，应由
+调度器或启动 launcher 的父环境负责。评估包含采样、score、梯度和 Hessian，
+也可能需要 GPU。查看进度：
 
 ```bash
-tail -f logs/halo12-server-v1-df.log
+tail -f runs/halo12_server_v1/logs/df.log
 ```
 
-W&B 打开时也可用对应 run 名监控指标。
+launcher 会同时写入 `df.pid`、`phi.pid` 或 `eval.pid`，并拒绝重复启动仍在运行的
+同一阶段。
+
+### 启用 W&B
+
+首次在服务器账户中执行：
+
+```bash
+pip install -e ".[operations,tracking]"
+wandb login
+```
+
+然后在 run YAML 中设置 `logging.backend: wandb` 和 `mode: online`。没有网络时
+使用 `mode: offline`，之后对阶段目录中的 `wandb/offline-run-*` 执行
+`wandb sync`。密钥只保存在 W&B 用户配置或受保护的 `WANDB_API_KEY` 环境变量，
+不要写入 Git、run YAML 或日志。
 
 ## 5. 输出结构
 
 ```text
 runs/halo12_server_v1/
 ├── run.yaml
+├── logs/
+│   ├── df.log / phi.log / eval.log
+│   └── df.pid / phi.pid / eval.pid
 ├── trial_00/
 │   ├── df/
 │   │   ├── config.yaml

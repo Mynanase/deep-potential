@@ -72,7 +72,8 @@ def restore_step(manager: ocp.CheckpointManager, step: int) -> Any:
                     "Orbax restore failed due to missing/invalid sharding. This often happens when JAX "
                     "cannot initialize the intended platform (e.g. GPU OOM at startup) or when running "
                     "with a different platform than the one available.\n"
-                    "Fix: ensure GPU is available (or set env `XLA_PYTHON_CLIENT_PREALLOCATE=false`), "
-                    "or force CPU via `JAX_PLATFORM_NAME=cpu` for a quick smoke run."
+                    "Fix: ensure GPU is available; experiment entry points already default "
+                    "`XLA_PYTHON_CLIENT_PREALLOCATE=false`. Force CPU via "
+                    "`JAX_PLATFORM_NAME=cpu` only for a quick smoke run."
                 ) from e
             raise

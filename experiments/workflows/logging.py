@@ -66,6 +66,9 @@ class _WandbBackend:
         project: str,
         run_name: str | None,
         config: dict[str, Any] | None,
+        *,
+        entity: str | None,
+        mode: str | None,
     ):
         import wandb
 
@@ -75,6 +78,8 @@ class _WandbBackend:
             name=run_name or run_dir.name,
             dir=str(run_dir),
             config=config or {},
+            entity=entity,
+            mode=mode,
             reinit=True,
         )
 
@@ -153,6 +158,10 @@ class ExperimentLogger:
     csv_fieldnames : list[str]
         Column names for the CSV backend.  If empty, inferred from the first
         ``log_scalars`` call.
+    entity : str | None
+        Optional W&B user or team entity.
+    mode : str | None
+        W&B mode: ``online``, ``offline``, or ``disabled``.
     """
 
     def __init__(
@@ -164,12 +173,16 @@ class ExperimentLogger:
         backend: str = "csv",
         config: dict[str, Any] | None = None,
         csv_fieldnames: Sequence[str] = (),
+        entity: str | None = None,
+        mode: str | None = None,
     ):
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._backends: list = []
 
         backend = _BACKEND_ALIASES.get(backend.lower().strip(), backend.lower().strip())
+        if mode not in {None, "online", "offline", "disabled"}:
+            raise ValueError("W&B mode must be online, offline, or disabled.")
 
         want_wandb = "wandb" in backend
         want_tb = "tensorboard" in backend or "tb" in backend
@@ -181,7 +194,14 @@ class ExperimentLogger:
         if want_wandb:
             try:
                 self._backends.append(
-                    _WandbBackend(self.run_dir, project, run_name, config)
+                    _WandbBackend(
+                        self.run_dir,
+                        project,
+                        run_name,
+                        config,
+                        entity=entity,
+                        mode=mode,
+                    )
                 )
             except Exception as exc:  # noqa: BLE001 - optional backend failures degrade to CSV
                 warnings.warn(f"W&B init failed ({exc}); falling back to CSV-only.")
