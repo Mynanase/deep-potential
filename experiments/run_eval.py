@@ -17,7 +17,10 @@ from experiments.workflows.config import (
     prepare_run,
     write_evaluation_config,
 )
-from experiments.workflows.evaluation.auriga_df import evaluate_auriga_df
+from experiments.workflows.evaluation.auriga_df import (
+    DEFAULT_RADIAL_EDGES,
+    evaluate_auriga_df,
+)
 from experiments.workflows.evaluation.df import run_eval_df
 from experiments.workflows.evaluation.phi import run_eval_phi
 
@@ -93,6 +96,10 @@ def _run_halo_df(
         theta_edges=theta_edges,
         phi_edges=phi_edges,
         n_velocity_bins=int(config.get("n_velocity_bins", 64)),
+        radial_edges=np.asarray(
+            config.get("radial_edges", DEFAULT_RADIAL_EDGES),
+            dtype=np.float64,
+        ),
         spatial_r_edges=np.linspace(
             0.0,
             float(config.get("spatial_r_max", 75.0)),

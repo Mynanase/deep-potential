@@ -32,6 +32,7 @@ def main() -> int:
     parser.add_argument("--test-frac", type=float, default=0.0, help="Fraction of data for test set (0 = no split). Ignored if --test-n is set.")
     parser.add_argument("--test-n", type=int, default=None, help="Exact number of test samples (overrides --test-frac).")
     parser.add_argument("--max-dist", type=float, default=10.0, help="Maximum radial distance for sampling.")
+    parser.add_argument("--min-dist", type=float, default=0.0, help="Drop samples with radius below this value (after sampling). 0.0 = keep all.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for train/test split.")
     parser.add_argument("--train-out", type=str, required=True, help="Output path for training data (.h5).")
     parser.add_argument("--test-out", type=str, default=None, help="Output path for test data (.h5). Required if --test-frac > 0.")
@@ -41,6 +42,8 @@ def main() -> int:
         parser.error("--total-n must be positive")
     if args.max_dist <= 0.0:
         parser.error("--max-dist must be positive")
+    if not 0.0 <= args.min_dist < args.max_dist:
+        parser.error("--min-dist must satisfy 0 <= value < --max-dist")
     if not 0.0 <= args.test_frac < 1.0:
         parser.error("--test-frac must satisfy 0 <= value < 1")
     if args.test_n is not None and not 0 < args.test_n < args.total_n:
@@ -62,6 +65,15 @@ def main() -> int:
         max_dist=args.max_dist,
         rng=rng,
     )
+    print(f"  Sampled: {eta_all.shape[0]} samples, shape={eta_all.shape}")
+    if args.min_dist > 0.0:
+        radius = np.linalg.norm(eta_all[:, :3], axis=1)
+        n_before = eta_all.shape[0]
+        eta_all = eta_all[radius >= args.min_dist]
+        print(
+            f"  Dropped {n_before - eta_all.shape[0]} samples with r < {args.min_dist}; "
+            f"kept {eta_all.shape[0]}."
+        )
     print(f"  Final dataset: {eta_all.shape[0]} samples, shape={eta_all.shape}")
 
     # Split
