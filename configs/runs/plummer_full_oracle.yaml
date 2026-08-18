@@ -1,8 +1,9 @@
-# Plummer r-cut experiment — full data (all radii), baseline case.
+# Full Plummer oracle experiment: identical to full-baseline except that the
+# Phi/CBE stage uses the analytic Plummer score instead of the trained flow.
 schema: dpjax.run.v2
-name: full-baseline
-case: full
-output_dir: runs/plummer_rcut/full-baseline
+name: full-oracle
+case: full-oracle
+output_dir: runs/plummer_rcut/full-oracle
 
 data:
   path: data/plummer_n524288_train.h5
@@ -26,7 +27,11 @@ df:
 phi:
   model: configs/models/phi/plummer_mlp_v1.yaml
   seed: 42
+  # Reuse the exact support and normalizer from the flow-score baseline.
+  df_run: runs/plummer_rcut/full-baseline/df
   model_overrides:
+    score:
+      source: plummer_analytic
     potential:
       hidden_sizes: [128, 128, 128]
     train:
@@ -53,7 +58,8 @@ execution:
 evaluation:
   system: plummer
   df:
-    enabled: true
+    # The shared baseline DF already owns these diagnostics.
+    enabled: false
     radial_edges: [0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
     n_samples_per_model: 262144
     n_score_points: 32768

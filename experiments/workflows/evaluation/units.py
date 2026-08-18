@@ -1,4 +1,4 @@
-"""Unit conventions selected by repository validation workflows."""
+"""Unit conventions for generic operational potential evaluation."""
 
 from __future__ import annotations
 

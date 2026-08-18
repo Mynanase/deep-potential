@@ -1,1 +1,1 @@
-"""Synthetic and simulator-truth validation helpers."""
+"""Optional analytic and simulator-truth helpers for one-off analysis."""

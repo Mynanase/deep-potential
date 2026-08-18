@@ -14,7 +14,6 @@ import yaml
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from tqdm.auto import tqdm
 
-from dpjax.flows.api import score_apply
 from dpjax.models.potential import (
     PotentialConfig,
     PotentialMLP,
@@ -43,6 +42,10 @@ from experiments.workflows.checkpoints import (
 )
 from experiments.workflows.logging import ExperimentLogger
 from experiments.workflows.optimizers import build_optimizer
+from experiments.workflows.score_sources import (
+    resolve_score_source,
+    score_std_batch,
+)
 
 # ---------------------------------------------------------------------------
 # Operational training workflow – called by the run entry point
@@ -102,6 +105,7 @@ def run_phi_training(
         operation="Phi/CBE training",
     )
     flow_cfg = df_cfg.get("flow", {})
+    score_source = resolve_score_source(config)
 
     df_data_cfg = df_cfg.get("data", {})
     df_dataset = str(df_data_cfg.get("dataset", "eta"))
@@ -217,6 +221,7 @@ def run_phi_training(
                 "schema": "dpjax.model-summary.v1",
                 "kind": "phi",
                 "parameter_count": parameter_count,
+                "score_source": score_source,
             },
             sort_keys=False,
         ),
@@ -247,6 +252,7 @@ def run_phi_training(
         f"total_steps={total_steps}"
     )
     print(f"[train_phi] local devices: {device_list}")
+    print(f"[train_phi] score_source={score_source}")
     print(
         "[train_phi] reweight: "
         f"gamma={rw_gamma}, r_ref={rw_r_ref}"
@@ -321,7 +327,14 @@ def run_phi_training(
         mean_x = jnp.asarray(normalizer.mean[:3], dtype=eta_std_batch.dtype)
 
         def loss_fn(p):
-            score_std = score_apply(df_model, df_params, eta_std_batch, flow_cfg)
+            score_std = score_std_batch(
+                score_source,
+                eta_std_batch,
+                normalizer,
+                df_model=df_model,
+                df_params=df_params,
+                flow_cfg=flow_cfg,
+            )
             grad_phi_std = grad_phi_apply(phi_model, p, x_std)
 
             # Compute per-sample radial weights
@@ -490,7 +503,14 @@ def run_phi_training(
 
                 if (global_step % log_every) == 0:
                     eta_small = jnp.asarray(batch_np[:1024])
-                    score_small = score_apply(df_model, df_params_host, eta_small, flow_cfg)
+                    score_small = score_std_batch(
+                        score_source,
+                        eta_small,
+                        normalizer,
+                        df_model=df_model,
+                        df_params=df_params_host,
+                        flow_cfg=flow_cfg,
+                    )
                     grad_phi_small = grad_phi_apply(phi_model, phi_params_host, eta_small[:, :3])
                     r = residual_A(eta_small, score_small, grad_phi_small, normalizer)
                     r_mean = float(jnp.mean(r))
@@ -552,5 +572,6 @@ def run_phi_training(
         "df_model": df_model,
         "df_params": df_params_host,
         "normalizer": normalizer,
+        "score_source": score_source,
         "final_step": global_step,
     }

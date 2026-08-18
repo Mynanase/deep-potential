@@ -17,13 +17,15 @@ deep-potential/
 │   ├── workflows/                 # YAML, logging, checkpoints and run layout
 │   ├── diagnostics/               # persisted artifact readers and metrics
 │   ├── plotting/                  # all matplotlib figure builders
-│   ├── validation/                # optional simulator/analytic truth checks
+│   ├── validation/                # reusable optional truth-check functions
 │   ├── launch.py                  # detached stage launcher, logs and PID files
 │   ├── runtime.py                 # pre-JAX project environment defaults
 │   ├── run_df.py
 │   ├── run_phi.py
 │   └── run_eval.py
-├── analysis/halo12.py             # read-only Marimo application
+├── analysis/
+│   ├── {halo12,plummer_rcut}.py   # read-only Marimo applications
+│   └── validate_*_truth.py        # editable one-off truth scripts
 ├── configs/
 │   ├── models/{df,phi}/           # reusable model/training recipes
 │   └── runs/                      # data, execution, evaluation and plots
@@ -68,9 +70,9 @@ Configuration files have exactly two roles:
 - `configs/models/**/*.yaml` uses schema `dpjax.model.v1` and contains model
   architecture, loss, optimizer, schedule, regularization, batch size and
   epochs;
-- `configs/runs/*.yaml` uses schema `dpjax.run.v1` and contains data,
-  preprocessing, model references, seeds, execution, evaluation, plots and
-  optional validation.
+- `configs/runs/*.yaml` uses schema `dpjax.run.v2`; each file describes one
+  concrete experiment and contains data,
+  preprocessing, model references, seeds, execution, evaluation and plots.
 
 Model YAML is semantically aligned with `dpjax`, but it is loaded and validated
 by `experiments.workflows`; the numerical core never reads YAML. See
@@ -79,18 +81,19 @@ by `experiments.workflows`; the numerical core never reads YAML. See
 ## Output contract
 
 ```text
-runs/<name>/<trial>/
+runs/<experiment>/
+├── run.yaml
+├── logs/
 ├── df/
 ├── phi/
-├── eval/                         # ordinary DF/Phi diagnostics
-├── plots/
-└── validation/
-    └── auriga_truth/             # optional simulator-only validation
+├── eval/                         # flat df_*/phi_* diagnostics
+└── plots/
 ```
 
-Each run root also contains `logs/{df,phi,eval}.log` and matching PID files when
-stages are started through `experiments.launch`.
+The run has no required trial subdirectory. `logs/{df,phi,eval}.log` and matching
+PID files are written when stages are started through `experiments.launch`.
 
 Potential and acceleration truth are not part of the core phase-space input.
-They remain optional validation artifacts for synthetic/simulation development
-and are absent for real observations.
+They are absent from the run schema and `run_eval.py`. When needed for a
+one-off synthetic/simulation check, standalone analysis scripts write optional
+`validation/<kind>/{metrics.json,diagnostics.npz}` artifacts for Marimo.

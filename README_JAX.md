@@ -93,13 +93,10 @@ environment variable.
 runs/<run-name>/
 ├── run.yaml
 ├── logs/          # launcher console logs and PID files
-├── trial_00/
-│   ├── df/       # checkpoint, preprocessing, config, metrics
-│   ├── phi/      # checkpoint, config, metrics
-│   ├── eval/     # persisted JSON/NPZ diagnostics
-│   ├── plots/    # rendered figures
-│   └── validation/ # optional simulator-truth checks
-└── summary/      # multi-trial DF summaries
+├── df/            # checkpoint, preprocessing, config, metrics
+├── phi/           # checkpoint, config, metrics
+├── eval/          # flat df_*/phi_* JSON/NPZ diagnostics
+└── plots/         # optional figures
 ```
 
 The generated `run.yaml` is an immutable resolved snapshot. Existing
@@ -112,8 +109,12 @@ current resolved configuration matches the saved stage configuration.
 marimo edit analysis/halo12.py
 ```
 
-Choose the run directory in the UI. The app reads existing `metrics.csv`, JSON,
-NPZ and image artifacts; it never starts training.
+Choose experiment directories in the UI. The app reads existing `metrics.csv`,
+JSON and NPZ artifacts and never starts training.
+
+Optional simulator or analytic truth is not part of the run YAML. Edit and run
+`analysis/validate_auriga_truth.py` or `analysis/validate_plummer_truth.py` to
+generate separate JSON/NPZ artifacts for Marimo.
 
 ## Data utilities
 

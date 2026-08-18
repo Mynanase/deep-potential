@@ -19,7 +19,7 @@ from experiments.workflows.model_config import (
     validate_model_config,
 )
 
-RUN_SCHEMA = "dpjax.run.v1"
+RUN_SCHEMA = "dpjax.run.v2"
 
 
 def _require_mapping(value: Any, field: str) -> dict[str, Any]:
@@ -64,6 +64,7 @@ class StageSpec:
     seed: int | None
     model_overrides: dict[str, Any]
     init_params: Path | None = None
+    df_run: Path | None = None
 
     def resolve_config(
         self,
@@ -83,51 +84,22 @@ class StageSpec:
 
 
 @dataclass(frozen=True)
-class TrialSpec:
-    name: str
-    df: StageSpec
-    phi: StageSpec
-
-
-@dataclass(frozen=True)
-class TrialLayout:
-    root: Path
-
-    @property
-    def df_dir(self) -> Path:
-        return self.root / "df"
-
-    @property
-    def phi_dir(self) -> Path:
-        return self.root / "phi"
-
-    @property
-    def eval_dir(self) -> Path:
-        return self.root / "eval"
-
-    @property
-    def plots_dir(self) -> Path:
-        return self.root / "plots"
-
-    @property
-    def validation_dir(self) -> Path:
-        return self.root / "validation"
-
-
-@dataclass(frozen=True)
 class RunSpec:
+    """One concrete experiment and its repository-owned artifact layout."""
+
     source_path: Path
     name: str
+    case: str
     output_dir: Path
     data_path: Path
     dataset: str
     data_config: dict[str, Any]
-    trials: tuple[TrialSpec, ...]
+    df: StageSpec
+    phi: StageSpec
     logging: dict[str, Any]
     execution: dict[str, Any]
     evaluation: dict[str, Any]
     plots: dict[str, Any]
-    validation: dict[str, Any]
 
     @property
     def snapshot_path(self) -> Path:
@@ -138,32 +110,29 @@ class RunSpec:
         return self.output_dir / "logs"
 
     @property
-    def summary_dir(self) -> Path:
-        return self.output_dir / "summary"
+    def df_dir(self) -> Path:
+        return self.output_dir / "df"
 
-    def layout(self, trial: TrialSpec | str) -> TrialLayout:
-        name = trial.name if isinstance(trial, TrialSpec) else trial
-        return TrialLayout(self.output_dir / name)
+    @property
+    def phi_dir(self) -> Path:
+        return self.output_dir / "phi"
+
+    @property
+    def phi_df_dir(self) -> Path:
+        """DF artifacts consumed by Phi, defaulting to this experiment's DF."""
+        return self.phi.df_run or self.df_dir
+
+    @property
+    def eval_dir(self) -> Path:
+        return self.output_dir / "eval"
+
+    @property
+    def plots_dir(self) -> Path:
+        return self.output_dir / "plots"
 
     @property
     def resume(self) -> bool:
         return bool(self.execution.get("resume", False))
-
-    def selected_trials(self) -> tuple[TrialSpec, ...]:
-        selected = self.execution.get("trials")
-        if selected is None:
-            return self.trials
-        if not isinstance(selected, list) or not all(
-            isinstance(item, str) for item in selected
-        ):
-            raise ValueError("execution.trials must be a list of trial names.")
-        by_name = {trial.name: trial for trial in self.trials}
-        unknown = [name for name in selected if name not in by_name]
-        if unknown:
-            raise ValueError(
-                "execution.trials contains unknown trial(s): " + ", ".join(unknown)
-            )
-        return tuple(by_name[name] for name in selected)
 
     def resolved_data_config(self) -> dict[str, Any]:
         """Translate the run-facing data layout into the training API layout."""
@@ -207,13 +176,12 @@ class RunSpec:
 
     def resolve_stage_config(
         self,
-        trial: TrialSpec,
         stage_name: str,
     ) -> dict[str, Any]:
         """Resolve one DF/Phi config for execution and artifact snapshots."""
         if stage_name not in {"df", "phi"}:
             raise ValueError("stage_name must be 'df' or 'phi'.")
-        stage = trial.df if stage_name == "df" else trial.phi
+        stage = self.df if stage_name == "df" else self.phi
         return stage.resolve_config(
             data_config=self.resolved_data_config(),
             runtime_config=self.stage_runtime_config(stage_name),
@@ -221,36 +189,34 @@ class RunSpec:
 
     def training_snapshot(self) -> dict[str, Any]:
         """Return the immutable, resolved portion of the run configuration."""
-        trials: dict[str, Any] = {}
-        for trial in self.trials:
-            trial_data: dict[str, Any] = {}
-            for stage_name, stage in (("df", trial.df), ("phi", trial.phi)):
-                stage_data: dict[str, Any] = {
-                    "source_model": _portable_path(stage.model_path),
-                    "resolved_config": self.resolve_stage_config(
-                        trial,
-                        stage_name,
-                    ),
-                }
-                if stage.init_params is not None:
-                    stage_data["init_params"] = _portable_path(stage.init_params)
-                trial_data[stage_name] = stage_data
-            trials[trial.name] = trial_data
-        return {
+        payload: dict[str, Any] = {
             "schema": RUN_SCHEMA,
             "name": self.name,
+            "case": self.case,
             "output_dir": _portable_path(self.output_dir),
             "data": {
                 "path": _portable_path(self.data_path),
                 **self.data_config,
             },
-            "trials": trials,
         }
+        for stage_name, stage in (("df", self.df), ("phi", self.phi)):
+            stage_data: dict[str, Any] = {
+                "source_model": _portable_path(stage.model_path),
+                "resolved_config": self.resolve_stage_config(stage_name),
+            }
+            if stage.init_params is not None:
+                stage_data["init_params"] = _portable_path(stage.init_params)
+            if stage.df_run is not None:
+                stage_data["df_run"] = _portable_path(stage.df_run)
+            payload[stage_name] = stage_data
+        return payload
 
 
 def _load_stage(raw: Any, field: str, *, kind: str) -> StageSpec:
     stage = _require_mapping(raw, field)
     allowed = {"model", "seed", "model_overrides", "init_params"}
+    if kind == "phi":
+        allowed.add("df_run")
     unknown = sorted(set(stage) - allowed)
     if unknown:
         raise ValueError(
@@ -273,12 +239,19 @@ def _load_stage(raw: Any, field: str, *, kind: str) -> StageSpec:
         if init_params_raw is None
         else resolve_path(_require_string(init_params_raw, f"{field}.init_params"))
     )
+    df_run_raw = stage.get("df_run")
+    df_run = (
+        None
+        if df_run_raw is None
+        else resolve_path(_require_string(df_run_raw, f"{field}.df_run"))
+    )
     return StageSpec(
         kind=kind,
         model_path=model_path,
         seed=seed,
         model_overrides=model_overrides,
         init_params=init_params,
+        df_run=df_run,
     )
 
 
@@ -295,20 +268,22 @@ def load_run_spec(path: str | Path) -> RunSpec:
     allowed = {
         "schema",
         "name",
+        "case",
         "output_dir",
         "data",
-        "trials",
+        "df",
+        "phi",
         "logging",
         "execution",
         "evaluation",
         "plots",
-        "validation",
     }
     unknown = sorted(set(raw) - allowed)
     if unknown:
         raise ValueError("Unknown run config field(s): " + ", ".join(unknown))
 
     name = _require_string(raw.get("name"), "name")
+    case = _require_string(raw.get("case"), "case")
     output_dir = resolve_path(_require_string(raw.get("output_dir"), "output_dir"))
     data = _require_mapping(raw.get("data"), "data")
     data_path = resolve_path(_require_string(data.get("path"), "data.path"))
@@ -318,49 +293,33 @@ def load_run_spec(path: str | Path) -> RunSpec:
     _require_mapping(data_config.get("split", {}), "data.split")
     _require_mapping(data_config.get("preprocessing", {}), "data.preprocessing")
 
-    trials_raw = _require_mapping(raw.get("trials"), "trials")
-    if not trials_raw:
-        raise ValueError("trials must contain at least one trial.")
-    trials: list[TrialSpec] = []
-    for trial_name, trial_raw in trials_raw.items():
-        trial_name = _require_string(trial_name, "trial name")
-        trial = _require_mapping(trial_raw, f"trials.{trial_name}")
-        trials.append(
-            TrialSpec(
-                name=trial_name,
-                df=_load_stage(
-                    trial.get("df"),
-                    f"trials.{trial_name}.df",
-                    kind="df",
-                ),
-                phi=_load_stage(
-                    trial.get("phi"),
-                    f"trials.{trial_name}.phi",
-                    kind="phi",
-                ),
-            )
-        )
-
     return RunSpec(
         source_path=source_path,
         name=name,
+        case=case,
         output_dir=output_dir,
         data_path=data_path,
         dataset=dataset,
         data_config=data_config,
-        trials=tuple(trials),
+        df=_load_stage(raw.get("df"), "df", kind="df"),
+        phi=_load_stage(raw.get("phi"), "phi", kind="phi"),
         logging=_require_mapping(raw.get("logging", {}), "logging"),
         execution=_require_mapping(raw.get("execution", {}), "execution"),
         evaluation=_require_mapping(raw.get("evaluation", {}), "evaluation"),
         plots=_require_mapping(raw.get("plots", {}), "plots"),
-        validation=_require_mapping(raw.get("validation", {}), "validation"),
     )
 
 
 def prepare_run(spec: RunSpec) -> Path:
     """Create the run root and persist/validate its immutable config snapshot."""
-    spec.output_dir.mkdir(parents=True, exist_ok=True)
-    spec.logs_dir.mkdir(parents=True, exist_ok=True)
+    for directory in (
+        spec.logs_dir,
+        spec.df_dir,
+        spec.phi_dir,
+        spec.eval_dir,
+        spec.plots_dir,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
     payload = spec.training_snapshot()
     canonical = yaml.safe_dump(payload, sort_keys=True)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -420,9 +379,16 @@ def validate_stage_start(
             )
 
 
-def write_evaluation_config(path: Path, config: Mapping[str, Any]) -> None:
+def write_evaluation_config(
+    path: Path,
+    stage_name: str,
+    config: Mapping[str, Any],
+) -> None:
+    """Persist one stage's resolved evaluation settings in the flat eval dir."""
+    if stage_name not in {"df", "phi"}:
+        raise ValueError("stage_name must be 'df' or 'phi'.")
     path.mkdir(parents=True, exist_ok=True)
-    (path / "config.yaml").write_text(
+    (path / f"{stage_name}_config.yaml").write_text(
         yaml.safe_dump(dict(config), sort_keys=False),
         encoding="utf-8",
     )

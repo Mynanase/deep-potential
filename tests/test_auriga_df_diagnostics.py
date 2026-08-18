@@ -5,8 +5,16 @@ import jax.numpy as jnp
 import numpy as np
 
 from dpjax.normalization import Normalizer
-from experiments.plotting import plot_auriga_df_ensemble
-from experiments.workflows.evaluation import auriga_df as eval_auriga_df
+from experiments.diagnostics import load_df_diagnostics
+from experiments.diagnostics import load_df_samples
+from experiments.plotting import (
+    plot_cylindrical_rz_density,
+    plot_density_profile,
+    plot_radial_speed_comparison,
+    plot_score_distribution,
+    plot_velocity_marginals,
+)
+from experiments.workflows.evaluation import df as eval_df
 
 
 def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
@@ -25,7 +33,7 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
         std=np.ones(6, dtype=np.float32),
     )
     monkeypatch.setattr(
-        eval_auriga_df,
+        eval_df,
         "load_df",
         lambda run_dir: (
             object(),
@@ -36,20 +44,20 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        eval_auriga_df,
+        eval_df,
         "sample_apply",
         lambda model, params, key, n, flow_cfg: jnp.asarray(
             model_samples[:n]
         ),
     )
     monkeypatch.setattr(
-        eval_auriga_df,
+        eval_df,
         "_score_in_physical_coordinates",
         lambda model, params, normalizer, flow_cfg, rows, batch_size: -rows,
     )
 
     output_dir = tmp_path / "evaluation"
-    result = eval_auriga_df.evaluate_auriga_df(
+    result = eval_df.evaluate_df_diagnostics(
         data_path,
         [tmp_path / "seed_42"],
         output_dir,
@@ -69,26 +77,41 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
     assert result["density_semantics"].startswith(
         "Normalized stellar tracer mass density"
     )
-    diagnostics_path = output_dir / "auriga_df_diagnostics.npz"
+    diagnostics_path = output_dir / "df_diagnostics.npz"
     with np.load(diagnostics_path) as diagnostics:
         assert diagnostics["model_density_by_model"].shape[0] == 1
         assert diagnostics["conditional_r_model_hist"].shape[0] == 1
         assert diagnostics["spatial_model_density"].shape[0] == 1
 
-    figures = plot_auriga_df_ensemble(
-        output_dir / "auriga_df_metrics.json",
-        diagnostics_path,
-        fig_dir=output_dir / "plots",
-        dpi=40,
-    )
+    assert (output_dir / "df_metrics.json").is_file()
+    assert (output_dir / "df_samples.npz").is_file()
 
-    assert "score_consistency" not in figures
-    for filename in (
-        "density_profile.png",
-        "df_spatial_rz_by_phi.png",
-        "velocity_marginals_by_r.png",
-        "velocity_marginals_by_theta.png",
-        "velocity_marginals_by_phi.png",
-        "score_per_dim_hist.png",
-    ):
-        assert (output_dir / "plots" / filename).exists()
+    diagnostics = load_df_diagnostics(output_dir)
+    samples = load_df_samples(output_dir)
+    figures = [
+        plot_density_profile(diagnostics, dpi=40),
+        plot_cylindrical_rz_density(diagnostics, dpi=40),
+        plot_velocity_marginals(diagnostics, "r", dpi=40),
+        plot_velocity_marginals(diagnostics, "theta", dpi=40),
+        plot_velocity_marginals(diagnostics, "phi", dpi=40),
+        plot_score_distribution(diagnostics, dpi=40),
+        plot_radial_speed_comparison(
+            samples["reference_eta"],
+            samples["model_eta_by_model"][0],
+            radius_range=(0.0, 5.0),
+            speed_range=(0.0, 5.0),
+            bins=8,
+            dpi=40,
+        ),
+        plot_radial_speed_comparison(
+            None,
+            samples["model_eta_by_model"][0],
+            reference_probability_mass=np.full((8, 8), 1.0 / 64.0),
+            radius_range=(0.0, 5.0),
+            speed_range=(0.0, 5.0),
+            bins=(8, 8),
+            dpi=40,
+        ),
+    ]
+    assert all(figure.axes for figure in figures)
+    assert not (output_dir / "plots").exists()

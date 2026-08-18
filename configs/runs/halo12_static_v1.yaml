@@ -1,7 +1,8 @@
 # One operational run: data/preprocessing + model references + evaluation.
-schema: dpjax.run.v1
-name: halo12_static_v1
-output_dir: runs/halo12_static_v1
+schema: dpjax.run.v2
+name: halo12-static-baseline
+case: halo12
+output_dir: runs/halo12/static-baseline
 
 data:
   path: data/auriga/halo12_all_mass.h5
@@ -17,14 +18,13 @@ data:
       type: none
       dims: []
 
-trials:
-  trial_00:
-    df:
-      model: configs/models/df/halo12_ffjord_compact_v1.yaml
-      seed: 42
-    phi:
-      model: configs/models/phi/halo12_static_mlp_v1.yaml
-      seed: 42
+df:
+  model: configs/models/df/halo12_ffjord_compact_v1.yaml
+  seed: 42
+
+phi:
+  model: configs/models/phi/halo12_static_mlp_v1.yaml
+  seed: 42
 
 logging:
   backend: wandb
@@ -35,8 +35,6 @@ logging:
 execution:
   # Change to true only to continue matching checkpoints in this run directory.
   resume: false
-  # Optional: select a subset without adding CLI arguments.
-  # trials: [trial_00]
   stages:
     df:
       multi_gpu: true
@@ -62,6 +60,9 @@ evaluation:
     spatial_r_max: 75.0
     spatial_z_max: 75.0
     spatial_min_cell_count: 5
+    n_theta_bins: 6
+    n_phi_bins: 8
+    n_velocity_bins: 64
   phi:
     enabled: true
     n_eval: 32768
@@ -71,32 +72,13 @@ evaluation:
     r_max: 75.0
     n_r: 256
     r_ref: 20.0
+    compute_slice: true
+    slice_grid: 128
+    slice_rmax: 75.0
 
 plots:
   formats: [png]
   df:
     dpi: 150
-    n_theta_bins: 6
-    n_phi_bins: 8
-    n_velocity_bins: 64
   phi:
     dpi: 180
-    plot_overview: true
-    slice_grid: 128
-    slice_rmax: 75.0
-  auriga_truth:
-    dpi: 180
-    plot_truth: true
-    slice_phi_bins: 6
-    slice_r_bins: 40
-    slice_z_bins: 40
-    slice_min_count: 3
-
-validation:
-  auriga_truth:
-    # Enable only when the prepared mock contains potential/acceleration truth.
-    enabled: false
-    n_eval: 65536
-    batch_size: 4096
-    seed: 0
-    radial_bins: 12

@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from dpjax.flows.api import score_apply
 from dpjax.models.potential import (
     grad_phi_apply,
     laplacian_phi_apply,
@@ -27,13 +26,12 @@ from experiments.datasets.phase_space import (
     require_physics_compatible_transform,
 )
 from experiments.paths import ensure_dir, resolve_path
-from experiments.plotting.diagnostics import (
-    plot_laplacian_density_diagnostics,
-    plot_potential_density_overview,
-)
-from experiments.validation.plummer import plummer_ar, plummer_phi
-from experiments.validation.units import gravitational_constant_for_system
 from experiments.workflows.artifacts import load_df, load_phi
+from experiments.workflows.evaluation.units import gravitational_constant_for_system
+from experiments.workflows.score_sources import (
+    resolve_score_source,
+    score_std_batch,
+)
 
 # ---------------------------------------------------------------------------
 # Operational evaluation workflow – called by run_eval
@@ -45,7 +43,6 @@ def run_eval_phi(
     phi_run_dir: str | Path,
     *,
     out_dir: str | Path | None = None,
-    plots_dir: str | Path | None = None,
     n_eval: int = 32768,
     batch_size: int = 4096,
     seed: int = 0,
@@ -54,11 +51,9 @@ def run_eval_phi(
     n_r: int = 256,
     r_ref: float = 1.0,
     system: str = "generic",
-    plot_overview: bool = True,
+    compute_slice: bool = True,
     slice_grid: int = 128,
     slice_rmax: float | None = None,
-    fig_fmt: tuple[str, ...] = ("png", "pdf"),
-    dpi: int = 180,
     gravitational_constant: float | None = None,
 ) -> dict[str, Any]:
     """Evaluate trained Phi/DF on residual stats and radial/slice diagnostics.
@@ -66,7 +61,7 @@ def run_eval_phi(
     Returns
     -------
     dict
-        ``{"stats": dict, "radial": dict, "out_dir": Path, "plots_dir": Path}``
+        ``{"metrics": dict, "diagnostics": dict, "out_dir": Path}``
     """
     data_path = resolve_path(data_path)
     df_run_dir = resolve_path(df_run_dir)
@@ -78,10 +73,10 @@ def run_eval_phi(
         operation="Phi/CBE evaluation",
     )
     flow_cfg = df_cfg.get("flow", {})
-    phi_model, phi_params, _ = load_phi(phi_run_dir)
+    phi_model, phi_params, phi_cfg = load_phi(phi_run_dir)
+    score_source = resolve_score_source(phi_cfg)
 
     out_dir = ensure_dir(out_dir or phi_run_dir)
-    plots_dir = ensure_dir(plots_dir or (out_dir / "plots"))
     system = str(system).lower()
     density_g = gravitational_constant_for_system(
         system,
@@ -100,6 +95,7 @@ def run_eval_phi(
         f"source={support_source}, kept={support_eta.shape[0]}/"
         f"{source_n}"
     )
+    print(f"[eval_phi] score_source={score_source}")
     eta_std = normalizer.transform(support_eta)
 
     n_total = eta_std.shape[0]
@@ -114,7 +110,14 @@ def run_eval_phi(
 
     @jax.jit
     def residual_batch(eta_std_batch: jnp.ndarray) -> jnp.ndarray:
-        score_std = score_apply(df_model, df_params, eta_std_batch, flow_cfg)
+        score_std = score_std_batch(
+            score_source,
+            eta_std_batch,
+            normalizer,
+            df_model=df_model,
+            df_params=df_params,
+            flow_cfg=flow_cfg,
+        )
         grad_phi_std = grad_phi_apply(phi_model, phi_params, eta_std_batch[:, :3])
         return residual_A(eta_std_batch, score_std, grad_phi_std, normalizer)
 
@@ -125,19 +128,12 @@ def run_eval_phi(
 
     r_all = np.concatenate(rs, axis=0)
 
-    # Save per-point residuals with physical coordinates for spatial map
+    # Keep per-point residuals with physical coordinates for offline plotting.
     eta_eval_phys = normalizer.inverse(eta_eval)
-    np.savez(
-        out_dir / "residual_spatial.npz",
-        x=eta_eval_phys[:, 0],
-        y=eta_eval_phys[:, 1],
-        z=eta_eval_phys[:, 2],
-        residual=r_all,
-    )
-    print(f"Saved residual_spatial.npz ({r_all.shape[0]} points)")
 
     stats = {
         "n_eval": int(r_all.shape[0]),
+        "score_source": score_source,
         "residual_mean": float(np.mean(r_all)),
         "residual_std": float(np.std(r_all)),
         "residual_p99_abs": float(np.percentile(np.abs(r_all), 99.0)),
@@ -146,9 +142,6 @@ def run_eval_phi(
         "density_semantics": "total_gravitating_density",
         "density_gravitational_constant": density_g,
     }
-    (out_dir / "eval_stats.json").write_text(json.dumps(stats, indent=2) + "\n")
-    print(json.dumps(stats, indent=2))
-
     # Radial curves along x-axis
     r = np.geomspace(r_min, r_max, num=int(n_r)).astype(np.float32)
     x_phys = np.stack([r, np.zeros_like(r), np.zeros_like(r)], axis=-1)
@@ -178,38 +171,8 @@ def run_eval_phi(
         gravitational_constant=density_g,
     )
 
-    np.savez(
-        out_dir / "radial_curves.npz",
-        r=r,
-        phi_learned=phi_learned,
-        phi_learned_shift=phi_learned_shift,
-        ar_learned=ar_learned,
-        rho_learned=rho_learned,
-    )
-
-    phi_true = None
-    ar_true = None
-    rho_analytic = None
-    if system == "plummer":
-        phi_true = plummer_phi(r)
-        ar_true = plummer_ar(r)
-        phi_true_ref = float(plummer_phi(np.array([r_ref], dtype=np.float32))[0])
-        phi_learned_shift = phi_learned - phi_learned[i_ref] + phi_true_ref
-        rho_analytic = (3.0 / (4.0 * np.pi)) * (1.0 + r ** 2) ** (-2.5)
-        np.savez(
-            out_dir / "radial_curves_plummer.npz",
-            r=r,
-            phi_learned=phi_learned,
-            phi_learned_shift=phi_learned_shift,
-            phi_true=phi_true,
-            ar_learned=ar_learned,
-            ar_true=ar_true,
-            rho_learned=rho_learned,
-            rho_analytic=rho_analytic,
-        )
-
     slice_data: dict[str, np.ndarray] | None = None
-    if plot_overview:
+    if compute_slice:
         r_xy = np.sqrt(eta_eval_phys[:, 0] ** 2 + eta_eval_phys[:, 1] ** 2)
         rmax_slice = float(slice_rmax) if slice_rmax is not None else float(max(np.percentile(r_xy, 99.0), 1.0e-6))
         grid = int(slice_grid)
@@ -239,91 +202,41 @@ def run_eval_phi(
         phi_img = np.concatenate(phi_slices).reshape(X.shape)
         rho_img = np.concatenate(rho_slices).reshape(X.shape)
         acc_img = np.concatenate(acc_slices).reshape(X.shape)
-        np.savez(plots_dir / "phi_slice_xy.npz", x=xs, y=ys, phi=phi_img, rho=rho_img, acc_mag=acc_img)
         slice_data = {"x": xs, "y": ys, "phi": phi_img, "rho": rho_img, "acc_mag": acc_img}
-        density_summary = summarize_density_sign(rho_img)
-        (plots_dir / "rho_slice_xy_summary.json").write_text(
-            json.dumps(density_summary, indent=2) + "\n",
-            encoding="utf-8",
+        stats["slice_density"] = summarize_density_sign(rho_img)
+
+    diagnostics = {
+        "residual_x": eta_eval_phys[:, 0],
+        "residual_y": eta_eval_phys[:, 1],
+        "residual_z": eta_eval_phys[:, 2],
+        "residual": r_all,
+        "radial_r": r,
+        "radial_phi": phi_learned,
+        "radial_phi_shifted": phi_learned_shift,
+        "radial_acceleration": ar_learned,
+        "radial_density": rho_learned,
+    }
+    if slice_data is not None:
+        diagnostics.update(
+            {
+                "slice_x": slice_data["x"],
+                "slice_y": slice_data["y"],
+                "slice_phi": slice_data["phi"],
+                "slice_density": slice_data["rho"],
+                "slice_acceleration_magnitude": slice_data["acc_mag"],
+            }
         )
-        plot_laplacian_density_diagnostics(
-            xs,
-            ys,
-            rho_img,
-            density_label=(
-                r"$\rho_{\rm total}$"
-                if system == "halo"
-                else r"$\rho$"
-            ),
-            fig_dir=plots_dir,
-            fig_fmt=fig_fmt,
-            dpi=int(dpi),
-            filename="rho_laplacian_diagnostics",
-        )
-        plot_potential_density_overview(
-            r,
-            phi_learned_shift,
-            rho_learned,
-            xs,
-            ys,
-            phi_img,
-            rho_img,
-            ar_learned=ar_learned,
-            phi_true=phi_true,
-            rho_true=rho_analytic,
-            ar_true=ar_true,
-            data_xy=eta_eval_phys[:, :2] if system != "plummer" else None,
-            title="Plummer Potential / Density Overview" if system == "plummer" else "Halo Potential / Density Overview",
-            density_label=(
-                r"$\rho_{\rm total}=\nabla^2\Phi/(4\pi G)$"
-                if system == "halo"
-                else r"$\rho=\nabla^2\Phi/(4\pi G)$"
-            ),
-            fig_dir=plots_dir,
-            fig_fmt=fig_fmt,
-            dpi=int(dpi),
-            filename="potential_density_overview",
-        )
-        print(f"Wrote potential density overview to {plots_dir}")
 
-    # Optional plotting
-    try:
-        import matplotlib.pyplot as plt
-
-        if system == "plummer" and phi_true is not None and ar_true is not None:
-            plt.figure()
-            plt.plot(r, phi_true, label="Plummer analytic")
-            plt.plot(r, phi_learned_shift, label="Learned (shifted)")
-            plt.xscale("log")
-            plt.xlabel("r")
-            plt.ylabel("Phi(r)")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(plots_dir / "phi_r_plummer.png", dpi=150)
-            plt.close()
-
-            plt.figure()
-            plt.plot(r, ar_true, label="Plummer analytic")
-            plt.plot(r, ar_learned, label="Learned")
-            plt.xscale("log")
-            plt.xlabel("r")
-            plt.ylabel("a_r(r)")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig(plots_dir / "ar_r_plummer.png", dpi=150)
-            plt.close()
-
-        print(f"Wrote plots to {plots_dir}")
-    except Exception as e:  # noqa: BLE001
-        print(f"Plot skipped: {e}")
+    (out_dir / "phi_metrics.json").write_text(
+        json.dumps(stats, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    np.savez_compressed(out_dir / "phi_diagnostics.npz", **diagnostics)
+    print(json.dumps(stats, indent=2))
+    print(f"Wrote Phi evaluation artifacts to {out_dir}")
 
     return {
-        "stats": stats,
-        "radial": {
-            "r": r, "phi_learned": phi_learned, "phi_learned_shift": phi_learned_shift,
-            "phi_true": phi_true, "ar_learned": ar_learned, "ar_true": ar_true,
-        },
-        "slice": slice_data,
+        "metrics": stats,
+        "diagnostics": diagnostics,
         "out_dir": out_dir,
-        "plots_dir": plots_dir,
     }

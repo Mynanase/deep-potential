@@ -1,235 +1,138 @@
 # 架构与功能扩展操作指南
 
-本文用于快速判断一个新功能应该修改哪里，并给出配置、运行和验证步骤。
+本项目采用三层结构：`dpjax` 只处理数组和数值模型，`experiments` 负责数据、
+训练、产物和绘图，`analysis` 中的 Marimo 只读取结果并组合展示。
 
-## 1. 先判断修改属于哪一层
+## 配置边界
 
-| 需求 | 修改位置 | 配置位置 |
-|---|---|---|
-| 新增 DF 或 Phi 网络 | `dpjax/flows` 或 `dpjax/models` | `configs/models` |
-| 修改 CBE、导数或核心数学 | `dpjax/physics` | `configs/models`（如有参数） |
-| 更换数据或文件格式 | `experiments/datasets` | `configs/runs` 的 `data` |
-| 修改筛选、切分或坐标预处理 | `experiments/datasets` | `configs/runs` 的 `data` |
-| 修改训练编排、日志或 checkpoint | `experiments/workflows` | `configs/runs` 的 `execution/logging` |
-| 新增数值诊断 | `experiments/diagnostics` 或 `workflows/evaluation` | `configs/runs` 的 `evaluation` |
-| 新增图表 | `experiments/plotting` | `configs/runs` 的 `plots` |
-| 新增模拟 truth 检查 | `experiments/validation` | `configs/runs` 的 `validation` |
-| 修改 Marimo 展示 | `analysis/halo12.py` | 通常读取已有 run 产物 |
-
-判断标准：只有直接处理六维数组和数学模型的可复用算法进入 `dpjax`。文件、
-目录、数据集、实验编排、绘图和 truth 都留在 `experiments`。
-
-## 2. 配置文件只有两类
-
-```text
-configs/
-├── models/
-│   ├── df/
-│   └── phi/
-└── runs/
-```
-
-### 2.1 新建模型配方
-
-复制最接近的模型文件：
-
-```bash
-cp configs/models/df/halo12_ffjord_compact_v1.yaml \
-  configs/models/df/my_df_v1.yaml
-```
-
-模型文件中只修改以下内容：
-
-- `flow` 或 `potential`：网络结构和数值求解器；
-- `normalizer`：DF 归一化的数值稳定参数；
-- `train.optimizer`：目前支持 `adam` 和 `radam`；
-- `train.lr`、loss、正则化、batch size 和 epochs。
-
-参数量由层数、宽度和具体实现共同决定，不要在 YAML 中手填。模型初始化后会把
-真实 `parameter_count` 写入对应的 `df/model_summary.yaml` 或
-`phi/model_summary.yaml`。
-
-不要在模型文件中加入：
-
-- `data`、数据路径或字段名；
-- `seed`、`multi_gpu`、日志和 checkpoint；
-- evaluation、plots、validation 或 output directory。
-
-模型配置边界由 `experiments.workflows.model_config` 自动校验，字段放错层时会在
-启动前报错。
-
-### 2.2 新建一次运行
-
-```bash
-cp configs/runs/halo12_static_v1.yaml configs/runs/my_run.yaml
-```
-
-至少修改：
+`configs/models` 保存可复用的网络、loss、optimizer 和训练超参数；
+`configs/runs` 中每个 YAML 只描述一次具体实验。一次实验只有一个输出目录，DF
+与 Phi 在该目录下配对，不存在 `trials` 或 `trial_00`：
 
 ```yaml
-schema: dpjax.run.v1
-name: my_run
-output_dir: runs/my_run
+schema: dpjax.run.v2
+name: cut-baseline
+case: cut
+output_dir: runs/plummer_rcut/cut-baseline
 
 data:
-  path: data/my_data.h5
+  path: data/plummer_n524288_rcut1.0_train.h5
   dataset: eta
-  split:
-    validation_fraction: 0.1
-    seed: 100
-  preprocessing:
-    clip_sigma: 0.0
-    jitter_std: 0.0
-    transform:
-      type: none
-      dims: []
 
-trials:
-  trial_00:
-    df:
-      model: configs/models/df/my_df_v1.yaml
-      seed: 42
-    phi:
-      model: configs/models/phi/halo12_static_mlp_v1.yaml
-      seed: 42
+df:
+  model: configs/models/df/plummer_ffjord_v1.yaml
+  seed: 42
+
+phi:
+  model: configs/models/phi/plummer_mlp_v1.yaml
+  seed: 42
 ```
 
-一次参数对比增加新的 trial。需要少量模型消融时可用
-`model_overrides`，但稳定且可复用的配方应另存到 `configs/models`：
+需要更换 seed、模型或超参数时复制一份 run YAML，并使用新的 `name` 与
+`output_dir`，例如 `cut-seed43`。`case` 是用于分析分组的元数据，产物位置以
+`output_dir` 为准。
 
-```yaml
-trials:
-  trial_01:
-    df:
-      model: configs/models/df/my_df_v1.yaml
-      seed: 43
-      model_overrides:
-        train:
-          optimizer: adam
+## 输出约定
+
+```text
+runs/<experiment>/
+├── run.yaml
+├── logs/
+├── df/                 # checkpoint、模型状态、训练指标
+├── phi/                # checkpoint、模型状态、训练指标
+├── eval/
+│   ├── df_config.yaml
+│   ├── df_metrics.json
+│   ├── df_diagnostics.npz
+│   ├── df_samples.npz
+│   ├── phi_config.yaml
+│   ├── phi_metrics.json
+│   └── phi_diagnostics.npz
+└── plots/
 ```
 
-运行层参数集中在：
+`eval/` 不再按 DF/Phi 建子目录。模拟 potential、acceleration 等 truth 不进入
+通用诊断文件，也不进入 run YAML 或 `run_eval.py`。
 
-```yaml
-logging:
-  backend: wandb
-  project: deep-potential
-  mode: online
-  # entity: your-user-or-team
+## 诊断与绘图
 
-execution:
-  resume: false
-  stages:
-    df:
-      multi_gpu: true
-      log_every: 25
-      checkpoint_every: 500
-      checkpoints_to_keep: 3
-    phi:
-      multi_gpu: true
-      log_every: 50
-      checkpoint_every: 500
-      checkpoints_to_keep: 3
+DF 产物按需读取：
+
+```python
+from experiments.diagnostics import (
+    load_df_diagnostics,
+    load_df_metrics,
+    load_df_samples,
+)
+
+metrics = load_df_metrics(eval_dir)
+diagnostics = load_df_diagnostics(eval_dir)
+samples = load_df_samples(eval_dir)  # 仅在确实需要大数组时调用
 ```
 
-评估参数放在 `evaluation`；纯绘图参数放在 `plots`；仅模拟数据存在的真实势能或
-加速度检查放在 `validation`。
+缺失文件会抛出 `FileNotFoundError`。绘图函数位于 `experiments.plotting`：
 
-## 3. 新增一套数据
+```python
+plot_density_profile(diagnostics)
+plot_cylindrical_rz_density(diagnostics)
+plot_velocity_marginals(diagnostics, "r")
+plot_score_distribution(diagnostics)
 
-1. 在 `experiments/datasets` 新增读取或转换函数；
-2. 最终产出有限的 `float32 (N, 6)` 数组，列顺序为
-   `[x, y, z, vx, vy, vz]`；
-3. 如需中间准备步骤，在 `experiments/prepare_*.py` 实现；
-4. 将数据路径、字段名、筛选和预处理参数写入 run YAML；
-5. 为适配器增加测试，不修改 `dpjax`。
+plot_potential_profile(radius, model_potential, truth_potential=truth)
+plot_radial_acceleration_profile(radius, model_acceleration)
+plot_mass_density_profile(radius, model_density, truth_density=truth_density)
+plot_mass_density_residual(radius, model_density, truth_density)
+plot_potential_slice(x, y, model_potential)
+plot_mass_density_slice(x, y, model_density)
+```
 
-如果新数据已经整理成包含 `eta` 的 HDF5，通常只需修改 run YAML 的 `data`。
+这些函数只接收内存数据并返回 `Figure`，不读文件、不保存、不调用
+`plt.close()`。Marimo 决定加载哪些实验、如何组合以及展示哪些图。当前没有
+“一次生成全部默认图”的聚合入口；未来如需增加，应由 workflow 根据配置调用
+独立函数，而不是放入 plotting 包。
 
-## 4. 新增一个诊断或图表
+## 修改位置
 
-诊断计算和渲染分开：
+- 模型、方程、导数：`dpjax/`
+- 数据格式、筛选、预处理：`experiments/datasets/`
+- 训练和评估执行：`experiments/workflows/`
+- 持久化产物读取与诊断计算：`experiments/diagnostics/`
+- 图表：`experiments/plotting/`
+- 模拟 truth：`experiments/validation/`
+- 交互组合：`analysis/`
 
-1. 在 `experiments/diagnostics` 或 `experiments/workflows/evaluation` 计算并保存
-   JSON/NPZ；
-2. 在 `experiments/plotting` 新增接收数组或产物路径的绘图函数；
-3. 在 `experiments/run_eval.py` 编排调用；
-4. 将计算参数放进 `evaluation`，将 DPI、格式、切片网格等放进 `plots`；
-5. Marimo 只读取保存后的结果，不在页面里启动训练或重计算高成本诊断。
+新增数据最终只需提供有限的 `(N, 6)` 数组，列顺序为
+`[x, y, z, vx, vy, vz]`；文件读取和源数据特有逻辑不进入 `dpjax`。
 
-只有完全与文件和绘图无关、可用于任意 `(N, 6)` 数据的统计量，才考虑放进
-`dpjax/diagnostics`。
-
-## 5. 执行完整实验
+## 执行与验证
 
 ```bash
 conda activate dp-jax
 
-python -m experiments.run_df configs/runs/my_run.yaml
-python -m experiments.run_phi configs/runs/my_run.yaml
-python -m experiments.run_eval configs/runs/my_run.yaml
+python -m experiments.launch df configs/runs/plummer_rcut_cut.yaml
+python -m experiments.launch phi configs/runs/plummer_rcut_cut.yaml
+python -m experiments.launch eval configs/runs/plummer_rcut_cut.yaml
+
+tail -f runs/plummer_rcut/cut-baseline/logs/phi.log
+marimo edit analysis/plummer_rcut.py
 ```
 
-服务器后台运行使用项目 launcher；它在启动 JAX 前应用项目环境默认值，并把
-stdout、stderr、warning、进度和 traceback 写到 run 自己的 `logs` 目录：
+launcher 负责后台脱离、日志和 PID；项目默认设置
+`XLA_PYTHON_CLIENT_PREALLOCATE=false`。GPU 可见性由启动 launcher 的父环境控制。
+
+可选真值检查不使用配置文件。直接修改一次性脚本顶部的实验路径和数值参数：
 
 ```bash
-# 先运行 DF；确认完成后再依次运行 Phi 和 eval。
-python -m experiments.launch df configs/runs/my_run.yaml
-python -m experiments.launch phi configs/runs/my_run.yaml
-python -m experiments.launch eval configs/runs/my_run.yaml
+python analysis/validate_plummer_truth.py
+python analysis/validate_auriga_truth.py
 ```
 
-DF 成功后再启动 Phi，Phi 成功后再启动 evaluation。用日志或 W&B 监控，不依赖
-SSH 会话持续连接：
-
-```bash
-tail -f runs/my_run/logs/phi.log
-```
-
-项目默认在 JAX 导入前设置 `XLA_PYTHON_CLIENT_PREALLOCATE=false`。使用服务器分配
-的全部 GPU 时无需设置 `CUDA_VISIBLE_DEVICES`；只有调度器或父环境需要限制可见
-GPU 时才在外层设置。
-
-启用 W&B 前安装 `.[tracking]` 并在服务器账户下运行一次 `wandb login`。
-`logging.backend` 可选 `csv`、`wandb`、`tensorboard` 或 `wandb+tb`；W&B 的
-`mode` 可选 `online`、`offline` 或 `disabled`。API key 不写入 run YAML。
-
-## 6. 输出与恢复
-
-```text
-runs/<run>/
-├── run.yaml
-├── logs/
-│   ├── df.log / phi.log / eval.log
-│   └── df.pid / phi.pid / eval.pid
-├── summary/
-└── <trial>/
-    ├── df/
-    ├── phi/
-    ├── eval/
-    ├── plots/
-    └── validation/
-```
-
-`run.yaml` 保存解析后的完整快照，包括模型来源、数据参数和运行时参数。已有
-checkpoint 时默认拒绝覆盖。只有配置完全一致时才能设置
-`execution.resume: true`；科学参数变化时应使用新的 `name/output_dir`。
-每个模型目录还包含 `model_summary.yaml`，记录由实际参数树计算出的参数量。
-
-## 7. 查看结果与验证代码
-
-```bash
-marimo edit analysis/halo12.py
-```
-
-提交修改前执行：
+脚本只生成 `validation/<kind>/metrics.json` 与 `diagnostics.npz`；绘图仍由
+Marimo 调用独立 Figure 函数组合完成。
+提交前运行：
 
 ```bash
 pytest -q
-marimo check --strict analysis/halo12.py
-ruff check dpjax experiments analysis scripts tests
+marimo check --strict analysis/halo12.py analysis/plummer_rcut.py
+ruff check dpjax experiments analysis tests
 ```
-
-GPU 训练需要在用户终端或服务器环境运行；本地测试只验证 CPU 可执行路径和配置
-边界。

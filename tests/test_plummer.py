@@ -9,6 +9,7 @@ from experiments.datasets.plummer import (
     sample_plummer,
     split_train_test,
 )
+from experiments.validation.plummer import plummer_rv_ideal_grid
 
 
 def test_sample_plummer_is_reproducible_and_bound():
@@ -41,6 +42,33 @@ def test_plummer_df_is_positive_for_samples():
 
     assert density.shape == (128,)
     assert np.all(density > 0.0)
+
+
+def test_plummer_rv_grid_is_normalized_for_radial_selections():
+    full = plummer_rv_ideal_grid(
+        r_lim=(0.0, 10.0),
+        v_lim=(0.0, 1.5),
+        bins=(64, 64),
+        radial_selection=(0.0, 10.0),
+    )
+    cut = plummer_rv_ideal_grid(
+        r_lim=(0.0, 10.0),
+        v_lim=(0.0, 1.5),
+        bins=(64, 64),
+        radial_selection=(1.0, 10.0),
+    )
+
+    np.testing.assert_allclose(
+        np.sum(full["probability_mass"]),
+        1.0,
+        rtol=2e-3,
+    )
+    np.testing.assert_allclose(
+        np.sum(cut["probability_mass"]),
+        1.0,
+        rtol=2e-3,
+    )
+    assert np.all(cut["probability_mass"][:6] == 0.0)
 
 
 @pytest.mark.parametrize(

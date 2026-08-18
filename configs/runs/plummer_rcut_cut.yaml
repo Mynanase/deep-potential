@@ -1,8 +1,9 @@
 # Plummer r-cut experiment — cut data (r >= 1.0 subset of the full data),
 # modelling the Auriga scenario where central stars dominate the DF.
-schema: dpjax.run.v1
-name: plummer_rcut_cut
-output_dir: runs/plummer_rcut/cut
+schema: dpjax.run.v2
+name: cut-baseline
+case: cut
+output_dir: runs/plummer_rcut/cut-baseline
 
 data:
   path: data/plummer_n524288_rcut1.0_train.h5
@@ -16,22 +17,21 @@ data:
       type: none
       dims: []
 
-trials:
-  trial_00:
-    df:
-      model: configs/models/df/plummer_ffjord_v1.yaml
-      seed: 42
-      model_overrides:
-        train:
-          epochs: 64
-    phi:
-      model: configs/models/phi/plummer_mlp_v1.yaml
-      seed: 42
-      model_overrides:
-        potential:
-          hidden_sizes: [128, 128, 128]
-        train:
-          epochs: 128
+df:
+  model: configs/models/df/plummer_ffjord_v1.yaml
+  seed: 42
+  model_overrides:
+    train:
+      epochs: 64
+
+phi:
+  model: configs/models/phi/plummer_mlp_v1.yaml
+  seed: 42
+  model_overrides:
+    potential:
+      hidden_sizes: [128, 128, 128]
+    train:
+      epochs: 128
 
 logging:
   backend: csv
@@ -52,7 +52,7 @@ execution:
       checkpoints_to_keep: 3
 
 evaluation:
-  system: halo
+  system: plummer
   df:
     enabled: true
     radial_edges: [0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0]
@@ -78,6 +78,9 @@ evaluation:
     r_max: 10.0
     n_r: 256
     r_ref: 1.0
+    compute_slice: true
+    slice_grid: 128
+    slice_rmax: 10.0
 
 plots:
   formats: [png]
@@ -85,6 +88,3 @@ plots:
     dpi: 150
   phi:
     dpi: 180
-    plot_overview: true
-    slice_grid: 128
-    slice_rmax: 10.0

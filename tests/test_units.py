@@ -7,7 +7,7 @@ from dpjax.physics.units import (
     density_from_laplacian,
     summarize_density_sign,
 )
-from experiments.validation.units import (
+from experiments.workflows.evaluation.units import (
     G_KPC_KMS2_PER_MSUN,
     gravitational_constant_for_system,
 )

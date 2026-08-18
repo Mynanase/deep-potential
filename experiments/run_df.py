@@ -1,4 +1,4 @@
-"""Train all selected DF trials from one run-level YAML configuration."""
+"""Train the DF stage for one concrete experiment."""
 
 from __future__ import annotations
 
@@ -22,33 +22,31 @@ def run(config_path: str | Path) -> None:
     mode = spec.logging.get("mode")
     entity = spec.logging.get("entity")
 
-    for trial in spec.selected_trials():
-        layout = spec.layout(trial)
-        config = spec.resolve_stage_config(trial, "df")
-        validate_stage_start(layout.df_dir, config, resume=spec.resume)
-        run_name = f"{spec.name}-{trial.name}-df"
-        print(f"[run_df] trial={trial.name} output={layout.df_dir}")
-        with ExperimentLogger(
-            layout.df_dir,
-            project=project,
-            run_name=run_name,
-            backend=backend,
-            config=config,
-            mode=None if mode is None else str(mode),
-            entity=None if entity is None else str(entity),
-        ) as logger:
-            run_df_training(
-                config,
-                spec.data_path,
-                layout.df_dir,
-                resume=spec.resume,
-                logger=logger,
-            )
+    config = spec.resolve_stage_config("df")
+    validate_stage_start(spec.df_dir, config, resume=spec.resume)
+    run_name = f"{spec.name}-df"
+    print(f"[run_df] experiment={spec.name} output={spec.df_dir}")
+    with ExperimentLogger(
+        spec.df_dir,
+        project=project,
+        run_name=run_name,
+        backend=backend,
+        config=config,
+        mode=None if mode is None else str(mode),
+        entity=None if entity is None else str(entity),
+    ) as logger:
+        run_df_training(
+            config,
+            spec.data_path,
+            spec.df_dir,
+            resume=spec.resume,
+            logger=logger,
+        )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Train DF trials declared by a run-level YAML config."
+        description="Train the DF stage declared by an experiment YAML config."
     )
     parser.add_argument("config", help="Path to configs/runs/<name>.yaml")
     args = parser.parse_args()
