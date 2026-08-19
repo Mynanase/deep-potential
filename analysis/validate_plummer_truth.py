@@ -6,7 +6,7 @@ from experiments.paths import resolve_path
 from experiments.validation.plummer import evaluate_plummer_truth
 
 
-EXPERIMENT_DIR = "runs/plummer_rcut/cut-baseline"
+EXPERIMENT_DIR = "runs/plummer_rcut/full-oracle"
 R_MIN = 1.0
 R_MAX = 10.0
 N_EVAL = 65_536
