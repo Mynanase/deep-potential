@@ -7,23 +7,24 @@ potentials from phase-space snapshots:
 2. freeze the DF and fit a potential network with the collisionless Boltzmann
    equation.
 
-Experiments use one checked-in run YAML and three stable worker entry points:
+Experiments use one checked-in run YAML and four stable worker entry points:
 
 ```bash
 python -m experiments.run_df configs/runs/halo12_static_v1.yaml
 python -m experiments.run_phi configs/runs/halo12_static_v1.yaml
 python -m experiments.run_eval configs/runs/halo12_static_v1.yaml
+python -m experiments.run_plot configs/runs/halo12_static_v1.yaml
 ```
 
 For a detached server run with automatic console logs, use the project launcher:
 
 ```bash
-python -m experiments.launch phi configs/runs/halo12_static_v1.yaml
+python -m experiments.launch plot configs/runs/halo12_static_v1.yaml
 ```
 
-The expensive stages are standalone processes. Post-training exploration uses
-the git-friendly Marimo app at `analysis/halo12.py` and only reads saved
-artifacts.
+The expensive stages are standalone processes. Post-training figure debugging
+uses `notebooks/figure_debug.ipynb`; it only reads saved artifacts and renders
+one explicitly selected figure at a time.
 
 The `dpjax` package is an array-only numerical core with a single `(N, 6)`
 phase-space contract. Dataset adapters, file I/O, plotting, run orchestration,

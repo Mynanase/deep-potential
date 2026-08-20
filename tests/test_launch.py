@@ -11,6 +11,10 @@ from experiments import launch as launcher
 from experiments.runtime import configure_runtime_environment
 
 
+def test_plot_stage_uses_the_batch_plot_entrypoint():
+    assert launcher.STAGE_MODULES["plot"] == "experiments.run_plot"
+
+
 def test_runtime_environment_sets_default_without_overriding_user_value():
     default_env: dict[str, str] = {}
     configure_runtime_environment(default_env)

@@ -40,6 +40,92 @@ def load_metrics(path: str | Path) -> dict[str, np.ndarray]:
     }
 
 
+def plot_training_loss(
+    metrics: dict[str, np.ndarray],
+    *,
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Create one loss Figure from in-memory training metrics."""
+    import matplotlib.pyplot as plt
+
+    if "step" not in metrics or "loss" not in metrics:
+        raise KeyError("Training metrics require step and loss columns.")
+    fig, ax = plt.subplots(dpi=dpi)
+    ax.plot(metrics["step"], metrics["loss"], color="#3070b3", lw=1.5)
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.grid(True, alpha=0.2)
+    if title:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_training_score_stats(
+    metrics: dict[str, np.ndarray],
+    *,
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Create one DF score-statistics Figure from in-memory metrics."""
+    import matplotlib.pyplot as plt
+
+    if "step" not in metrics:
+        raise KeyError("Training metrics require a step column.")
+    labels = {
+        "score_p50": "score | p50",
+        "score_p99": "score | p99",
+        "score_max_abs": "score | max",
+    }
+    keys = [key for key in labels if key in metrics]
+    if not keys:
+        raise KeyError("Training metrics contain no DF score-statistics columns.")
+    fig, ax = plt.subplots(dpi=dpi)
+    for key in keys:
+        ax.plot(metrics["step"], metrics[key], label=labels[key], lw=1.2)
+    ax.set_xlabel("step")
+    ax.set_ylabel("|score| statistics")
+    ax.grid(True, alpha=0.2)
+    ax.legend()
+    if title:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
+def plot_training_residual_stats(
+    metrics: dict[str, np.ndarray],
+    *,
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Create one Phi residual-statistics Figure from in-memory metrics."""
+    import matplotlib.pyplot as plt
+
+    if "step" not in metrics:
+        raise KeyError("Training metrics require a step column.")
+    labels = {
+        "residual_mean": "mean",
+        "residual_std": "standard deviation",
+        "residual_p99_abs": "p99(|residual|)",
+    }
+    keys = [key for key in labels if key in metrics]
+    if not keys:
+        raise KeyError("Training metrics contain no Phi residual-statistics columns.")
+    fig, ax = plt.subplots(dpi=dpi)
+    for key in keys:
+        ax.plot(metrics["step"], metrics[key], label=labels[key], lw=1.2)
+    ax.set_xlabel("step")
+    ax.set_ylabel("residual statistics")
+    ax.grid(True, alpha=0.2)
+    ax.legend()
+    if title:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
+
+
 def plot_training_metrics(
     metrics: dict[str, np.ndarray],
     *,

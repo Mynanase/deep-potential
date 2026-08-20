@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from experiments.plotting.style import format_display_unit, label_with_unit
+
 
 def _require(
     diagnostics: Mapping[str, np.ndarray],
@@ -14,7 +16,7 @@ def _require(
 ) -> None:
     missing = names.difference(diagnostics)
     if missing:
-        raise ValueError(
+        raise KeyError(
             "DF diagnostics are missing: " + ", ".join(sorted(missing))
         )
 
@@ -28,6 +30,12 @@ def _model_labels(
         if len(labels) >= n_models:
             return labels[:n_models]
     return [f"model_{index}" for index in range(n_models)]
+
+
+def _nanmedian(values: np.ndarray, *, axis: int) -> np.ndarray:
+    """Compute a NaN-aware median without warnings for unsupported cells."""
+    result = np.ma.median(np.ma.masked_invalid(values), axis=axis)
+    return np.asarray(result.filled(np.nan))
 
 
 def plot_density_profile(
@@ -56,16 +64,23 @@ def plot_density_profile(
     axes[0].plot(radius, reference, "k-o", lw=1.8, label=reference_label)
     if "model_density_by_model" in diagnostics:
         values = np.asarray(diagnostics["model_density_by_model"])
-        for index, density in enumerate(values):
-            axes[0].plot(
-                radius,
-                density,
-                color="C1",
-                alpha=0.25,
-                lw=0.9,
-                label=model_label if values.shape[0] == 1 else None,
-            )
-    axes[0].plot(radius, model, "s--", color="C1", lw=1.8, label=model_label)
+        if values.shape[0] > 1:
+            for density in values:
+                axes[0].plot(
+                    radius,
+                    density,
+                    color="#3070b3",
+                    alpha=0.25,
+                    lw=0.9,
+                )
+    axes[0].plot(
+        radius,
+        model,
+        "s--",
+        color="#3070b3",
+        lw=1.8,
+        label=model_label,
+    )
     if np.all(radius > 0):
         axes[0].set_xscale("log")
     if np.all(reference > 0) and np.all(model > 0):
@@ -195,6 +210,7 @@ def plot_cylindrical_rz_density(
             cmap="magma",
             norm=density_norm,
             shading="auto",
+            rasterized=True,
         )
         axes[1, phi_index].pcolormesh(
             radius_edges,
@@ -203,6 +219,7 @@ def plot_cylindrical_rz_density(
             cmap="magma",
             norm=density_norm,
             shading="auto",
+            rasterized=True,
         )
         ratio_mappable = axes[2, phi_index].pcolormesh(
             radius_edges,
@@ -211,6 +228,7 @@ def plot_cylindrical_rz_density(
             cmap="coolwarm",
             norm=ratio_norm,
             shading="auto",
+            rasterized=True,
         )
         axes[0, phi_index].set_title(
             rf"${phi_left:.0f}^\circ\leq\phi<{phi_right:.0f}^\circ$"
@@ -332,7 +350,8 @@ def plot_velocity_marginals(
             if row == 0:
                 ax.set_title(velocity_labels[velocity_index])
             if row == n_rows - 1:
-                unit = f" [{velocity_unit}]" if velocity_unit else ""
+                formatted_unit = format_display_unit(velocity_unit)
+                unit = f" [{formatted_unit}]" if formatted_unit else ""
                 ax.set_xlabel(f"velocity{unit}")
 
         left = coordinate_edges[row]
@@ -413,6 +432,359 @@ def plot_score_distribution(
         ax.legend(fontsize=8)
     fig.suptitle(title or "Per-dimension physical-score distribution")
     fig.tight_layout()
+    return fig
+
+
+def _display_label(symbol: str, unit: str | None) -> str:
+    return label_with_unit(symbol, unit)
+
+
+def plot_cylindrical_marginals_by_radius(
+    diagnostics: Mapping[str, np.ndarray],
+    *,
+    length_unit: str = "",
+    velocity_unit: str = "",
+    reference_label: str = "data",
+    model_label: str = "model",
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot five cylindrical marginal PDFs in reference-defined R quantiles."""
+    import matplotlib.pyplot as plt
+
+    _require(
+        diagnostics,
+        {
+            "cylindrical_R_edges",
+            "cylindrical_component_names",
+            "cylindrical_component_edges",
+            "cylindrical_reference_pdf",
+            "cylindrical_model_pdf",
+            "cylindrical_reference_effective_count",
+            "cylindrical_model_count",
+        },
+    )
+    radius_edges = np.asarray(diagnostics["cylindrical_R_edges"])
+    names = [str(value) for value in diagnostics["cylindrical_component_names"]]
+    edges = np.asarray(diagnostics["cylindrical_component_edges"])
+    reference_pdf = np.asarray(diagnostics["cylindrical_reference_pdf"])
+    model_pdf = np.asarray(diagnostics["cylindrical_model_pdf"])
+    if model_pdf.ndim == reference_pdf.ndim:
+        model_pdf = model_pdf[None, ...]
+    effective_count = np.asarray(diagnostics["cylindrical_reference_effective_count"])
+    model_count = np.asarray(diagnostics["cylindrical_model_count"])
+    if model_count.ndim == 1:
+        model_count = model_count[None, ...]
+
+    n_radius = radius_edges.size - 1
+    fig, axes = plt.subplots(
+        n_radius,
+        5,
+        figsize=(12.5, max(5.0, 1.55 * n_radius)),
+        squeeze=False,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    labels = {
+        "phi": r"$\phi$",
+        "z": _display_label(r"$z$", length_unit),
+        "v_R": _display_label(r"$v_R$", velocity_unit),
+        "v_phi": _display_label(r"$v_\phi$", velocity_unit),
+        "v_z": _display_label(r"$v_z$", velocity_unit),
+    }
+    for radius_index in range(n_radius):
+        for component_index, name in enumerate(names):
+            ax = axes[radius_index, component_index]
+            ax.stairs(
+                reference_pdf[radius_index, component_index],
+                edges[component_index],
+                color="black",
+                linewidth=1.35,
+                label=reference_label,
+            )
+            median_model = _nanmedian(
+                model_pdf[:, radius_index, component_index], axis=0
+            )
+            ax.stairs(
+                median_model,
+                edges[component_index],
+                color="#3070b3",
+                linewidth=1.25,
+                label=model_label,
+            )
+            ax.grid(True, alpha=0.18)
+            if radius_index == 0:
+                ax.set_title(labels.get(name, name))
+            if radius_index == n_radius - 1:
+                ax.set_xlabel(labels.get(name, name))
+        unit = (
+            f" {format_display_unit(length_unit)}" if length_unit else ""
+        )
+        axes[radius_index, 0].set_ylabel(
+            rf"${radius_edges[radius_index]:.2g}\leq R<"
+            rf"{radius_edges[radius_index + 1]:.2g}$" + unit + "\nPDF\n"
+            + rf"$N_{{eff}}={effective_count[radius_index]:.0f}$, "
+            + rf"$N_m\sim{np.median(model_count[:, radius_index]):.0f}$"
+        )
+    axes[0, -1].legend(frameon=False, fontsize=8)
+    if title:
+        fig.suptitle(title)
+    return fig
+
+
+def plot_score_field_rv(
+    diagnostics: Mapping[str, np.ndarray],
+    *,
+    length_unit: str = "",
+    velocity_unit: str = "",
+    score_r_label: str = r"$s_r$",
+    score_v_label: str = r"$s_v$",
+    min_effective_count: float | None = None,
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot signed weighted-median radial score components on ``(r, |v|)``."""
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+
+    _require(
+        diagnostics,
+        {
+            "score_field_r_edges",
+            "score_field_v_edges",
+            "score_field_effective_count",
+            "score_field_r_median",
+            "score_field_v_median",
+        },
+    )
+    r_edges = np.asarray(diagnostics["score_field_r_edges"])
+    v_edges = np.asarray(diagnostics["score_field_v_edges"])
+    effective_count = np.asarray(diagnostics["score_field_effective_count"])
+    threshold = (
+        float(min_effective_count)
+        if min_effective_count is not None
+        else float(np.asarray(diagnostics.get("score_field_min_effective_count", 20.0)))
+    )
+    fields = []
+    for key in ("score_field_r_median", "score_field_v_median"):
+        values = np.asarray(diagnostics[key])
+        if values.ndim == 3:
+            values = _nanmedian(values, axis=0)
+        fields.append(np.where(effective_count >= threshold, values, np.nan))
+    finite = np.concatenate([np.abs(value[np.isfinite(value)]) for value in fields])
+    if finite.size == 0:
+        raise ValueError("No score-field cells satisfy the support threshold.")
+    limit = max(float(np.percentile(finite, 98.0)), np.finfo(float).eps)
+    positive = finite[finite > 0]
+    linthresh = max(
+        min(float(np.percentile(positive, 10.0)) if positive.size else limit, limit * 0.1),
+        limit * 1.0e-6,
+    )
+    norm = colors.SymLogNorm(linthresh=linthresh, vmin=-limit, vmax=limit)
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(9.0, 3.8),
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    mappable = None
+    for ax, values, label in zip(axes, fields, (score_r_label, score_v_label)):
+        mappable = ax.pcolormesh(
+            r_edges,
+            v_edges,
+            np.ma.masked_invalid(values.T),
+            shading="auto",
+            cmap="coolwarm",
+            norm=norm,
+            rasterized=True,
+        )
+        ax.set_title(label)
+        ax.set_xlabel(_display_label(r"$r$", length_unit))
+        ax.set_ylabel(_display_label(r"$|v|$", velocity_unit))
+    fig.colorbar(mappable, ax=axes.ravel().tolist(), label="weighted median score")
+    if title:
+        fig.suptitle(title)
+    return fig
+
+
+def plot_score_slices_by_radius(
+    diagnostics: Mapping[str, np.ndarray],
+    *,
+    length_unit: str = "",
+    velocity_unit: str = "",
+    min_effective_count: float | None = None,
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot score medians and weighted 16--84% bands in three R slices."""
+    import matplotlib.pyplot as plt
+
+    _require(
+        diagnostics,
+        {
+            "score_field_v_edges",
+            "score_field_slice_quantiles",
+            "score_field_slice_radii",
+            "score_field_slice_effective_count",
+            "score_slice_r_q16",
+            "score_slice_r_median",
+            "score_slice_r_q84",
+            "score_slice_v_q16",
+            "score_slice_v_median",
+            "score_slice_v_q84",
+        },
+    )
+    v_edges = np.asarray(diagnostics["score_field_v_edges"])
+    speed = 0.5 * (v_edges[:-1] + v_edges[1:])
+    slice_quantiles = np.asarray(diagnostics["score_field_slice_quantiles"])
+    slice_radii = np.asarray(diagnostics["score_field_slice_radii"])
+    effective_count = np.asarray(diagnostics["score_field_slice_effective_count"])
+    threshold = (
+        float(min_effective_count)
+        if min_effective_count is not None
+        else float(np.asarray(diagnostics.get("score_field_min_effective_count", 20.0)))
+    )
+    fig, axes = plt.subplots(
+        2,
+        3,
+        figsize=(10.5, 6.0),
+        sharex=True,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    for component_index, component in enumerate(("r", "v")):
+        low = np.asarray(diagnostics[f"score_slice_{component}_q16"])
+        median = np.asarray(diagnostics[f"score_slice_{component}_median"])
+        high = np.asarray(diagnostics[f"score_slice_{component}_q84"])
+        if median.ndim == 3:
+            low, median, high = (
+                _nanmedian(values, axis=0) for values in (low, median, high)
+            )
+        for slice_index in range(3):
+            ax = axes[component_index, slice_index]
+            supported = effective_count[slice_index] >= threshold
+            ax.fill_between(
+                speed,
+                np.where(supported, low[slice_index], np.nan),
+                np.where(supported, high[slice_index], np.nan),
+                color="#3070b3",
+                alpha=0.22,
+                linewidth=0,
+            )
+            ax.plot(
+                speed,
+                np.where(supported, median[slice_index], np.nan),
+                color="#3070b3",
+                linewidth=1.3,
+            )
+            ax.axhline(0.0, color="0.3", linewidth=0.7)
+            ax.grid(True, alpha=0.18)
+            if component_index == 0:
+                unit = (
+                    f" {format_display_unit(length_unit)}"
+                    if length_unit
+                    else ""
+                )
+                ax.set_title(
+                    f"R q={slice_quantiles[slice_index]:.2g} "
+                    f"({slice_radii[slice_index]:.3g}{unit})"
+                )
+            if component_index == 1:
+                ax.set_xlabel(_display_label(r"$|v|$", velocity_unit))
+        axes[component_index, 0].set_ylabel(r"$s_r$" if component == "r" else r"$s_v$")
+    if title:
+        fig.suptitle(title)
+    return fig
+
+
+def plot_radial_speed_density(
+    diagnostics: Mapping[str, np.ndarray],
+    *,
+    length_unit: str = "",
+    velocity_unit: str = "",
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot data/model ``(r, |v|)`` densities and ``log10(model/data)``."""
+    import matplotlib.pyplot as plt
+    from matplotlib import colors
+
+    _require(
+        diagnostics,
+        {
+            "radial_speed_r_edges",
+            "radial_speed_v_edges",
+            "radial_speed_reference_density",
+            "radial_speed_model_density",
+            "radial_speed_log10_ratio",
+        },
+    )
+    r_edges = np.asarray(diagnostics["radial_speed_r_edges"])
+    v_edges = np.asarray(diagnostics["radial_speed_v_edges"])
+    reference = np.asarray(diagnostics["radial_speed_reference_density"])
+    model = _nanmedian(
+        np.asarray(diagnostics["radial_speed_model_density"]), axis=0
+    )
+    ratio = _nanmedian(
+        np.asarray(diagnostics["radial_speed_log10_ratio"]), axis=0
+    )
+    positive = np.concatenate([reference[reference > 0], model[model > 0]])
+    density_norm = colors.LogNorm(vmin=np.percentile(positive, 2), vmax=np.percentile(positive, 99))
+    finite_ratio = np.abs(ratio[np.isfinite(ratio)])
+    ratio_limit = max(float(np.percentile(finite_ratio, 98)) if finite_ratio.size else 1.0, 0.1)
+    ratio_norm = colors.TwoSlopeNorm(vmin=-ratio_limit, vcenter=0.0, vmax=ratio_limit)
+    fig = plt.figure(figsize=(11.5, 3.5), layout="constrained", dpi=dpi)
+    grid = fig.add_gridspec(
+        1,
+        5,
+        width_ratios=(1.0, 1.0, 0.055, 1.0, 0.055),
+    )
+    axes = [fig.add_subplot(grid[0, 0])]
+    axes.append(fig.add_subplot(grid[0, 1], sharex=axes[0], sharey=axes[0]))
+    axes.append(fig.add_subplot(grid[0, 3], sharex=axes[0], sharey=axes[0]))
+    density_colorbar_axis = fig.add_subplot(grid[0, 2])
+    ratio_colorbar_axis = fig.add_subplot(grid[0, 4])
+    for ax, values, panel_title in zip(axes[:2], (reference, model), ("Data", "Model")):
+        mesh = ax.pcolormesh(
+            r_edges,
+            v_edges,
+            np.ma.masked_less_equal(values.T, 0),
+            cmap="viridis",
+            norm=density_norm,
+            shading="auto",
+            rasterized=True,
+        )
+        ax.set_title(panel_title)
+    ratio_mesh = axes[2].pcolormesh(
+        r_edges,
+        v_edges,
+        np.ma.masked_invalid(ratio.T),
+        cmap="coolwarm",
+        norm=ratio_norm,
+        shading="auto",
+        rasterized=True,
+    )
+    axes[2].set_title(r"$\log_{10}(model/data)$")
+    for ax in axes:
+        ax.set_xlabel(_display_label(r"$r$", length_unit))
+    axes[0].set_ylabel(_display_label(r"$|v|$", velocity_unit))
+    axes[1].tick_params(labelleft=False)
+    axes[2].tick_params(labelleft=False)
+    fig.colorbar(
+        mesh,
+        cax=density_colorbar_axis,
+        label="probability density",
+    )
+    fig.colorbar(
+        ratio_mesh,
+        cax=ratio_colorbar_axis,
+        label="log10 density ratio",
+    )
+    if title:
+        fig.suptitle(title)
     return fig
 
 

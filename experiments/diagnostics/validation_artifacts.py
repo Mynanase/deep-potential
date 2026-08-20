@@ -8,24 +8,44 @@ from typing import Any
 
 import numpy as np
 
-
-def _artifact_path(validation_dir: str | Path, filename: str) -> Path:
-    path = Path(validation_dir) / filename
-    if not path.is_file():
-        raise FileNotFoundError(f"Missing truth-validation artifact: {path}")
-    return path
+from experiments.diagnostics.artifact_paths import artifact_candidates
 
 
-def load_validation_metrics(validation_dir: str | Path) -> dict[str, Any]:
+def _artifact_path(
+    validation_dir: str | Path,
+    filename: str,
+    *,
+    kind: str | None = None,
+) -> Path:
+    names = [f"validation_{kind}_{filename}" if kind else filename, filename]
+    for name in names:
+        candidates = list(artifact_candidates(validation_dir, name))
+        if kind:
+            candidates.append(Path(validation_dir) / "validation" / kind / filename)
+        for path in candidates:
+            if path.is_file():
+                return path
+    raise FileNotFoundError(
+        f"Missing truth-validation artifact {filename!r} under {validation_dir}."
+    )
+
+
+def load_validation_metrics(
+    validation_dir: str | Path,
+    *,
+    kind: str | None = None,
+) -> dict[str, Any]:
     """Load the optional ``metrics.json`` artifact."""
-    path = _artifact_path(validation_dir, "metrics.json")
+    path = _artifact_path(validation_dir, "metrics.json", kind=kind)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_validation_diagnostics(
     validation_dir: str | Path,
+    *,
+    kind: str | None = None,
 ) -> dict[str, np.ndarray]:
     """Load the optional ``diagnostics.npz`` artifact."""
-    path = _artifact_path(validation_dir, "diagnostics.npz")
+    path = _artifact_path(validation_dir, "diagnostics.npz", kind=kind)
     with np.load(path, allow_pickle=False) as data:
         return {key: np.asarray(data[key]) for key in data.files}

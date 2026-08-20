@@ -1,6 +1,6 @@
 # 服务器 Agent 操作指南
 
-训练和高成本评估使用独立后台进程；Marimo 只读取保存后的结果。
+训练和高成本评估使用独立后台进程；Jupyter 只读取保存后的结果并调试单张图。
 
 ## 准备
 
@@ -80,28 +80,26 @@ runs/halo12/static-baseline/
 ├── logs/
 ├── df/
 ├── phi/
-├── eval/
-│   ├── df_metrics.json
-│   ├── df_diagnostics.npz
-│   ├── df_samples.npz
-│   ├── phi_metrics.json
-│   └── phi_diagnostics.npz
-└── plots/
+└── results/
+    ├── data/
+    ├── figures/
+    ├── debug/
+    ├── manifest.json
+    └── report.md
 ```
 
-旧的 `trial_00/`、`eval/df/`、`eval/phi/` 和 `auriga_df_*` 产物不属于当前
-结构。已有重要结果需显式迁移或重新运行 evaluation。
+旧的 `eval/`、`plots/` 和 `validation/` 仍可读取，但不会由新运行创建，旧结果
+不需要迁移。
 
 真值验证不属于服务器 run 配置或 `run_eval.py`。如需临时验证，修改并运行
 `analysis/validate_plummer_truth.py` 或 `analysis/validate_auriga_truth.py`；脚本
-会另外写入 `validation/<kind>/metrics.json` 和 `diagnostics.npz`。
+会写入 `results/data/validation_<kind>_*.{json,npz}`。
 
 ## 分析与检查
 
 ```bash
-marimo edit analysis/halo12.py
+jupyter lab notebooks/figure_debug.ipynb
 pytest -q
-marimo check --strict analysis/halo12.py analysis/plummer_rcut.py
 ```
 
 Agent 不得提交数据、凭据、日志或 checkpoint，也不得把数据适配、绘图和 truth

@@ -1,7 +1,7 @@
 # 架构与功能扩展操作指南
 
 本项目采用三层结构：`dpjax` 只处理数组和数值模型，`experiments` 负责数据、
-训练、产物和绘图，`analysis` 中的 Marimo 只读取结果并组合展示。
+训练、产物和绘图，Jupyter 只读取保存结果并定位单张图。
 
 ## 配置边界
 
@@ -40,19 +40,16 @@ runs/<experiment>/
 ├── logs/
 ├── df/                 # checkpoint、模型状态、训练指标
 ├── phi/                # checkpoint、模型状态、训练指标
-├── eval/
-│   ├── df_config.yaml
-│   ├── df_metrics.json
-│   ├── df_diagnostics.npz
-│   ├── df_samples.npz
-│   ├── phi_config.yaml
-│   ├── phi_metrics.json
-│   └── phi_diagnostics.npz
-└── plots/
+└── results/
+    ├── data/             # flat JSON/NPZ 与评估配置
+    ├── figures/          # 正式 PNG/PDF
+    ├── debug/            # Jupyter 调试图
+    ├── manifest.json
+    └── report.md
 ```
 
-`eval/` 不再按 DF/Phi 建子目录。模拟 potential、acceleration 等 truth 不进入
-通用诊断文件，也不进入 run YAML 或 `run_eval.py`。
+新运行不创建 `eval/`、`plots/` 或多层 validation；读取器仍兼容这些旧目录。
+模拟 potential、acceleration 等 truth 不进入 run YAML 或 `run_eval.py`。
 
 ## 诊断与绘图
 
@@ -86,10 +83,10 @@ plot_potential_slice(x, y, model_potential)
 plot_mass_density_slice(x, y, model_density)
 ```
 
-这些函数只接收内存数据并返回 `Figure`，不读文件、不保存、不调用
-`plt.close()`。Marimo 决定加载哪些实验、如何组合以及展示哪些图。当前没有
-“一次生成全部默认图”的聚合入口；未来如需增加，应由 workflow 根据配置调用
-独立函数，而不是放入 plotting 包。
+Figure builder 只接收内存数据并返回 `Figure`，不读文件、不保存、不调用
+`plt.close()`。`FigureRegistry` 负责按名字装配数据和 builder，`FigureWriter`
+统一写入格式、manifest 和关闭 Figure。批量入口是 `run_plot`；Jupyter 每个
+单元只调用一个 `render_figure`。
 
 ## 修改位置
 
@@ -112,9 +109,10 @@ conda activate dp-jax
 python -m experiments.launch df configs/runs/plummer_rcut_cut.yaml
 python -m experiments.launch phi configs/runs/plummer_rcut_cut.yaml
 python -m experiments.launch eval configs/runs/plummer_rcut_cut.yaml
+python -m experiments.launch plot configs/runs/plummer_rcut_cut.yaml
 
 tail -f runs/plummer_rcut/cut-baseline/logs/phi.log
-marimo edit analysis/plummer_rcut.py
+jupyter lab notebooks/figure_debug.ipynb
 ```
 
 launcher 负责后台脱离、日志和 PID；项目默认设置
@@ -127,12 +125,10 @@ python analysis/validate_plummer_truth.py
 python analysis/validate_auriga_truth.py
 ```
 
-脚本只生成 `validation/<kind>/metrics.json` 与 `diagnostics.npz`；绘图仍由
-Marimo 调用独立 Figure 函数组合完成。
+脚本只在 `results/data/` 生成 flat validation JSON/NPZ；通用图不依赖解析真值。
 提交前运行：
 
 ```bash
 pytest -q
-marimo check --strict analysis/halo12.py analysis/plummer_rcut.py
 ruff check dpjax experiments analysis tests
 ```

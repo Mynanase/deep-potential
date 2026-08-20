@@ -22,7 +22,7 @@ def main() -> None:
     result = evaluate_plummer_truth(
         experiment_dir / "df",
         experiment_dir / "phi",
-        experiment_dir / "validation" / "plummer",
+        experiment_dir / "results" / "data",
         n_eval=N_EVAL,
         batch_size=BATCH_SIZE,
         seed=SEED,
@@ -31,6 +31,7 @@ def main() -> None:
         n_r=N_R,
         slice_grid=SLICE_GRID,
         slice_rmax=SLICE_RMAX,
+        artifact_prefix="validation_plummer",
     )
     print(f"Wrote Plummer truth artifacts to {result['output_dir']}")
 

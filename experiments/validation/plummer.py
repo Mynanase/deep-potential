@@ -338,6 +338,7 @@ def evaluate_plummer_truth(
     n_r: int = 256,
     slice_grid: int = 128,
     slice_rmax: float | None = None,
+    artifact_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Write analytic Plummer truth metrics and arrays, but never figures.
 
@@ -485,11 +486,12 @@ def evaluate_plummer_truth(
         "slice_truth_density": plummer_rho(slice_radius),
         "slice_support_mask": slice_support_mask,
     }
-    (output_dir / "metrics.json").write_text(
+    prefix = f"{artifact_prefix}_" if artifact_prefix else ""
+    (output_dir / f"{prefix}metrics.json").write_text(
         json.dumps(_json_safe(metrics), indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )
-    np.savez_compressed(output_dir / "diagnostics.npz", **diagnostics)
+    np.savez_compressed(output_dir / f"{prefix}diagnostics.npz", **diagnostics)
     return {
         "metrics": metrics,
         "diagnostics": diagnostics,

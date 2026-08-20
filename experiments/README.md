@@ -6,12 +6,14 @@ Each run YAML describes one concrete experiment and one output directory:
 python -m experiments.run_df configs/runs/<run>.yaml
 python -m experiments.run_phi configs/runs/<run>.yaml
 python -m experiments.run_eval configs/runs/<run>.yaml
+python -m experiments.run_plot configs/runs/<run>.yaml
+python -m experiments.run_plot configs/runs/<run>.yaml --only training df
 ```
 
 For detached server execution, use the launcher:
 
 ```bash
-python -m experiments.launch phi configs/runs/<run>.yaml
+python -m experiments.launch plot configs/runs/<run>.yaml
 ```
 
 The launcher owns process detachment, logs, PID files, and runtime environment
@@ -30,8 +32,12 @@ runs/<experiment>/
 ├── logs/
 ├── df/
 ├── phi/
-├── eval/          # flat df_*/phi_* JSON/NPZ artifacts
-└── plots/
+└── results/
+    ├── data/      # flat JSON/NPZ artifacts
+    ├── figures/   # official PNG/PDF
+    ├── debug/     # notebook output
+    ├── manifest.json
+    └── report.md
 ```
 
 DF evaluation artifacts are loaded independently with `load_df_metrics`,
@@ -57,23 +63,18 @@ checked-in YAML.
 
 ## Analysis
 
-```bash
-marimo edit analysis/halo12.py
-marimo edit analysis/plummer_rcut.py
-```
-
-Marimo reads JSON/NPZ artifacts and composes functions from
-`experiments.plotting`; it never starts training or expensive evaluation.
+Use `notebooks/figure_debug.ipynb` to render one registered figure from saved
+artifacts. Jupyter does not train, sample a model, or invoke `run_eval`.
 
 ## Optional truth checks
 
 Truth checks are deliberately outside the run YAML and `run_eval.py`. Edit the
-constants in a one-off script, generate arrays once, and let Marimo read them:
+constants in a one-off script and generate the arrays once:
 
 ```bash
 python analysis/validate_plummer_truth.py
 python analysis/validate_auriga_truth.py
 ```
 
-They create `validation/<kind>/{metrics.json,diagnostics.npz}` below the chosen
-experiment directory. The scripts do not render or save figures.
+They create flat `validation_<kind>_{metrics.json,diagnostics.npz}` artifacts
+under `results/data/`. The scripts do not render or save figures.

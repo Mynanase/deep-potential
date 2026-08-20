@@ -32,8 +32,8 @@ python -m experiments.run_eval configs/runs/my_run.yaml
 ```
 
 Each entry point accepts only the run YAML path. `run_phi` automatically uses
-the DF from the same trial. `run_eval` persists metrics and arrays before they
-are displayed by Marimo.
+the DF from the same run. `run_eval` persists metrics and arrays before
+`run_plot` or the debugging notebook renders them.
 
 The reusable `dpjax` package accepts six-dimensional arrays only. HDF5 and
 dataset-specific preparation live in `experiments.datasets`; adding another
@@ -95,8 +95,12 @@ runs/<run-name>/
 ├── logs/          # launcher console logs and PID files
 ├── df/            # checkpoint, preprocessing, config, metrics
 ├── phi/           # checkpoint, config, metrics
-├── eval/          # flat df_*/phi_* JSON/NPZ diagnostics
-└── plots/         # optional figures
+└── results/
+    ├── data/       # flat df_*/phi_* JSON/NPZ diagnostics
+    ├── figures/    # official PNG/PDF
+    ├── debug/      # notebook output
+    ├── manifest.json
+    └── report.md
 ```
 
 The generated `run.yaml` is an immutable resolved snapshot. Existing
@@ -105,16 +109,14 @@ current resolved configuration matches the saved stage configuration.
 
 ## Analysis
 
-```bash
-marimo edit analysis/halo12.py
-```
-
-Choose experiment directories in the UI. The app reads existing `metrics.csv`,
-JSON and NPZ artifacts and never starts training.
+Open `notebooks/figure_debug.ipynb`, set `RUN` in the first code cell, and run
+only the cell for the desired figure. The notebook never starts training or
+evaluation. Use `write_figure(..., target="debug")` while iterating and
+`target="official"` only after confirmation.
 
 Optional simulator or analytic truth is not part of the run YAML. Edit and run
 `analysis/validate_auriga_truth.py` or `analysis/validate_plummer_truth.py` to
-generate separate JSON/NPZ artifacts for Marimo.
+generate separate JSON/NPZ artifacts under `results/data/`.
 
 ## Data utilities
 
@@ -131,7 +133,6 @@ python -m experiments.smoke_dpjax --help
 
 ```bash
 pytest -q
-marimo check --strict analysis/halo12.py
 ```
 
 GPU training should be run from the user terminal or server environment. For

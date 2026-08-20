@@ -1,0 +1,25 @@
+schema: dpjax.model.v1
+kind: phi
+
+potential:
+  hidden_sizes: [512, 512, 512, 512]
+
+train:
+  optimizer: radam
+  batch_size: 32768
+  epochs: 128
+  loss_type: mse
+  alpha: 1.0
+  beta: 1.0
+  lambda_mass: 1.0
+  mass_batch_size: 4096
+  l2_reg: 0.001
+  reweight:
+    gamma: 0.0
+    r_ref: 20.0
+  lr:
+    schedule: cosine
+    max: 0.003
+    final: 1.0e-6
+    warmup_frac: 0.03
+  grad_clip: 1.0

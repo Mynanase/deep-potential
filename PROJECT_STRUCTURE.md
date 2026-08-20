@@ -22,10 +22,13 @@ deep-potential/
 │   ├── runtime.py                 # pre-JAX project environment defaults
 │   ├── run_df.py
 │   ├── run_phi.py
-│   └── run_eval.py
+│   ├── run_eval.py
+│   ├── run_plot.py
+│   └── list_runs.py
 ├── analysis/
-│   ├── {halo12,plummer_rcut}.py   # read-only Marimo applications
 │   └── validate_*_truth.py        # editable one-off truth scripts
+├── notebooks/
+│   └── figure_debug.ipynb         # saved-artifact, single-figure debugging
 ├── configs/
 │   ├── models/{df,phi}/           # reusable model/training recipes
 │   └── runs/                      # data, execution, evaluation and plots
@@ -57,7 +60,7 @@ experiments.diagnostics        │
 experiments.plotting ──────────┘
             │
             ▼
-analysis/halo12.py
+run_plot / figure_debug.ipynb
 ```
 
 The dependency is one-way: `experiments -> dpjax`. Core code must not import
@@ -86,8 +89,12 @@ runs/<experiment>/
 ├── logs/
 ├── df/
 ├── phi/
-├── eval/                         # flat df_*/phi_* diagnostics
-└── plots/
+└── results/
+    ├── data/                     # flat df_*/phi_* diagnostics
+    ├── figures/                  # official PNG/PDF
+    ├── debug/                    # notebook output
+    ├── manifest.json
+    └── report.md
 ```
 
 The run has no required trial subdirectory. `logs/{df,phi,eval}.log` and matching
@@ -96,4 +103,4 @@ PID files are written when stages are started through `experiments.launch`.
 Potential and acceleration truth are not part of the core phase-space input.
 They are absent from the run schema and `run_eval.py`. When needed for a
 one-off synthetic/simulation check, standalone analysis scripts write optional
-`validation/<kind>/{metrics.json,diagnostics.npz}` artifacts for Marimo.
+flat `validation_<kind>_*` artifacts under `results/data/`.

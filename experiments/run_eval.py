@@ -71,6 +71,17 @@ def _run_df(
             int(config.get("spatial_z_bins", 48)) + 1,
         ),
         spatial_min_cell_count=int(config.get("spatial_min_cell_count", 5)),
+        n_cylindrical_r_bins=int(config.get("n_cylindrical_r_bins", 8)),
+        n_cylindrical_component_bins=int(
+            config.get("n_cylindrical_component_bins", 64)
+        ),
+        score_field_r_bins=int(config.get("score_field_r_bins", 32)),
+        score_field_v_bins=int(config.get("score_field_v_bins", 32)),
+        score_field_min_effective_count=float(
+            config.get("score_field_min_effective_count", 20)
+        ),
+        radial_speed_r_bins=int(config.get("radial_speed_r_bins", 64)),
+        radial_speed_v_bins=int(config.get("radial_speed_v_bins", 64)),
     )
 
 

@@ -8,12 +8,11 @@ from typing import Any
 
 import numpy as np
 
+from experiments.diagnostics.artifact_paths import resolve_artifact
+
 
 def _artifact_path(eval_dir: str | Path, filename: str) -> Path:
-    path = Path(eval_dir) / filename
-    if not path.is_file():
-        raise FileNotFoundError(f"Missing DF evaluation artifact: {path}")
-    return path
+    return resolve_artifact(eval_dir, filename)
 
 
 def _load_npz(path: Path) -> dict[str, np.ndarray]:

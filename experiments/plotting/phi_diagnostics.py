@@ -55,20 +55,20 @@ def plot_potential_profile(
         model_potential,
         truth_potential,
     )
-    fig, ax = plt.subplots(dpi=dpi)
+    fig, ax = plt.subplots(constrained_layout=True, dpi=dpi)
     if truth is not None:
         ax.plot(
             radius,
             truth,
             label=truth_label,
-            **_line_kwargs({"color": "black", "linewidth": 1.8}, truth_kwargs),
+            **_line_kwargs({"color": "#e1812c", "linewidth": 1.8}, truth_kwargs),
         )
     ax.plot(
         radius,
         model,
         label=model_label,
         **_line_kwargs(
-            {"color": "C1", "linewidth": 1.5, "linestyle": "--"},
+            {"color": "#3070b3", "linewidth": 1.5, "linestyle": "--"},
             model_kwargs,
         ),
     )
@@ -80,7 +80,6 @@ def plot_potential_profile(
     ax.legend()
     if title:
         ax.set_title(title)
-    fig.tight_layout()
     return fig
 
 
@@ -106,20 +105,20 @@ def plot_mass_density_profile(
         model_density,
         truth_density,
     )
-    fig, ax = plt.subplots(dpi=dpi)
+    fig, ax = plt.subplots(constrained_layout=True, dpi=dpi)
     if truth is not None:
         ax.plot(
             radius,
             truth,
             label=truth_label,
-            **_line_kwargs({"color": "black", "linewidth": 1.8}, truth_kwargs),
+            **_line_kwargs({"color": "#e1812c", "linewidth": 1.8}, truth_kwargs),
         )
     ax.plot(
         radius,
         model,
         label=model_label,
         **_line_kwargs(
-            {"color": "C1", "linewidth": 1.5, "linestyle": "--"},
+            {"color": "#3070b3", "linewidth": 1.5, "linestyle": "--"},
             model_kwargs,
         ),
     )
@@ -142,7 +141,6 @@ def plot_mass_density_profile(
     ax.legend()
     if title:
         ax.set_title(title)
-    fig.tight_layout()
     return fig
 
 
@@ -212,14 +210,14 @@ def plot_radial_acceleration_profile(
             radius,
             truth,
             label=truth_label,
-            **_line_kwargs({"color": "black", "linewidth": 1.8}, truth_kwargs),
+            **_line_kwargs({"color": "#e1812c", "linewidth": 1.8}, truth_kwargs),
         )
     ax.plot(
         radius,
         model,
         label=model_label,
         **_line_kwargs(
-            {"color": "C1", "linewidth": 1.5, "linestyle": "--"},
+            {"color": "#3070b3", "linewidth": 1.5, "linestyle": "--"},
             model_kwargs,
         ),
     )
@@ -291,7 +289,7 @@ def plot_potential_slice(
     vmin, vmax = np.percentile(finite, percentiles)
     if vmax <= vmin:
         vmax = vmin + max(abs(float(vmin)) * 1.0e-6, 1.0e-12)
-    fig, ax = plt.subplots(dpi=dpi)
+    fig, ax = plt.subplots(constrained_layout=True, dpi=dpi)
     mappable = ax.pcolormesh(
         x,
         y,
@@ -299,6 +297,7 @@ def plot_potential_slice(
         shading="auto",
         cmap=cmap,
         norm=colors.Normalize(vmin=float(vmin), vmax=float(vmax)),
+        rasterized=True,
     )
     if truth_potential is not None:
         _, _, truth = _slice_arrays(x, y, truth_potential, mask)
@@ -309,14 +308,13 @@ def plot_potential_slice(
             else np.unique(np.percentile(truth_values, [20.0, 50.0, 80.0]))
         )
         if levels.size:
-            ax.contour(x, y, truth, levels=levels, colors="white", linewidths=0.7)
+            ax.contour(x, y, truth, levels=levels, colors="#e1812c", linewidths=0.7)
     fig.colorbar(mappable, ax=ax, label=potential_label)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_aspect("equal")
     if title:
         ax.set_title(title)
-    fig.tight_layout()
     return fig
 
 
@@ -366,7 +364,7 @@ def plot_mass_density_slice(
         )
         cmap = "coolwarm"
 
-    fig, ax = plt.subplots(dpi=dpi)
+    fig, ax = plt.subplots(constrained_layout=True, dpi=dpi)
     mappable = ax.pcolormesh(
         x,
         y,
@@ -374,6 +372,7 @@ def plot_mass_density_slice(
         shading="auto",
         cmap=cmap,
         norm=norm,
+        rasterized=True,
     )
     if truth_density is not None:
         _, _, truth = _slice_arrays(x, y, truth_density, mask)
@@ -388,12 +387,11 @@ def plot_mass_density_slice(
         else:
             levels = np.asarray(truth_contour_levels, dtype=np.float64)
         if levels.size:
-            ax.contour(x, y, truth, levels=levels, colors="0.2", linewidths=0.7)
+            ax.contour(x, y, truth, levels=levels, colors="#e1812c", linewidths=0.7)
     fig.colorbar(mappable, ax=ax, label=density_label)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_aspect("equal")
     if title:
         ax.set_title(title)
-    fig.tight_layout()
     return fig

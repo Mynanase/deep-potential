@@ -123,12 +123,38 @@ class RunSpec:
         return self.phi.df_run or self.df_dir
 
     @property
+    def results_dir(self) -> Path:
+        return self.output_dir / "results"
+
+    @property
+    def result_data_dir(self) -> Path:
+        return self.results_dir / "data"
+
+    @property
+    def figures_dir(self) -> Path:
+        return self.results_dir / "figures"
+
+    @property
+    def debug_dir(self) -> Path:
+        return self.results_dir / "debug"
+
+    @property
+    def manifest_path(self) -> Path:
+        return self.results_dir / "manifest.json"
+
+    @property
+    def report_path(self) -> Path:
+        return self.results_dir / "report.md"
+
+    @property
     def eval_dir(self) -> Path:
-        return self.output_dir / "eval"
+        """Compatibility alias for code that writes evaluation artifacts."""
+        return self.result_data_dir
 
     @property
     def plots_dir(self) -> Path:
-        return self.output_dir / "plots"
+        """Compatibility alias for code that writes official figures."""
+        return self.figures_dir
 
     @property
     def resume(self) -> bool:
@@ -316,8 +342,9 @@ def prepare_run(spec: RunSpec) -> Path:
         spec.logs_dir,
         spec.df_dir,
         spec.phi_dir,
-        spec.eval_dir,
-        spec.plots_dir,
+        spec.result_data_dir,
+        spec.figures_dir,
+        spec.debug_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     payload = spec.training_snapshot()

@@ -29,7 +29,6 @@ operations = [
   "orbax-checkpoint>=0.5.0",
 ]
 notebook = [
-  "marimo>=0.19",
   "jupyter>=1.0",
   "jupyterlab>=4.0",
   "ipywidgets>=8.0",

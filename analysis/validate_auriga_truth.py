@@ -26,7 +26,7 @@ def main() -> None:
         resolve_path(DATA_PATH),
         experiment_dir / "df",
         experiment_dir / "phi",
-        experiment_dir / "validation" / "auriga",
+        experiment_dir / "results" / "data",
         n_eval=N_EVAL,
         batch_size=BATCH_SIZE,
         seed=SEED,
@@ -37,6 +37,7 @@ def main() -> None:
         slice_r_bins=SLICE_R_BINS,
         slice_z_bins=SLICE_Z_BINS,
         slice_min_count=SLICE_MIN_COUNT,
+        artifact_prefix="validation_auriga",
     )
     print(f"Wrote Auriga truth artifacts to {result['output_dir']}")
 

@@ -82,8 +82,9 @@ evaluation:
     slice_rmax: 10.0
 
 plots:
-  formats: [png]
+  formats: [png, pdf]
+  dpi: 200
   df:
-    dpi: 150
+    dpi: 200
   phi:
-    dpi: 180
+    dpi: 200

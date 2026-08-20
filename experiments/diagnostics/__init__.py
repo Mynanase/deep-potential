@@ -1,5 +1,7 @@
 """Artifact readers and repository-specific diagnostic calculations."""
 
+from experiments.diagnostics.artifact_paths import resolve_figure_artifact
+
 from experiments.diagnostics.df_artifacts import (
     load_df_diagnostics,
     load_df_metrics,
@@ -28,4 +30,5 @@ __all__ = [
     "load_validation_diagnostics",
     "load_validation_metrics",
     "plot_training_metrics",
+    "resolve_figure_artifact",
 ]

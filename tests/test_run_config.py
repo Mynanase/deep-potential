@@ -95,7 +95,10 @@ def test_run_spec_resolves_stage_configs_and_layout(tmp_path):
     assert spec.case == "test"
     assert spec.df_dir == tmp_path / "artifacts" / "df"
     assert spec.phi_df_dir == spec.df_dir
-    assert spec.eval_dir == tmp_path / "artifacts" / "eval"
+    assert spec.result_data_dir == tmp_path / "artifacts" / "results" / "data"
+    assert spec.eval_dir == spec.result_data_dir
+    assert spec.figures_dir == tmp_path / "artifacts" / "results" / "figures"
+    assert spec.debug_dir == tmp_path / "artifacts" / "results" / "debug"
     df_config = spec.resolve_stage_config("df")
     assert df_config["seed"] == 42
     assert df_config["data"]["dataset"] == "eta"
@@ -119,8 +122,12 @@ def test_prepare_run_snapshots_resolved_config_and_rejects_changes(tmp_path):
     assert snapshot["case"] == "test"
     assert snapshot["df"]["resolved_config"]["seed"] == 42
     assert snapshot["_meta"]["spec_sha256"]
-    for directory in ("logs", "df", "phi", "eval", "plots"):
+    for directory in ("logs", "df", "phi"):
         assert (tmp_path / "artifacts" / directory).is_dir()
+    for directory in ("data", "figures", "debug"):
+        assert (tmp_path / "artifacts" / "results" / directory).is_dir()
+    assert not (tmp_path / "artifacts" / "eval").exists()
+    assert not (tmp_path / "artifacts" / "plots").exists()
     assert not (tmp_path / "artifacts" / "validation").exists()
     assert prepare_run(spec) == snapshot_path
 
@@ -229,7 +236,7 @@ def test_run_phi_entrypoint_uses_df_from_the_same_experiment(tmp_path, monkeypat
     assert captured["logger_kwargs"]["entity"] == "test-team"
 
 
-def test_run_eval_uses_one_flat_evaluation_directory(tmp_path, monkeypatch):
+def test_run_eval_uses_one_flat_result_data_directory(tmp_path, monkeypatch):
     import experiments.run_eval as entrypoint
 
     source_path = _write_run_config(tmp_path)
@@ -252,7 +259,7 @@ def test_run_eval_uses_one_flat_evaluation_directory(tmp_path, monkeypatch):
 
     entrypoint.run(source_path)
 
-    eval_dir = run_root / "eval"
+    eval_dir = run_root / "results" / "data"
     assert captured["df_run_dirs"] == [run_root / "df"]
     assert captured["df_output_dir"] == eval_dir
     assert captured["phi_df_dir"] == run_root / "df"

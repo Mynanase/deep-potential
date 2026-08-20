@@ -17,8 +17,11 @@ from experiments.datasets.phase_space import (
 )
 from experiments.diagnostics.evaluation import (
     conditional_velocity_diagnostics,
+    cylindrical_marginal_diagnostics,
     cylindrical_rz_density_by_phi,
     density_profile_metrics,
+    radial_score_field_diagnostics,
+    radial_speed_density_diagnostics,
     score_ensemble_metrics,
     spherical_density_profile,
     stein_score_metrics,
@@ -83,6 +86,13 @@ def evaluate_df_diagnostics(
     spatial_r_edges: np.ndarray = DEFAULT_SPATIAL_R_EDGES,
     spatial_z_edges: np.ndarray = DEFAULT_SPATIAL_Z_EDGES,
     spatial_min_cell_count: int = 5,
+    n_cylindrical_r_bins: int = 8,
+    n_cylindrical_component_bins: int = 64,
+    score_field_r_bins: int = 32,
+    score_field_v_bins: int = 32,
+    score_field_min_effective_count: float = 20.0,
+    radial_speed_r_bins: int = 64,
+    radial_speed_v_bins: int = 64,
 ) -> dict:
     """Persist generic distribution and score diagnostics for one or more DFs."""
     if len(run_dirs) < 1:
@@ -205,6 +215,28 @@ def evaluate_df_diagnostics(
         z_edges=spatial_z_edges,
         min_cell_count=int(spatial_min_cell_count),
     )
+    cylindrical = cylindrical_marginal_diagnostics(
+        snapshot.eta,
+        samples_by_model,
+        np.asarray(target_weights),
+        n_radius_bins=int(n_cylindrical_r_bins),
+        n_component_bins=int(n_cylindrical_component_bins),
+    )
+    score_field = radial_score_field_diagnostics(
+        score_eta,
+        scores,
+        score_weights,
+        n_radius_bins=int(score_field_r_bins),
+        n_speed_bins=int(score_field_v_bins),
+        min_effective_count=float(score_field_min_effective_count),
+    )
+    radial_speed = radial_speed_density_diagnostics(
+        snapshot.eta,
+        samples_by_model,
+        np.asarray(target_weights),
+        n_radius_bins=int(radial_speed_r_bins),
+        n_speed_bins=int(radial_speed_v_bins),
+    )
 
     def finite_median(values: np.ndarray, axis=None):
         values = np.asarray(values, dtype=np.float64)
@@ -299,6 +331,15 @@ def evaluate_df_diagnostics(
         "conditional_velocity": conditional_summary,
         "score_ensemble": ensemble_metrics,
         "score_stein_consistency": stein_metrics,
+        "cylindrical_marginals_by_R": {
+            "n_radius_bins": int(n_cylindrical_r_bins),
+            "n_component_bins": int(n_cylindrical_component_bins),
+        },
+        "score_field_rv": {
+            "n_radius_bins": int(score_field_r_bins),
+            "n_speed_bins": int(score_field_v_bins),
+            "min_effective_count": float(score_field_min_effective_count),
+        },
         "interpretation": (
             "Data/model histograms test DF marginals. Without an analytic "
             "6D score or acceleration truth, ensemble and Stein metrics "
@@ -323,6 +364,7 @@ def evaluate_df_diagnostics(
         "score_indices": score_indices,
         "score_eta": score_eta,
         "scores": scores,
+        "score_weights": np.asarray(score_weights),
         "model_labels": np.asarray(model_labels),
         "conditional_velocity_edges": np.asarray(
             conditional["velocity_edges"]
@@ -347,6 +389,9 @@ def evaluate_df_diagnostics(
         ),
         "spatial_min_cell_count": np.asarray(spatial["min_cell_count"]),
     }
+    diagnostics.update(cylindrical)
+    diagnostics.update(score_field)
+    diagnostics.update(radial_speed)
     for coordinate_name in ("r", "theta", "phi"):
         values = conditional[coordinate_name]
         for key, value in values.items():
@@ -360,6 +405,7 @@ def evaluate_df_diagnostics(
     np.savez_compressed(
         output_dir / "df_samples.npz",
         reference_eta=np.asarray(snapshot.eta),
+        reference_weights=np.asarray(target_weights),
         model_eta_by_model=samples_by_model,
         model_labels=np.asarray(model_labels),
     )

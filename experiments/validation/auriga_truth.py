@@ -99,6 +99,7 @@ def evaluate_auriga_truth(
     slice_min_count: int = 3,
     slice_r_max: float | None = None,
     slice_z_max: float | None = None,
+    artifact_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Write simulator-truth metrics and arrays, but never figures.
 
@@ -311,11 +312,12 @@ def evaluate_auriga_truth(
             }
         )
 
-    (output_dir / "metrics.json").write_text(
+    prefix = f"{artifact_prefix}_" if artifact_prefix else ""
+    (output_dir / f"{prefix}metrics.json").write_text(
         json.dumps(_json_safe(metrics), indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )
-    np.savez_compressed(output_dir / "diagnostics.npz", **diagnostics)
+    np.savez_compressed(output_dir / f"{prefix}diagnostics.npz", **diagnostics)
     return {
         "metrics": metrics,
         "diagnostics": diagnostics,

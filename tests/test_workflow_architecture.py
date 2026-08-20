@@ -64,11 +64,13 @@ def test_experiments_package_keeps_a_small_supported_surface():
         "gendata_plummer.py",
         "inspect_data.py",
         "launch.py",
+        "list_runs.py",
         "paths.py",
         "prepare_auriga.py",
         "run_df.py",
         "run_eval.py",
         "run_phi.py",
+        "run_plot.py",
         "runtime.py",
         "smoke_dpjax.py",
     }
@@ -77,3 +79,15 @@ def test_experiments_package_keeps_a_small_supported_surface():
         for path in (PROJECT_ROOT / "experiments").glob("*.py")
     }
     assert actual == expected
+
+
+def test_active_plotting_has_no_machine_or_case_specific_paths():
+    plotting_files = (PROJECT_ROOT / "experiments" / "plotting").glob("*.py")
+    forbidden = ("/localdisk/", "halo12", "plummer")
+    violations = {
+        str(path.relative_to(PROJECT_ROOT)): token
+        for path in plotting_files
+        for token in forbidden
+        if token in path.read_text(encoding="utf-8").lower()
+    }
+    assert not violations

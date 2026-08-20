@@ -36,13 +36,14 @@ schema: dpjax.run.v2
 
 它负责引用模型文件，并保存一次具体实验的数据、预处理、seed、运行环境、评估和
 绘图设置。真值验证不属于 run schema。一个 YAML 对应一个输出目录，不包含
-`trials`。三个正式
+`trials`。四个正式
 入口都只接收一个 run YAML：
 
 ```bash
 python -m experiments.run_df configs/runs/<run>.yaml
 python -m experiments.run_phi configs/runs/<run>.yaml
 python -m experiments.run_eval configs/runs/<run>.yaml
+python -m experiments.run_plot configs/runs/<run>.yaml
 ```
 
 Plummer oracle 实验可在 `phi.model_overrides` 中显式选择解析 score：
@@ -61,7 +62,7 @@ phi:
 服务器后台执行使用统一 launcher；它自动写入 run 目录中的日志：
 
 ```bash
-python -m experiments.launch phi configs/runs/<run>.yaml
+python -m experiments.launch plot configs/runs/<run>.yaml
 ```
 
 日志后端也属于 run 配置：`backend: csv` 只保存本地指标，`backend: wandb`

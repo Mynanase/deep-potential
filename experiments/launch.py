@@ -19,6 +19,7 @@ STAGE_MODULES = {
     "df": "experiments.run_df",
     "phi": "experiments.run_phi",
     "eval": "experiments.run_eval",
+    "plot": "experiments.run_plot",
 }
 
 
