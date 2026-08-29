@@ -24,6 +24,31 @@ Repository-specific behavior belongs under `experiments.datasets`,
 `experiments.workflows`, `experiments.diagnostics`, `experiments.plotting`, and
 `experiments.validation`. `dpjax` remains the array-only numerical dependency.
 
+## Halo12 outer-clump cleaning experiment
+
+The Halo12 cleaning branch uses a reversible density-connected selection. It
+does not modify the original Gadget/Auriga HDF5. Generate the canonical clean
+dataset, exact removed-row artifact, and a static diagnostic with:
+
+```bash
+python -m experiments.datasets.clean_outer_clump
+```
+
+The defaults search at `r >= 40`, count neighbors within a length of `1`, and
+grow the component containing the densest point from particles with at least
+`16` neighbors. Every parameter and the source phase-space SHA-256 are stored
+with the output. The retained rows preserve their original `source_index`.
+
+Run the clean-data experiment with the same model recipes and random seeds as
+the static baseline:
+
+```bash
+python -m experiments.run_df \
+  configs/runs/halo12_clean_outer_clump_v1.yaml
+python -m experiments.run_phi \
+  configs/runs/halo12_clean_outer_clump_v1.yaml
+```
+
 ## Output contract
 
 ```text

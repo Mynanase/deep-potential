@@ -1,0 +1,86 @@
+# Halo12 static baseline with only the density-connected outer clump removed.
+schema: dpjax.run.v2
+name: halo12-clean-outer-clump-v1
+case: halo12
+output_dir: runs/halo12/clean-outer-clump-v1
+
+data:
+  path: data/auriga/halo12_all_mass_clean_outer_clump.h5
+  dataset: eta
+  weight_dataset: tracer_weight
+  split:
+    validation_fraction: 0.25
+    seed: 1042
+  preprocessing:
+    clip_sigma: 4.5
+    jitter_std: 0.002
+    transform:
+      type: none
+      dims: []
+
+df:
+  model: configs/models/df/halo12_ffjord_compact_v1.yaml
+  seed: 42
+
+phi:
+  model: configs/models/phi/halo12_static_mlp_v1.yaml
+  seed: 42
+
+logging:
+  backend: csv
+  project: deep-potential
+
+execution:
+  resume: false
+  stages:
+    df:
+      multi_gpu: true
+      log_every: 25
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+    phi:
+      multi_gpu: true
+      log_every: 50
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+
+evaluation:
+  system: halo
+  df:
+    enabled: true
+    n_samples_per_model: 262144
+    n_score_points: 32768
+    score_batch_size: 1024
+    seed: 42
+    spatial_r_bins: 48
+    spatial_z_bins: 48
+    spatial_r_max: 75.0
+    spatial_z_max: 75.0
+    spatial_min_cell_count: 5
+    n_theta_bins: 6
+    n_phi_bins: 8
+    n_velocity_bins: 64
+  phi:
+    enabled: true
+    n_eval: 32768
+    batch_size: 4096
+    seed: 0
+    r_min: 0.001
+    r_max: 75.0
+    n_r: 256
+    r_ref: 20.0
+    compute_slice: true
+    slice_grid: 128
+    slice_rmax: 75.0
+
+plots:
+  formats: [png, pdf]
+  dpi: 200
+  display_units:
+    length_unit: kpc
+    velocity_unit: 'km\,s^{-1}'
+    potential_unit: '(km\,s^{-1})^2'
+  df:
+    dpi: 200
+  phi:
+    dpi: 200
