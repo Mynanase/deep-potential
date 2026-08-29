@@ -1,18 +1,18 @@
-# Paired with halo12_raw_no_clip_v1: only the outer-clump rows differ.
+# Paired with halo12_clean_outer_clump_v1: only the input rows differ.
 schema: dpjax.run.v2
-name: halo12-clean-outer-clump-v1
+name: halo12-raw-no-clip-v1
 case: halo12
-output_dir: runs/halo12/clean-outer-clump-v1
+output_dir: runs/halo12/raw-no-clip-v1
 
 data:
-  path: data/auriga/halo12_all_mass_clean_outer_clump.h5
+  path: data/auriga/halo12_all_mass.h5
   dataset: eta
   weight_dataset: tracer_weight
   split:
     validation_fraction: 0.25
     seed: 1042
   preprocessing:
-    # The explicit density mask is the only row selection in this comparison.
+    # Preserve the target clump in the control instead of removing it again.
     clip_sigma: 0.0
     jitter_std: 0.002
     transform:

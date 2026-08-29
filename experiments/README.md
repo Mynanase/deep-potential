@@ -39,15 +39,22 @@ grow the component containing the densest point from particles with at least
 `16` neighbors. Every parameter and the source phase-space SHA-256 are stored
 with the output. The retained rows preserve their original `source_index`.
 
-Run the clean-data experiment with the same model recipes and random seeds as
-the static baseline:
+Run the paired no-clip control and clean-data experiment. These two configs use
+the same model recipes, random seeds, and mass weighting; only the 9,683
+explicitly removed rows differ:
 
 ```bash
+python -m experiments.run_df configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_df \
   configs/runs/halo12_clean_outer_clump_v1.yaml
+python -m experiments.run_phi configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_phi \
   configs/runs/halo12_clean_outer_clump_v1.yaml
 ```
+
+Do not use `halo12_static_v1.yaml` as the only causal control for this question:
+its global `clip_sigma: 4.5` selection already removes every detected clump
+member and also removes unrelated tail particles.
 
 ## Output contract
 

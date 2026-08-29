@@ -85,21 +85,47 @@ position, velocity, ParticleID, mass, and potential exactly after the canonical
 float32 conversion. `tracer_weight` is recomputed as
 `mass / mean(clean mass)` and has mean one.
 
+## Sigma-clipping preflight
+
+The current static Halo12 run config applies a global, weighted
+`clip_sigma=4.5` selection after loading the data. Replaying that exact
+selection gives:
+
+| Dataset | Source rows | DF support | Globally clipped |
+|---|---:|---:|---:|
+| Original | 1,652,969 | 1,602,922 | 50,047 |
+| Clean | 1,643,286 | 1,596,306 | 46,980 |
+
+Crucially, the original 4.5-sigma support retains `0 / 9,683` target-clump
+members. Removing the clump before recomputing the global normalizer also moves
+the clipping boundary: compared by original `source_index`, 6,733 background
+rows are retained only by the original support and 117 only by the clean
+support. Therefore, training the original and clean files with
+`clip_sigma=4.5` would not measure the effect of this clump; it would mostly
+compare two nearby global clipping boundaries after the clump was already gone.
+
 ## Deep Potential comparison
 
-The clean run changes only the data path and output directory relative to the
-static Halo12 model and seed choices:
+The causal pair disables global clipping so that the explicit density mask is
+the only row-selection difference:
 
 ```bash
+python -m experiments.run_df configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_df \
   configs/runs/halo12_clean_outer_clump_v1.yaml
+python -m experiments.run_phi configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_phi \
   configs/runs/halo12_clean_outer_clump_v1.yaml
+python -m experiments.run_eval configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_eval \
   configs/runs/halo12_clean_outer_clump_v1.yaml
+python -m experiments.run_plot configs/runs/halo12_raw_no_clip_v1.yaml
 python -m experiments.run_plot \
   configs/runs/halo12_clean_outer_clump_v1.yaml
 ```
+
+`configs/runs/halo12_static_v1.yaml` remains a third reference for the broader
+global 4.5-sigma clipping policy, not the causal raw-versus-clump-clean pair.
 
 The scientific comparison should not stop at validation NLL. Compare original
 and clean runs using:
