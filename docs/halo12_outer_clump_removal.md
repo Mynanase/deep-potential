@@ -127,6 +127,21 @@ python -m experiments.run_plot \
 `configs/runs/halo12_static_v1.yaml` remains a third reference for the broader
 global 4.5-sigma clipping policy, not the causal raw-versus-clump-clean pair.
 
+Validate the paired configs, exact source-index partition, phase-space hash,
+row alignment, and tracer weights before launching an expensive run:
+
+```bash
+python -m experiments.validation.halo12_clump_pair
+```
+
+After both DF checkpoints exist, run the common-target evaluation. It evaluates
+both flows against the clean host data and uses identical score points, rather
+than comparing two independently sampled evaluation targets:
+
+```bash
+python -m experiments.validation.halo12_clump_pair --evaluate-df
+```
+
 The scientific comparison should not stop at validation NLL. Compare original
 and clean runs using:
 

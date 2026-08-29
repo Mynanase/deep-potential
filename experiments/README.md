@@ -56,6 +56,20 @@ Do not use `halo12_static_v1.yaml` as the only causal control for this question:
 its global `clip_sigma: 4.5` selection already removes every detected clump
 member and also removes unrelated tail particles.
 
+Before training, or after moving the data to another host, revalidate the exact
+pair contract:
+
+```bash
+python -m experiments.validation.halo12_clump_pair
+```
+
+After both DF checkpoints exist, evaluate them on the same clean target rows
+and the same randomly selected score points:
+
+```bash
+python -m experiments.validation.halo12_clump_pair --evaluate-df
+```
+
 ## Output contract
 
 ```text
