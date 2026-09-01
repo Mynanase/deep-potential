@@ -10,13 +10,7 @@ from typing import Any
 import yaml
 
 from experiments.paths import RUNS_DIR
-
-
-def _has_checkpoint(stage_dir: Path) -> bool:
-    checkpoint_dir = stage_dir / "ckpt"
-    return checkpoint_dir.is_dir() and any(
-        child.is_dir() and child.name.isdigit() for child in checkpoint_dir.iterdir()
-    )
+from experiments.workflows.checkpoints import has_checkpoint
 
 
 def collect_runs(runs_dir: str | Path = RUNS_DIR) -> list[dict[str, Any]]:
@@ -36,7 +30,6 @@ def collect_runs(runs_dir: str | Path = RUNS_DIR) -> list[dict[str, Any]]:
         has_legacy_evaluation = legacy_eval.is_dir() and any(
             legacy_eval.glob("*_metrics.json")
         )
-        figures = run_dir / "results" / "figures"
         legacy_plots = run_dir / "plots"
         result_path = run_dir / "results" if (run_dir / "results").exists() else legacy_plots
         records.append(
@@ -44,8 +37,8 @@ def collect_runs(runs_dir: str | Path = RUNS_DIR) -> list[dict[str, Any]]:
                 "name": raw.get("name", run_dir.name),
                 "case": raw.get("case"),
                 "git_commit": raw.get("_meta", {}).get("git_commit"),
-                "df": _has_checkpoint(run_dir / "df"),
-                "phi": _has_checkpoint(run_dir / "phi"),
+                "df": has_checkpoint(run_dir / "df" / "ckpt"),
+                "phi": has_checkpoint(run_dir / "phi" / "ckpt"),
                 "eval": has_new_evaluation or has_legacy_evaluation,
                 "plot": (run_dir / "results" / "manifest.json").is_file()
                 or (legacy_plots.is_dir() and any(legacy_plots.iterdir())),

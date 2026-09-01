@@ -7,10 +7,36 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from experiments.plotting.registry import FigureWriter, render_all
+from experiments.diagnostics.artifact_paths import resolve_artifact
+from experiments.plotting.registry import FigureWriter, render_all, render_many
 from experiments.workflows.config import load_run_spec, prepare_run
 
 SECTIONS = ("training", "df", "phi", "validation")
+DF_FIGURES = (
+    "training_df",
+    "training_df_score_stats",
+    "df_density_profile",
+    "df_cylindrical_rz_density",
+    "df_velocity_marginals_by_r",
+    "df_velocity_marginals_by_theta",
+    "df_velocity_marginals_by_phi",
+    "df_score_distribution",
+    "df_cylindrical_marginals_by_R",
+    "df_score_field_rv",
+    "df_score_slices_by_R",
+    "df_radial_speed_density",
+)
+PHI_FIGURES = (
+    "training_phi",
+    "training_phi_residual_stats",
+    "phi_potential_profile",
+    "phi_acceleration_profile",
+    "phi_density_profile",
+)
+PHI_SLICE_FIGURES = (
+    "phi_potential_slice",
+    "phi_density_slice",
+)
 
 
 def _write_report(spec, outputs: dict[str, tuple[Path, ...]]) -> None:
@@ -73,6 +99,51 @@ def run(
         name: writer.write(figure, name, target="official")
         for name, figure in figures.items()
     }
+    _write_report(spec, outputs)
+    return outputs
+
+
+def _stage_figure_names(spec, stage: str) -> tuple[str, ...]:
+    if stage == "df":
+        return DF_FIGURES
+    if stage == "phi":
+        phi_evaluation = dict(spec.evaluation.get("phi", {}))
+        if bool(phi_evaluation.get("compute_slice", True)):
+            return PHI_FIGURES + PHI_SLICE_FIGURES
+        return PHI_FIGURES
+    raise ValueError("stage must be 'df' or 'phi'.")
+
+
+def _require_stage_plot_inputs(spec, stage: str) -> None:
+    metrics_path = getattr(spec, f"{stage}_dir") / "metrics.csv"
+    if not metrics_path.is_file():
+        raise FileNotFoundError(f"Missing {stage.upper()} training metrics: {metrics_path}")
+    resolve_artifact(spec.output_dir, f"{stage}_diagnostics.npz")
+
+
+def run_stage(
+    config_path: str | Path,
+    stage: str,
+) -> dict[str, tuple[Path, ...]]:
+    """Strictly render one stage's training and evaluation figures."""
+    spec = load_run_spec(config_path)
+    prepare_run(spec)
+    names = _stage_figure_names(spec, stage)
+    _require_stage_plot_inputs(spec, stage)
+    figures = render_many(spec, names)
+    writer = FigureWriter(
+        spec,
+        dpi=int(spec.plots.get("dpi", 200)),
+    )
+    outputs: dict[str, tuple[Path, ...]] = {}
+    try:
+        for name, figure in figures.items():
+            outputs[name] = writer.write(figure, name, target="official")
+    finally:
+        import matplotlib.pyplot as plt
+
+        for figure in figures.values():
+            plt.close(figure)
     _write_report(spec, outputs)
     return outputs
 

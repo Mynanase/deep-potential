@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
+from experiments.workflows import checkpoints as checkpoint_utils
+from experiments.workflows.checkpoints import (
+    checkpoint_steps,
+    has_checkpoint,
+    require_checkpoint,
+)
 from experiments.workflows.config import (
     load_run_spec,
     prepare_run,
@@ -12,6 +19,16 @@ from experiments.workflows.config import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_checkpoint(stage_dir: Path, step: int) -> Path:
+    step_dir = stage_dir / "ckpt" / str(step)
+    step_dir.mkdir(parents=True, exist_ok=True)
+    (step_dir / "_CHECKPOINT_METADATA").write_text(
+        json.dumps({"commit_timestamp_nsecs": step + 1}),
+        encoding="utf-8",
+    )
+    return step_dir
 
 
 def _write_run_config(tmp_path: Path) -> Path:
@@ -145,8 +162,7 @@ def test_prepare_run_snapshots_resolved_config_and_rejects_changes(tmp_path):
 
 def test_validate_stage_start_prevents_overwrite_and_unsafe_resume(tmp_path):
     stage_dir = tmp_path / "df"
-    ckpt_dir = stage_dir / "ckpt" / "12"
-    ckpt_dir.mkdir(parents=True)
+    _write_checkpoint(stage_dir, 12)
     config = {"seed": 3, "train": {"epochs": 2}}
     (stage_dir / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
 
@@ -158,6 +174,65 @@ def test_validate_stage_start_prevents_overwrite_and_unsafe_resume(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="no checkpoint"):
         validate_stage_start(tmp_path / "empty", config, resume=True)
+
+
+def test_checkpoint_completeness_requires_a_numeric_orbax_step(tmp_path):
+    stage_dir = tmp_path / "df"
+    ckpt_dir = stage_dir / "ckpt"
+    ckpt_dir.mkdir(parents=True)
+    (ckpt_dir / "metadata").mkdir()
+    (ckpt_dir / "4.orbax-checkpoint-tmp").mkdir()
+
+    assert checkpoint_steps(ckpt_dir) == ()
+    assert has_checkpoint(ckpt_dir) is False
+    with pytest.raises(FileNotFoundError, match="completed DF checkpoint"):
+        require_checkpoint(stage_dir, "DF")
+
+    (ckpt_dir / "12").mkdir()
+    (ckpt_dir / "3").mkdir()
+
+    assert checkpoint_steps(ckpt_dir) == ()
+
+    (ckpt_dir / "12" / "_CHECKPOINT_METADATA").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (ckpt_dir / "3" / "_CHECKPOINT_METADATA").write_text(
+        json.dumps({"commit_timestamp_nsecs": 4}),
+        encoding="utf-8",
+    )
+
+    assert checkpoint_steps(ckpt_dir) == (3,)
+
+    (ckpt_dir / "12" / "_CHECKPOINT_METADATA").write_text(
+        json.dumps({"commit_timestamp_nsecs": 13}),
+        encoding="utf-8",
+    )
+
+    assert checkpoint_steps(ckpt_dir) == (3, 12)
+    assert has_checkpoint(ckpt_dir) is True
+    assert require_checkpoint(stage_dir, "DF") == ckpt_dir
+
+
+def test_restore_latest_ignores_uncommitted_numeric_directories(
+    tmp_path,
+    monkeypatch,
+):
+    stage_dir = tmp_path / "df"
+    _write_checkpoint(stage_dir, 3)
+    (stage_dir / "ckpt" / "12").mkdir()
+    manager = type("DummyManager", (), {"directory": stage_dir / "ckpt"})()
+    restored = {}
+
+    def fake_restore_step(received_manager, step):
+        restored["manager"] = received_manager
+        restored["step"] = step
+        return "restored"
+
+    monkeypatch.setattr(checkpoint_utils, "restore_step", fake_restore_step)
+
+    assert checkpoint_utils.restore_latest(manager) == "restored"
+    assert restored == {"manager": manager, "step": 3}
 
 
 def test_run_df_entrypoint_derives_paths_from_run_config(tmp_path, monkeypatch):
@@ -203,7 +278,7 @@ def test_run_phi_entrypoint_uses_df_from_the_same_experiment(tmp_path, monkeypat
 
     source_path = _write_run_config(tmp_path)
     run_root = tmp_path / "artifacts"
-    (run_root / "df" / "ckpt" / "1").mkdir(parents=True)
+    _write_checkpoint(run_root / "df", 1)
     captured = {}
 
     class DummyLogger:
@@ -241,8 +316,8 @@ def test_run_eval_uses_one_flat_result_data_directory(tmp_path, monkeypatch):
 
     source_path = _write_run_config(tmp_path)
     run_root = tmp_path / "artifacts"
-    (run_root / "df" / "ckpt").mkdir(parents=True)
-    (run_root / "phi" / "ckpt").mkdir(parents=True)
+    _write_checkpoint(run_root / "df", 1)
+    _write_checkpoint(run_root / "phi", 2)
     captured = {}
 
     def fake_df(data_path, run_dirs, output_dir, **kwargs):
@@ -269,6 +344,96 @@ def test_run_eval_uses_one_flat_result_data_directory(tmp_path, monkeypatch):
     assert (eval_dir / "phi_config.yaml").is_file()
     assert not (eval_dir / "df").exists()
     assert not (eval_dir / "phi").exists()
+
+
+def test_eval_df_runs_only_df_evaluation_with_a_completed_checkpoint(
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.eval_df as entrypoint
+    import experiments.run_eval as shared
+
+    source_path = _write_run_config(tmp_path)
+    run_root = tmp_path / "artifacts"
+    _write_checkpoint(run_root / "df", 7)
+    captured = {}
+
+    def fake_df(data_path, run_dirs, output_dir, **kwargs):
+        captured["data_path"] = data_path
+        captured["run_dirs"] = run_dirs
+        captured["output_dir"] = output_dir
+
+    monkeypatch.setattr(shared, "evaluate_df_diagnostics", fake_df)
+    monkeypatch.setattr(
+        shared,
+        "run_eval_phi",
+        lambda *args, **kwargs: pytest.fail("eval_df must not evaluate Phi"),
+    )
+
+    assert entrypoint.run(source_path) is None
+
+    assert captured["data_path"] == tmp_path / "data.h5"
+    assert captured["run_dirs"] == [run_root / "df"]
+    assert captured["output_dir"] == run_root / "results" / "data"
+    assert (captured["output_dir"] / "df_config.yaml").is_file()
+    assert not (captured["output_dir"] / "phi_config.yaml").exists()
+
+
+def test_eval_phi_uses_the_configured_external_df_and_only_evaluates_phi(
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.eval_phi as entrypoint
+    import experiments.run_eval as shared
+
+    source_path = _write_run_config(tmp_path)
+    external_df = tmp_path / "external" / "df"
+    raw = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+    raw["phi"]["df_run"] = str(external_df)
+    source_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    run_root = tmp_path / "artifacts"
+    _write_checkpoint(external_df, 8)
+    _write_checkpoint(run_root / "phi", 9)
+    captured = {}
+
+    def fake_phi(data_path, df_dir, phi_dir, **kwargs):
+        captured["data_path"] = data_path
+        captured["df_dir"] = df_dir
+        captured["phi_dir"] = phi_dir
+        captured["out_dir"] = kwargs["out_dir"]
+
+    monkeypatch.setattr(shared, "run_eval_phi", fake_phi)
+    monkeypatch.setattr(
+        shared,
+        "evaluate_df_diagnostics",
+        lambda *args, **kwargs: pytest.fail("eval_phi must not evaluate DF"),
+    )
+
+    assert entrypoint.run(source_path) is None
+
+    assert captured["data_path"] == tmp_path / "data.h5"
+    assert captured["df_dir"] == external_df
+    assert captured["phi_dir"] == run_root / "phi"
+    assert captured["out_dir"] == run_root / "results" / "data"
+    assert (captured["out_dir"] / "phi_config.yaml").is_file()
+    assert not (captured["out_dir"] / "df_config.yaml").exists()
+
+
+@pytest.mark.parametrize("stage", ["df", "phi"])
+def test_explicit_eval_rejects_a_disabled_stage_before_creating_artifacts(
+    stage,
+    tmp_path,
+):
+    module = __import__(f"experiments.eval_{stage}", fromlist=["run"])
+    source_path = _write_run_config(tmp_path)
+    raw = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+    raw["evaluation"][stage] = {"enabled": False}
+    source_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"evaluation\.{stage}\.enabled"):
+        module.run(source_path)
+
+    assert not (tmp_path / "artifacts" / "results" / "data").exists()
 
 
 def test_run_config_rejects_truth_validation_sections(tmp_path):

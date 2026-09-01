@@ -49,7 +49,9 @@ runs/<experiment>/
 ```
 
 新运行不创建 `eval/`、`plots/` 或多层 validation；读取器仍兼容这些旧目录。
-模拟 potential、acceleration 等 truth 不进入 run YAML 或 `run_eval.py`。
+`results/data/df_*` 与 `results/data/phi_*` 是从不可变 `run.yaml`、输入数据和
+checkpoint 派生的评估产物，可以独立重算，不需要重新训练。模拟 potential、
+acceleration 等 truth 不进入 run YAML 或日常评估入口。
 
 ## 诊断与绘图
 
@@ -85,8 +87,9 @@ plot_mass_density_slice(x, y, model_density)
 
 Figure builder 只接收内存数据并返回 `Figure`，不读文件、不保存、不调用
 `plt.close()`。`FigureRegistry` 负责按名字装配数据和 builder，`FigureWriter`
-统一写入格式、manifest 和关闭 Figure。批量入口是 `run_plot`；Jupyter 每个
-单元只调用一个 `render_figure`。
+统一写入格式、manifest 和关闭 Figure。日常批量入口是 `plot_df` 与
+`plot_phi`；它们只消费本阶段已保存的评估产物，缺少必需文件时立即报错，
+不会隐式训练或评估。Jupyter 每个单元只调用一个 `render_figure`。
 
 ## 修改位置
 
@@ -96,7 +99,7 @@ Figure builder 只接收内存数据并返回 `Figure`，不读文件、不保�
 - 持久化产物读取与诊断计算：`experiments/diagnostics/`
 - 图表：`experiments/plotting/`
 - 模拟 truth：`experiments/validation/`
-- 交互组合：`analysis/`
+- 一次性数值验证：`analysis/`
 
 新增数据最终只需提供有限的 `(N, 6)` 数组，列顺序为
 `[x, y, z, vx, vy, vz]`；文件读取和源数据特有逻辑不进入 `dpjax`。
@@ -106,17 +109,44 @@ Figure builder 只接收内存数据并返回 `Figure`，不读文件、不保�
 ```bash
 conda activate dp-jax
 
-python -m experiments.launch df configs/runs/plummer_rcut_cut.yaml
-python -m experiments.launch phi configs/runs/plummer_rcut_cut.yaml
-python -m experiments.launch eval configs/runs/plummer_rcut_cut.yaml
-python -m experiments.launch plot configs/runs/plummer_rcut_cut.yaml
+# 日常推荐：每一阶段都可单独重跑
+python -m experiments.run_df configs/runs/plummer_rcut_cut.yaml
+python -m experiments.eval_df configs/runs/plummer_rcut_cut.yaml
+python -m experiments.plot_df configs/runs/plummer_rcut_cut.yaml
+python -m experiments.run_phi configs/runs/plummer_rcut_cut.yaml
+python -m experiments.eval_phi configs/runs/plummer_rcut_cut.yaml
+python -m experiments.plot_phi configs/runs/plummer_rcut_cut.yaml
 
-tail -f runs/plummer_rcut/cut-baseline/logs/phi.log
+# 前台组合入口
+python -m experiments.run df configs/runs/plummer_rcut_cut.yaml
+python -m experiments.run phi configs/runs/plummer_rcut_cut.yaml
+python -m experiments.run all configs/runs/plummer_rcut_cut.yaml
+
+# 后台组合入口
+python -m experiments.launch all configs/runs/plummer_rcut_cut.yaml
+
+tail -f runs/plummer_rcut/cut-baseline/logs/all.log
 jupyter lab notebooks/figure_debug.ipynb
 ```
 
-launcher 负责后台脱离、日志和 PID；项目默认设置
-`XLA_PYTHON_CLIENT_PREALLOCATE=false`。GPU 可见性由启动 launcher 的父环境控制。
+组合入口不会把所有 JAX 工作装进同一进程：每个 worker 都在新的子进程中运行，
+使 GPU/JAX 状态在阶段之间隔离。它采用 fail-fast 语义：第一个非零退出码会停止
+后续阶段，已经完成的产物保留。组合入口不会自动跳过已有训练；失败后应先用对应
+的 `run_df`、`eval_df`、`plot_df`、`run_phi`、`eval_phi` 或 `plot_phi` 单阶段命令
+恢复。只有在配置与已有 checkpoint 兼容时才设置 `execution.resume: true`。
+`df`/`phi` 组合要求相应评估已启用；`phi` 要求已有 DF checkpoint，`all` 还要求
+Phi 使用本次 run 的 DF。故意关闭评估或通过 `phi.df_run` 组合不同 run 时，应使用
+适合的单阶段入口或 `phi` 组合，而不是 `all`。
+
+launcher 负责后台脱离、日志和 PID；单阶段名称为 `df`、`eval-df`、`plot-df`、
+`phi`、`eval-phi`、`plot-phi`，组合名称为 `df-pipeline`、`phi-pipeline`、`all`。
+launcher 返回成功仅表示后台 worker 已启动，最终结果以对应日志为准。项目默认
+设置 `XLA_PYTHON_CLIENT_PREALLOCATE=false`。GPU 可见性由启动 launcher 的父
+环境控制。
+
+`experiments.run_eval` 与 `experiments.run_plot --only` 只保留为旧聚合流程的
+兼容入口；新脚本不要使用不存在的 `--stage` 选择器，而应直接调用四个独立的
+eval/plot 模块。launcher 的旧名称 `eval`、`plot` 也仅用于这些兼容入口。
 
 可选真值检查不使用配置文件。直接修改一次性脚本顶部的实验路径和数值参数：
 

@@ -273,7 +273,10 @@ def _phi_profile(kind: str):
 def _phi_slice(kind: str):
     def builder(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
         unit = _unit(o, "length_unit")
-        axis = lambda symbol: label_with_unit(symbol, unit)
+
+        def axis(symbol: str) -> str:
+            return label_with_unit(symbol, unit)
+
         dpi = int(o.get("dpi", 200))
         if kind == "potential":
             potential_unit = _unit(o, "potential_unit")
@@ -411,6 +414,41 @@ class FigureRegistry:
                 continue
         return figures
 
+    def render_many(
+        self,
+        run: RunSpec | str | Path,
+        figure_names: Sequence[str],
+    ) -> dict[str, Any]:
+        """Strictly render named figures while sharing loaded artifacts."""
+        unknown = [name for name in figure_names if name not in self._specs]
+        if unknown:
+            raise KeyError(
+                f"Unknown figure(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(self.names)}"
+            )
+        spec = resolve_run(run)
+        figures: dict[str, Any] = {}
+        loaded: dict[Callable[[RunSpec], Any], Any] = {}
+        try:
+            for name in figure_names:
+                figure_spec = self._specs[name]
+                if figure_spec.loader not in loaded:
+                    loaded[figure_spec.loader] = figure_spec.loader(spec)
+                parameters = self._parameters(spec, figure_spec)
+                figures[name] = self._render_loaded(
+                    spec,
+                    figure_spec,
+                    loaded[figure_spec.loader],
+                    parameters,
+                )
+        except Exception:
+            import matplotlib.pyplot as plt
+
+            for figure in figures.values():
+                plt.close(figure)
+            raise
+        return figures
+
 
 DEFAULT_REGISTRY = FigureRegistry()
 DEFAULT_REGISTRY.register("training_df", "training", _training_metrics("df"), _training)
@@ -462,6 +500,13 @@ def render_all(
     sections: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     return DEFAULT_REGISTRY.render_all(run, sections)
+
+
+def render_many(
+    run: RunSpec | str | Path,
+    figure_names: Sequence[str],
+) -> dict[str, Any]:
+    return DEFAULT_REGISTRY.render_many(run, figure_names)
 
 
 class FigureWriter:

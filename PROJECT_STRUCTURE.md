@@ -20,10 +20,15 @@ deep-potential/
 │   ├── validation/                # reusable optional truth-check functions
 │   ├── launch.py                  # detached stage launcher, logs and PID files
 │   ├── runtime.py                 # pre-JAX project environment defaults
-│   ├── run_df.py
-│   ├── run_phi.py
-│   ├── run_eval.py
-│   ├── run_plot.py
+│   ├── run.py                     # df/phi/all composite subprocess runner
+│   ├── run_df.py                  # train DF
+│   ├── eval_df.py                 # derive DF evaluation artifacts
+│   ├── plot_df.py                 # render DF figures
+│   ├── run_phi.py                 # train Phi
+│   ├── eval_phi.py                # derive Phi evaluation artifacts
+│   ├── plot_phi.py                # render Phi figures
+│   ├── run_eval.py                # compatibility aggregate evaluation
+│   ├── run_plot.py                # compatibility aggregate plotting
 │   └── list_runs.py
 ├── analysis/
 │   └── validate_*_truth.py        # editable one-off truth scripts
@@ -60,7 +65,7 @@ experiments.diagnostics        │
 experiments.plotting ──────────┘
             │
             ▼
-run_plot / figure_debug.ipynb
+plot_df / plot_phi / figure_debug.ipynb
 ```
 
 The dependency is one-way: `experiments -> dpjax`. Core code must not import
@@ -97,10 +102,20 @@ runs/<experiment>/
     └── report.md
 ```
 
-The run has no required trial subdirectory. `logs/{df,phi,eval}.log` and matching
-PID files are written when stages are started through `experiments.launch`.
+The run has no required trial subdirectory. Detached launch names map directly
+to single stages (`df`, `eval-df`, `plot-df`, `phi`, `eval-phi`, `plot-phi`) or
+pipelines (`df-pipeline`, `phi-pipeline`, `all`); each gets a matching log and
+PID file under `logs/`. The legacy `eval` and `plot` launcher names remain for
+the compatibility entry points.
+
+`results/data/df_*` and `results/data/phi_*` evaluation files are derived from
+the immutable `run.yaml`, input data, and trained checkpoints. They may be
+regenerated independently; plotting consumes them and does not train or
+evaluate. Composite `experiments.run df|phi|all` commands execute each worker
+in a separate subprocess and stop at the first failure without deleting prior
+artifacts. Training restart behavior remains governed by `execution.resume`.
 
 Potential and acceleration truth are not part of the core phase-space input.
-They are absent from the run schema and `run_eval.py`. When needed for a
-one-off synthetic/simulation check, standalone analysis scripts write optional
-flat `validation_<kind>_*` artifacts under `results/data/`.
+They are absent from the run schema and routine evaluation entry points. When
+needed for a one-off synthetic/simulation check, standalone analysis scripts
+write optional flat `validation_<kind>_*` artifacts under `results/data/`.

@@ -20,7 +20,51 @@ STAGE_MODULES = {
     "phi": "experiments.run_phi",
     "eval": "experiments.run_eval",
     "plot": "experiments.run_plot",
+    "eval-df": "experiments.eval_df",
+    "eval-phi": "experiments.eval_phi",
+    "plot-df": "experiments.plot_df",
+    "plot-phi": "experiments.plot_phi",
+    "all": "experiments.run",
+    "df-pipeline": "experiments.run",
+    "phi-pipeline": "experiments.run",
 }
+
+PIPELINE_SUBCOMMANDS = {
+    "all": "all",
+    "df-pipeline": "df",
+    "phi-pipeline": "phi",
+}
+
+PIPELINE_STAGES = frozenset(PIPELINE_SUBCOMMANDS)
+
+# Pipelines own their covered stage for their whole lifetime.  The legacy
+# ``eval`` and ``plot`` commands may cover both stages, depending on the run
+# configuration, so both pipelines must treat them as related.  Unrelated
+# compute stages preserve the launcher's historical non-conflicting behaviour;
+# evaluation and plot artifact conflicts are handled separately below.
+PIPELINE_RELATED_STAGES = {
+    "all": frozenset(
+        {
+            "df",
+            "phi",
+            "eval",
+            "plot",
+            "eval-df",
+            "eval-phi",
+            "plot-df",
+            "plot-phi",
+        }
+    ),
+    "df-pipeline": frozenset(
+        {"df", "eval", "plot", "eval-df", "plot-df", "plot-phi"}
+    ),
+    "phi-pipeline": frozenset(
+        {"phi", "eval", "plot", "eval-phi", "plot-phi", "plot-df"}
+    ),
+}
+
+EVALUATION_STAGES = frozenset({"eval", "eval-df", "eval-phi"})
+PLOT_STAGES = frozenset({"plot", "plot-df", "plot-phi"})
 
 
 @dataclass(frozen=True)
@@ -53,6 +97,45 @@ def _active_pid(pid_path: Path) -> int | None:
     return pid if _process_is_running(pid) else None
 
 
+def _command(stage: str, config_path: Path) -> list[str]:
+    command = [sys.executable, "-u", "-m", STAGE_MODULES[stage]]
+    subcommand = PIPELINE_SUBCOMMANDS.get(stage)
+    if subcommand is not None:
+        command.append(subcommand)
+    command.append(str(config_path))
+    return command
+
+
+def _conflicting_stages(stage: str) -> tuple[str, ...]:
+    """Return stages whose active PID prevents launching ``stage``.
+
+    Pipelines are mutually exclusive for one run because they can all update
+    the same report and manifest.  A standalone stage additionally conflicts
+    with any pipeline that covers it.  Evaluation and plotting cannot overlap:
+    plots read evaluation files while every plot writer updates the same
+    manifest and report.
+    """
+    conflicts = {stage}
+    if stage in PIPELINE_STAGES:
+        conflicts.update(PIPELINE_STAGES)
+        conflicts.update(PIPELINE_RELATED_STAGES[stage])
+    else:
+        conflicts.update(
+            pipeline
+            for pipeline, related_stages in PIPELINE_RELATED_STAGES.items()
+            if stage in related_stages
+        )
+    if stage in EVALUATION_STAGES:
+        conflicts.update(PLOT_STAGES)
+        conflicts.add("eval")
+        if stage == "eval":
+            conflicts.update(EVALUATION_STAGES)
+    if stage in PLOT_STAGES:
+        conflicts.update(EVALUATION_STAGES)
+        conflicts.update(PLOT_STAGES)
+    return tuple(candidate for candidate in STAGE_MODULES if candidate in conflicts)
+
+
 def launch(stage: str, config_path: str | Path) -> LaunchResult:
     """Detach one stage, capture its console output, and persist its PID."""
     if stage not in STAGE_MODULES:
@@ -63,20 +146,17 @@ def launch(stage: str, config_path: str | Path) -> LaunchResult:
     log_path = spec.logs_dir / f"{stage}.log"
     pid_path = spec.logs_dir / f"{stage}.pid"
 
-    active_pid = _active_pid(pid_path)
-    if active_pid is not None:
-        raise RuntimeError(
-            f"{stage} is already running for {spec.name} with PID {active_pid}. "
-            f"See {log_path}."
-        )
+    for conflicting_stage in _conflicting_stages(stage):
+        conflicting_pid_path = spec.logs_dir / f"{conflicting_stage}.pid"
+        active_pid = _active_pid(conflicting_pid_path)
+        if active_pid is not None:
+            conflicting_log_path = spec.logs_dir / f"{conflicting_stage}.log"
+            raise RuntimeError(
+                f"Cannot launch {stage} for {spec.name}: {conflicting_stage} is "
+                f"already running with PID {active_pid}. See {conflicting_log_path}."
+            )
 
-    command = [
-        sys.executable,
-        "-u",
-        "-m",
-        STAGE_MODULES[stage],
-        str(spec.source_path),
-    ]
+    command = _command(stage, spec.source_path)
     child_env = dict(os.environ)
     configure_runtime_environment(child_env)
     started_at = datetime.now(timezone.utc).isoformat()

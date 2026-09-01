@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import pytest
 import yaml
 
 matplotlib.use("Agg")
@@ -13,7 +14,12 @@ from experiments.diagnostics import load_df_diagnostics, resolve_figure_artifact
 from experiments.diagnostics.validation_artifacts import load_validation_metrics
 from experiments.list_runs import collect_runs
 from experiments.plotting import render_figure, write_figure
-from experiments.run_plot import run as run_plot
+from experiments.run_plot import (
+    DF_FIGURES,
+    PHI_FIGURES,
+    PHI_SLICE_FIGURES,
+    run as run_plot,
+)
 from experiments.workflows.config import load_run_spec, prepare_run
 
 
@@ -146,6 +152,167 @@ def test_run_plot_only_df_writes_report_and_list_runs_reads_state(tmp_path):
     assert records[0]["plot"] is True
 
 
+def _write_strict_plot_inputs(spec, stage: str) -> None:
+    (getattr(spec, f"{stage}_dir") / "metrics.csv").write_text(
+        "epoch,loss\n0,1.0\n",
+        encoding="utf-8",
+    )
+    np.savez_compressed(spec.result_data_dir / f"{stage}_diagnostics.npz", marker=1)
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_names"),
+    [
+        ("df", DF_FIGURES),
+        ("phi", PHI_FIGURES + PHI_SLICE_FIGURES),
+    ],
+)
+def test_stage_plot_entrypoints_render_the_exact_strict_figure_set(
+    stage,
+    expected_names,
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.run_plot as shared
+
+    entrypoint = __import__(f"experiments.plot_{stage}", fromlist=["run"])
+    config = _write_config(tmp_path)
+    spec = load_run_spec(config)
+    prepare_run(spec)
+    _write_strict_plot_inputs(spec, stage)
+    captured = {}
+    figures = {name: object() for name in expected_names}
+
+    def fake_render_many(run_spec, names):
+        captured["spec"] = run_spec
+        captured["names"] = tuple(names)
+        return figures
+
+    class FakeWriter:
+        def __init__(self, run_spec, **kwargs):
+            captured["writer_spec"] = run_spec
+            captured["writer_kwargs"] = kwargs
+
+        def write(self, figure, name, *, target):
+            assert figure is figures[name]
+            assert target == "official"
+            return (spec.figures_dir / f"{name}.png",)
+
+    monkeypatch.setattr(shared, "render_many", fake_render_many)
+    monkeypatch.setattr(shared, "FigureWriter", FakeWriter)
+    monkeypatch.setattr("matplotlib.pyplot.close", lambda figure: None)
+
+    outputs = entrypoint.run(config)
+
+    assert captured["spec"] == spec
+    assert captured["writer_spec"] == spec
+    assert captured["names"] == expected_names
+    assert tuple(outputs) == expected_names
+    assert spec.report_path.is_file()
+
+
+def test_plot_phi_omits_slice_figures_when_evaluation_disables_slice(
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.plot_phi as entrypoint
+    import experiments.run_plot as shared
+
+    config = _write_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["evaluation"]["phi"] = {"compute_slice": False}
+    config.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    spec = load_run_spec(config)
+    prepare_run(spec)
+    _write_strict_plot_inputs(spec, "phi")
+    captured = {}
+
+    def fake_render_many(run_spec, names):
+        captured["names"] = tuple(names)
+        return {name: object() for name in names}
+
+    class FakeWriter:
+        def __init__(self, run_spec, **kwargs):
+            pass
+
+        def write(self, figure, name, *, target):
+            return (spec.figures_dir / f"{name}.png",)
+
+    monkeypatch.setattr(shared, "render_many", fake_render_many)
+    monkeypatch.setattr(shared, "FigureWriter", FakeWriter)
+    monkeypatch.setattr("matplotlib.pyplot.close", lambda figure: None)
+
+    outputs = entrypoint.run(config)
+
+    assert captured["names"] == PHI_FIGURES
+    assert tuple(outputs) == PHI_FIGURES
+    assert not set(PHI_SLICE_FIGURES) & set(outputs)
+
+
+@pytest.mark.parametrize("stage", ["df", "phi"])
+@pytest.mark.parametrize("missing", ["metrics", "diagnostics"])
+def test_stage_plot_entrypoints_fail_before_rendering_when_inputs_are_missing(
+    stage,
+    missing,
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.run_plot as shared
+
+    entrypoint = __import__(f"experiments.plot_{stage}", fromlist=["run"])
+    config = _write_config(tmp_path)
+    spec = load_run_spec(config)
+    prepare_run(spec)
+    if missing != "metrics":
+        (getattr(spec, f"{stage}_dir") / "metrics.csv").write_text(
+            "epoch,loss\n0,1.0\n",
+            encoding="utf-8",
+        )
+    if missing != "diagnostics":
+        np.savez_compressed(
+            spec.result_data_dir / f"{stage}_diagnostics.npz",
+            marker=1,
+        )
+    monkeypatch.setattr(
+        shared,
+        "render_many",
+        lambda *args, **kwargs: pytest.fail("missing inputs must fail before rendering"),
+    )
+
+    with pytest.raises(FileNotFoundError, match=stage):
+        entrypoint.run(config)
+
+    assert not spec.report_path.exists()
+
+
+def test_strict_stage_plot_does_not_write_or_report_when_pre_rendering_fails(
+    tmp_path,
+    monkeypatch,
+):
+    import experiments.plot_df as entrypoint
+    import experiments.run_plot as shared
+
+    config = _write_config(tmp_path)
+    spec = load_run_spec(config)
+    prepare_run(spec)
+    _write_strict_plot_inputs(spec, "df")
+    monkeypatch.setattr(
+        shared,
+        "render_many",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyError("required array")),
+    )
+    monkeypatch.setattr(
+        shared,
+        "FigureWriter",
+        lambda *args, **kwargs: pytest.fail("writer must not start before all renders"),
+    )
+
+    with pytest.raises(KeyError, match="required array"):
+        entrypoint.run(config)
+
+    assert not spec.report_path.exists()
+
+
 def test_list_runs_falls_back_when_new_result_data_is_empty(tmp_path):
     config = _write_config(tmp_path)
     spec = load_run_spec(config)
@@ -156,6 +323,23 @@ def test_list_runs_falls_back_when_new_result_data_is_empty(tmp_path):
 
     records = collect_runs(tmp_path / "runs")
     assert records[0]["eval"] is True
+
+
+def test_list_runs_requires_committed_orbax_checkpoint_metadata(tmp_path):
+    config = _write_config(tmp_path)
+    spec = load_run_spec(config)
+    prepare_run(spec)
+    step_dir = spec.df_dir / "ckpt" / "1"
+    step_dir.mkdir(parents=True)
+
+    assert collect_runs(tmp_path / "runs")[0]["df"] is False
+
+    (step_dir / "_CHECKPOINT_METADATA").write_text(
+        json.dumps({"commit_timestamp_nsecs": 2}),
+        encoding="utf-8",
+    )
+
+    assert collect_runs(tmp_path / "runs")[0]["df"] is True
 
 
 def test_figure_notebook_contains_only_individual_saved_artifact_calls():

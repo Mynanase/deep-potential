@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 from experiments.paths import PROJECT_ROOT, resolve_path
+from experiments.workflows.checkpoints import has_checkpoint
 from experiments.workflows.model_config import (
     load_model_config,
     merge_config,
@@ -384,15 +385,13 @@ def validate_stage_start(
     """Reject accidental overwrite or unsafe resume of a training stage."""
     config_path = stage_dir / "config.yaml"
     ckpt_dir = stage_dir / "ckpt"
-    has_checkpoint = ckpt_dir.exists() and any(
-        child.is_dir() and child.name.isdigit() for child in ckpt_dir.iterdir()
-    )
+    checkpoint_exists = has_checkpoint(ckpt_dir)
 
-    if resume and not has_checkpoint:
+    if resume and not checkpoint_exists:
         raise FileNotFoundError(
             f"resume=true but no checkpoint exists under {ckpt_dir}."
         )
-    if has_checkpoint and not resume:
+    if checkpoint_exists and not resume:
         raise FileExistsError(
             f"{stage_dir} already contains checkpoints. Set execution.resume "
             "to true or choose a new output_dir."

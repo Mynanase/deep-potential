@@ -17,10 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
-from dpjax.normalization import Normalizer
 from dpjax.physics.cbe import residual_A
 from experiments.datasets.phase_space import load_eta_h5, load_run_preprocessing, resolve_run_support_indices
 from experiments.validation.plummer import plummer_score_phys_batch

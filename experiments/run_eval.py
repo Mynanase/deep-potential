@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from experiments.workflows.checkpoints import require_checkpoint
 from experiments.workflows.config import (
     RunSpec,
     load_run_spec,
@@ -25,16 +26,11 @@ def _enabled(config: dict[str, Any]) -> bool:
     return bool(config.get("enabled", True))
 
 
-def _require_stage(path: Path, label: str) -> None:
-    if not (path / "ckpt").exists():
-        raise FileNotFoundError(f"Missing trained {label} stage: {path}")
-
-
 def _run_df(
     spec: RunSpec,
     config: dict[str, Any],
 ) -> None:
-    _require_stage(spec.df_dir, "DF")
+    require_checkpoint(spec.df_dir, "DF")
     write_evaluation_config(spec.eval_dir, "df", config)
 
     theta_edges = np.arccos(
@@ -92,8 +88,8 @@ def _run_phi(
     system: str,
 ) -> None:
     df_run_dir = spec.phi_df_dir
-    _require_stage(df_run_dir, "DF")
-    _require_stage(spec.phi_dir, "Phi")
+    require_checkpoint(df_run_dir, "DF")
+    require_checkpoint(spec.phi_dir, "Phi")
     write_evaluation_config(spec.eval_dir, "phi", config)
     run_eval_phi(
         spec.data_path,
@@ -131,6 +127,26 @@ def run(config_path: str | Path) -> None:
 
     if _enabled(phi_config):
         _run_phi(spec, phi_config, system=system)
+
+
+def run_stage(config_path: str | Path, stage: str) -> None:
+    """Evaluate exactly one explicitly selected stage."""
+    if stage not in {"df", "phi"}:
+        raise ValueError("stage must be 'df' or 'phi'.")
+    spec = load_run_spec(config_path)
+    evaluation = spec.evaluation
+    config = dict(evaluation.get(stage, {}))
+    if not _enabled(config):
+        raise ValueError(f"evaluation.{stage}.enabled must be true for eval_{stage}.")
+
+    system = str(evaluation.get("system", "generic")).lower()
+    if system not in {"generic", "plummer", "halo"}:
+        raise ValueError("evaluation.system must be generic, plummer, or halo.")
+    prepare_run(spec)
+    if stage == "df":
+        _run_df(spec, config)
+    else:
+        _run_phi(spec, config, system=system)
 
 
 def main() -> int:

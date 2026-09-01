@@ -110,19 +110,18 @@ The causal pair disables global clipping so that the explicit density mask is
 the only row-selection difference:
 
 ```bash
-python -m experiments.run_df configs/runs/halo12_raw_no_clip_v1.yaml
-python -m experiments.run_df \
-  configs/runs/halo12_clean_outer_clump_v1.yaml
-python -m experiments.run_phi configs/runs/halo12_raw_no_clip_v1.yaml
-python -m experiments.run_phi \
-  configs/runs/halo12_clean_outer_clump_v1.yaml
-python -m experiments.run_eval configs/runs/halo12_raw_no_clip_v1.yaml
-python -m experiments.run_eval \
-  configs/runs/halo12_clean_outer_clump_v1.yaml
-python -m experiments.run_plot configs/runs/halo12_raw_no_clip_v1.yaml
-python -m experiments.run_plot \
+python -m experiments.run all configs/runs/halo12_raw_no_clip_v1.yaml
+python -m experiments.run all \
   configs/runs/halo12_clean_outer_clump_v1.yaml
 ```
+
+Each composite run executes its training, evaluation, and plotting workers in
+separate processes and stops at the first failure without deleting completed
+artifacts. For manual recovery, use the corresponding independent command:
+`run_df`, `eval_df`, `plot_df`, `run_phi`, `eval_phi`, or `plot_phi`. Evaluation
+JSON/NPZ files are derived from the saved checkpoints and may be regenerated;
+checkpoint continuation is enabled only through a compatible
+`execution.resume: true` setting.
 
 `configs/runs/halo12_static_v1.yaml` remains a third reference for the broader
 global 4.5-sigma clipping policy, not the causal raw-versus-clump-clean pair.
@@ -141,6 +140,9 @@ than comparing two independently sampled evaluation targets:
 ```bash
 python -m experiments.validation.halo12_clump_pair --evaluate-df
 ```
+
+The routine `eval_df` artifacts remain useful within each run, but they do not
+replace this common-target comparison for the causal raw-versus-clean claim.
 
 The scientific comparison should not stop at validation NLL. Compare original
 and clean runs using:

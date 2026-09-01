@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from experiments.workflows.checkpoints import require_checkpoint
 from experiments.workflows.config import (
     load_run_spec,
     prepare_run,
@@ -23,8 +24,7 @@ def run(config_path: str | Path) -> None:
     entity = spec.logging.get("entity")
 
     df_run_dir = spec.phi_df_dir
-    if not (df_run_dir / "ckpt").exists():
-        raise FileNotFoundError(f"Missing completed DF stage: {df_run_dir}")
+    require_checkpoint(df_run_dir, "DF")
     config = spec.resolve_stage_config("phi")
     validate_stage_start(spec.phi_dir, config, resume=spec.resume)
     if spec.resume and spec.phi.init_params is not None:

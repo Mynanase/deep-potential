@@ -15,6 +15,30 @@ def test_plot_stage_uses_the_batch_plot_entrypoint():
     assert launcher.STAGE_MODULES["plot"] == "experiments.run_plot"
 
 
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    [
+        ("eval-df", ["experiments.eval_df"]),
+        ("eval-phi", ["experiments.eval_phi"]),
+        ("plot-df", ["experiments.plot_df"]),
+        ("plot-phi", ["experiments.plot_phi"]),
+        ("all", ["experiments.run", "all"]),
+        ("df-pipeline", ["experiments.run", "df"]),
+        ("phi-pipeline", ["experiments.run", "phi"]),
+    ],
+)
+def test_new_stage_command_vectors(stage: str, expected: list[str], tmp_path: Path):
+    config_path = tmp_path / "run.yaml"
+
+    assert launcher._command(stage, config_path) == [
+        sys.executable,
+        "-u",
+        "-m",
+        *expected,
+        str(config_path),
+    ]
+
+
 def test_runtime_environment_sets_default_without_overriding_user_value():
     default_env: dict[str, str] = {}
     configure_runtime_environment(default_env)
@@ -99,6 +123,112 @@ def test_launch_rejects_duplicate_active_stage(
 
     with pytest.raises(RuntimeError, match="already running"):
         launcher.launch("df", spec.source_path)
+
+
+@pytest.mark.parametrize(
+    ("active_stage", "requested_stage"),
+    [
+        ("df-pipeline", "df"),
+        ("df-pipeline", "eval-df"),
+        ("df-pipeline", "plot-df"),
+        ("df-pipeline", "plot-phi"),
+        ("phi-pipeline", "phi"),
+        ("phi-pipeline", "eval-phi"),
+        ("phi-pipeline", "plot-phi"),
+        ("phi-pipeline", "plot-df"),
+        ("plot-phi", "df-pipeline"),
+        ("plot-df", "phi-pipeline"),
+        ("all", "df"),
+        ("all", "phi"),
+        ("eval", "df-pipeline"),
+        ("plot", "phi-pipeline"),
+        ("df-pipeline", "phi-pipeline"),
+    ],
+)
+def test_pipeline_and_related_stage_are_mutually_exclusive(
+    active_stage: str,
+    requested_stage: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / f"{active_stage}.pid").write_text("123\n", encoding="utf-8")
+    spec = SimpleNamespace(
+        name="test_run",
+        source_path=tmp_path / "run.yaml",
+        logs_dir=logs_dir,
+    )
+    monkeypatch.setattr(launcher, "load_run_spec", lambda path: spec)
+    monkeypatch.setattr(launcher, "prepare_run", lambda value: None)
+    monkeypatch.setattr(launcher, "_process_is_running", lambda pid: pid == 123)
+
+    with pytest.raises(RuntimeError, match=active_stage):
+        launcher.launch(requested_stage, spec.source_path)
+
+
+@pytest.mark.parametrize(
+    ("active_stage", "requested_stage"),
+    [
+        ("eval-df", "plot-df"),
+        ("plot-df", "eval-df"),
+        ("eval-phi", "plot-phi"),
+        ("plot-phi", "eval-phi"),
+        ("plot-df", "plot-phi"),
+        ("plot", "plot-df"),
+        ("eval", "eval-df"),
+        ("eval-phi", "plot"),
+    ],
+)
+def test_evaluation_and_plot_writers_are_mutually_exclusive(
+    active_stage: str,
+    requested_stage: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / f"{active_stage}.pid").write_text("123\n", encoding="utf-8")
+    spec = SimpleNamespace(
+        name="test_run",
+        source_path=tmp_path / "run.yaml",
+        logs_dir=logs_dir,
+    )
+    monkeypatch.setattr(launcher, "load_run_spec", lambda path: spec)
+    monkeypatch.setattr(launcher, "prepare_run", lambda value: None)
+    monkeypatch.setattr(launcher, "_process_is_running", lambda pid: pid == 123)
+
+    with pytest.raises(RuntimeError, match=active_stage):
+        launcher.launch(requested_stage, spec.source_path)
+
+
+def test_unrelated_standalone_stages_keep_existing_non_conflicting_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "df.pid").write_text("123\n", encoding="utf-8")
+    spec = SimpleNamespace(
+        name="test_run",
+        source_path=tmp_path / "run.yaml",
+        logs_dir=logs_dir,
+    )
+
+    class DummyProcess:
+        pid = 456
+
+    monkeypatch.setattr(launcher, "load_run_spec", lambda path: spec)
+    monkeypatch.setattr(launcher, "prepare_run", lambda value: None)
+    monkeypatch.setattr(launcher, "_process_is_running", lambda pid: pid == 123)
+    monkeypatch.setattr(
+        launcher.subprocess, "Popen", lambda command, **kwargs: DummyProcess()
+    )
+
+    result = launcher.launch("phi", spec.source_path)
+
+    assert result.pid == 456
+    assert result.log_path == logs_dir / "phi.log"
 
 
 def test_experiments_import_applies_runtime_default():
