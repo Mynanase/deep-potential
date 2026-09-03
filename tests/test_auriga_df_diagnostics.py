@@ -8,7 +8,6 @@ from dpjax.normalization import Normalizer
 from experiments.diagnostics import load_df_diagnostics
 from experiments.diagnostics import load_df_samples
 from experiments.plotting import (
-    plot_cylindrical_rz_density,
     plot_density_profile,
     plot_radial_speed_comparison,
     plot_score_distribution,
@@ -67,9 +66,6 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
         theta_edges=np.array([0.0, np.pi / 2.0, np.pi]),
         phi_edges=np.array([-np.pi, 0.0, np.pi]),
         n_velocity_bins=12,
-        spatial_r_edges=np.array([0.0, 1.5, 3.0, 5.0]),
-        spatial_z_edges=np.array([-5.0, 0.0, 5.0]),
-        spatial_min_cell_count=1,
     )
 
     assert result["n_models"] == 1
@@ -81,7 +77,6 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
     with np.load(diagnostics_path) as diagnostics:
         assert diagnostics["model_density_by_model"].shape[0] == 1
         assert diagnostics["conditional_r_model_hist"].shape[0] == 1
-        assert diagnostics["spatial_model_density"].shape[0] == 1
 
     assert (output_dir / "df_metrics.json").is_file()
     assert (output_dir / "df_samples.npz").is_file()
@@ -90,7 +85,6 @@ def test_single_model_df_evaluation_and_plotting(tmp_path, monkeypatch):
     samples = load_df_samples(output_dir)
     figures = [
         plot_density_profile(diagnostics, dpi=40),
-        plot_cylindrical_rz_density(diagnostics, dpi=40),
         plot_velocity_marginals(diagnostics, "r", dpi=40),
         plot_velocity_marginals(diagnostics, "theta", dpi=40),
         plot_velocity_marginals(diagnostics, "phi", dpi=40),

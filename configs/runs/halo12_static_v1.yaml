@@ -55,11 +55,6 @@ evaluation:
     n_score_points: 32768
     score_batch_size: 1024
     seed: 42
-    spatial_r_bins: 48
-    spatial_z_bins: 48
-    spatial_r_max: 75.0
-    spatial_z_max: 75.0
-    spatial_min_cell_count: 5
     n_theta_bins: 6
     n_phi_bins: 8
     n_velocity_bins: 64

@@ -21,7 +21,6 @@ from experiments.diagnostics.evaluation import (
     binned_potential_truth_by_phi,
     cartesian_to_spherical_phase_space,
     conditional_velocity_diagnostics,
-    cylindrical_rz_density_by_phi,
     density_profile_metrics,
     potential_error_metrics,
     radial_acceleration_profile,
@@ -366,31 +365,3 @@ def test_conditional_velocity_histograms_marginalize_other_coordinates():
             0.0,
             atol=1.0e-12,
         )
-
-
-def test_cylindrical_rz_density_uses_exact_cell_volume():
-    positions = np.array(
-        [
-            [0.5, 0.0, 0.0],
-            [1.5, 0.0, 0.0],
-        ]
-    )
-    diagnostics = cylindrical_rz_density_by_phi(
-        positions,
-        positions[None, ...],
-        reference_weights=np.ones(2),
-        phi_edges=np.array([-np.pi, np.pi]),
-        cylindrical_radius_edges=np.array([0.0, 1.0, 2.0]),
-        z_edges=np.array([-1.0, 1.0]),
-        min_cell_count=1,
-    )
-
-    volume = diagnostics["cell_volume"]
-    np.testing.assert_allclose(volume[0, :, 0], [2.0 * np.pi, 6.0 * np.pi])
-    assert np.sum(diagnostics["reference_density"] * volume) == pytest.approx(
-        1.0
-    )
-    np.testing.assert_allclose(
-        diagnostics["model_density"][0],
-        diagnostics["reference_density"],
-    )

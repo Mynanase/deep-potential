@@ -242,21 +242,6 @@ def evaluate_pair_on_clean_target(
             config.get("radial_edges", DEFAULT_RADIAL_EDGES),
             dtype=np.float64,
         ),
-        spatial_r_edges=np.linspace(
-            0.0,
-            float(config.get("spatial_r_max", 75.0)),
-            int(config.get("spatial_r_bins", 48)) + 1,
-        ),
-        spatial_z_edges=np.linspace(
-            -float(config.get("spatial_z_max", 75.0)),
-            float(config.get("spatial_z_max", 75.0)),
-            int(config.get("spatial_z_bins", 48)) + 1,
-        ),
-        spatial_min_cell_count=int(config.get("spatial_min_cell_count", 5)),
-        n_cylindrical_r_bins=int(config.get("n_cylindrical_r_bins", 8)),
-        n_cylindrical_component_bins=int(
-            config.get("n_cylindrical_component_bins", 64)
-        ),
         score_field_r_bins=int(config.get("score_field_r_bins", 32)),
         score_field_v_bins=int(config.get("score_field_v_bins", 32)),
         score_field_min_effective_count=float(

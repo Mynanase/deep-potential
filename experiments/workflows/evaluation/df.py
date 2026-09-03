@@ -17,8 +17,6 @@ from experiments.datasets.phase_space import (
 )
 from experiments.diagnostics.evaluation import (
     conditional_velocity_diagnostics,
-    cylindrical_marginal_diagnostics,
-    cylindrical_rz_density_by_phi,
     density_profile_metrics,
     radial_score_field_diagnostics,
     radial_speed_density_diagnostics,
@@ -34,8 +32,6 @@ DEFAULT_RADIAL_EDGES = np.array(
 )
 DEFAULT_THETA_EDGES = np.arccos(np.linspace(1.0, -1.0, 7))
 DEFAULT_PHI_EDGES = np.linspace(-np.pi, np.pi, 9)
-DEFAULT_SPATIAL_R_EDGES = np.linspace(0.0, 75.0, 49)
-DEFAULT_SPATIAL_Z_EDGES = np.linspace(-75.0, 75.0, 49)
 
 
 def _json_safe(value):
@@ -83,11 +79,6 @@ def evaluate_df_diagnostics(
     theta_edges: np.ndarray = DEFAULT_THETA_EDGES,
     phi_edges: np.ndarray = DEFAULT_PHI_EDGES,
     n_velocity_bins: int = 64,
-    spatial_r_edges: np.ndarray = DEFAULT_SPATIAL_R_EDGES,
-    spatial_z_edges: np.ndarray = DEFAULT_SPATIAL_Z_EDGES,
-    spatial_min_cell_count: int = 5,
-    n_cylindrical_r_bins: int = 8,
-    n_cylindrical_component_bins: int = 64,
     score_field_r_bins: int = 32,
     score_field_v_bins: int = 32,
     score_field_min_effective_count: float = 20.0,
@@ -206,22 +197,6 @@ def evaluate_df_diagnostics(
         },
         n_velocity_bins=int(n_velocity_bins),
     )
-    spatial = cylindrical_rz_density_by_phi(
-        snapshot.eta[:, :3],
-        samples_by_model[:, :, :3],
-        reference_weights=np.asarray(target_weights),
-        phi_edges=phi_edges,
-        cylindrical_radius_edges=spatial_r_edges,
-        z_edges=spatial_z_edges,
-        min_cell_count=int(spatial_min_cell_count),
-    )
-    cylindrical = cylindrical_marginal_diagnostics(
-        snapshot.eta,
-        samples_by_model,
-        np.asarray(target_weights),
-        n_radius_bins=int(n_cylindrical_r_bins),
-        n_component_bins=int(n_cylindrical_component_bins),
-    )
     score_field = radial_score_field_diagnostics(
         score_eta,
         scores,
@@ -314,27 +289,9 @@ def evaluate_df_diagnostics(
         ),
         "density_profile": density_metrics,
         "density_profile_by_model": density_metrics_by_model,
-        "spatial_rz_by_phi": {
-            "n_phi_bins": int(np.asarray(spatial["phi_edges"]).size - 1),
-            "n_r_bins": int(
-                np.asarray(spatial["cylindrical_radius_edges"]).size - 1
-            ),
-            "n_z_bins": int(np.asarray(spatial["z_edges"]).size - 1),
-            "min_cell_count": int(spatial_min_cell_count),
-            "median_log10_rmse_dex": finite_median(
-                spatial["log10_rmse_by_model_phi"]
-            ),
-            "log10_rmse_by_model_phi": np.asarray(
-                spatial["log10_rmse_by_model_phi"]
-            ).tolist(),
-        },
         "conditional_velocity": conditional_summary,
         "score_ensemble": ensemble_metrics,
         "score_stein_consistency": stein_metrics,
-        "cylindrical_marginals_by_R": {
-            "n_radius_bins": int(n_cylindrical_r_bins),
-            "n_component_bins": int(n_cylindrical_component_bins),
-        },
         "score_field_rv": {
             "n_radius_bins": int(score_field_r_bins),
             "n_speed_bins": int(score_field_v_bins),
@@ -369,27 +326,7 @@ def evaluate_df_diagnostics(
         "conditional_velocity_edges": np.asarray(
             conditional["velocity_edges"]
         ),
-        "spatial_phi_edges": np.asarray(spatial["phi_edges"]),
-        "spatial_r_edges": np.asarray(
-            spatial["cylindrical_radius_edges"]
-        ),
-        "spatial_z_edges": np.asarray(spatial["z_edges"]),
-        "spatial_cell_volume": np.asarray(spatial["cell_volume"]),
-        "spatial_reference_density": np.asarray(
-            spatial["reference_density"]
-        ),
-        "spatial_model_density": np.asarray(spatial["model_density"]),
-        "spatial_model_median_density": np.asarray(
-            spatial["model_median_density"]
-        ),
-        "spatial_reference_count": np.asarray(spatial["reference_count"]),
-        "spatial_model_count": np.asarray(spatial["model_count"]),
-        "spatial_log10_rmse_by_model_phi": np.asarray(
-            spatial["log10_rmse_by_model_phi"]
-        ),
-        "spatial_min_cell_count": np.asarray(spatial["min_cell_count"]),
     }
-    diagnostics.update(cylindrical)
     diagnostics.update(score_field)
     diagnostics.update(radial_speed)
     for coordinate_name in ("r", "theta", "phi"):

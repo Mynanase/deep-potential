@@ -68,11 +68,6 @@ evaluation:
     n_theta_bins: 6
     n_phi_bins: 8
     n_velocity_bins: 64
-    spatial_r_bins: 48
-    spatial_z_bins: 48
-    spatial_r_max: 10.0
-    spatial_z_max: 10.0
-    spatial_min_cell_count: 5
   phi:
     enabled: true
     gravitational_constant: 1.0

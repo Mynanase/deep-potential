@@ -66,39 +66,6 @@ def cartesian_to_spherical_phase_space(eta: np.ndarray) -> np.ndarray:
     )
 
 
-def cartesian_to_cylindrical_phase_space(
-    eta: np.ndarray,
-    *,
-    radial_epsilon: float = 1.0e-12,
-) -> np.ndarray:
-    """Convert Cartesian rows to ``[R, phi, z, v_R, v_phi, v_z]``.
-
-    The azimuthal basis is undefined on the symmetry axis. ``phi``, ``v_R``
-    and ``v_phi`` are therefore marked NaN for ``R <= radial_epsilon`` rather
-    than silently assigning an arbitrary basis. ``z`` and ``v_z`` remain valid.
-    """
-    eta = np.asarray(eta, dtype=np.float64)
-    if eta.ndim != 2 or eta.shape[1] != 6:
-        raise ValueError(f"Expected eta shape (N, 6), got {eta.shape}.")
-    if not np.all(np.isfinite(eta)):
-        raise ValueError("eta contains NaN or Inf values.")
-    if radial_epsilon < 0:
-        raise ValueError("radial_epsilon must be non-negative.")
-
-    x, y, z, vx, vy, vz = eta.T
-    radius = np.hypot(x, y)
-    valid_basis = radius > float(radial_epsilon)
-    cos_phi = np.divide(x, radius, out=np.zeros_like(x), where=valid_basis)
-    sin_phi = np.divide(y, radius, out=np.zeros_like(y), where=valid_basis)
-    phi = np.arctan2(y, x)
-    v_r = vx * cos_phi + vy * sin_phi
-    v_phi = -vx * sin_phi + vy * cos_phi
-    phi = np.where(valid_basis, phi, np.nan)
-    v_r = np.where(valid_basis, v_r, np.nan)
-    v_phi = np.where(valid_basis, v_phi, np.nan)
-    return np.column_stack([radius, phi, z, v_r, v_phi, vz])
-
-
 def _validate_edges(edges: np.ndarray, *, name: str) -> np.ndarray:
     edges = np.asarray(edges, dtype=np.float64)
     if (
@@ -158,26 +125,6 @@ def weighted_quantile(
     return float(result) if result.ndim == 0 else result
 
 
-def _strict_quantile_edges(
-    values: np.ndarray,
-    weights: np.ndarray,
-    quantiles: np.ndarray,
-) -> np.ndarray:
-    edges = np.asarray(weighted_quantile(values, weights, quantiles))
-    if not np.all(np.isfinite(edges)):
-        raise ValueError("No finite positive-weight values are available.")
-    if edges[-1] <= edges[0]:
-        padding = max(abs(float(edges[0])) * 1.0e-9, 1.0e-12)
-        lower = max(float(edges[0]) - padding, 0.0)
-        upper = max(float(edges[-1]) + padding, np.nextafter(lower, np.inf))
-        return np.linspace(lower, upper, edges.size)
-    edges = edges.copy()
-    for index in range(1, edges.size):
-        if edges[index] <= edges[index - 1]:
-            edges[index] = np.nextafter(edges[index - 1], np.inf)
-    return edges
-
-
 def _expanded_weighted_range(
     values: np.ndarray,
     weights: np.ndarray,
@@ -204,136 +151,6 @@ def _effective_count(weights: np.ndarray) -> float:
     total = float(np.sum(weights))
     squared = float(np.sum(weights**2))
     return total**2 / squared if squared > 0 else 0.0
-
-
-def cylindrical_marginal_diagnostics(
-    reference_eta: np.ndarray,
-    model_eta: np.ndarray,
-    reference_weights: np.ndarray,
-    *,
-    n_radius_bins: int = 8,
-    n_component_bins: int = 64,
-    component_percentile_range: tuple[float, float] = (0.5, 99.5),
-    radial_epsilon: float = 1.0e-12,
-) -> dict[str, np.ndarray]:
-    """Compute weighted cylindrical marginals in reference-defined R bins."""
-    reference_eta = np.asarray(reference_eta, dtype=np.float64)
-    model_eta = np.asarray(model_eta, dtype=np.float64)
-    if model_eta.ndim == 2:
-        model_eta = model_eta[None, ...]
-    if reference_eta.ndim != 2 or reference_eta.shape[1] != 6:
-        raise ValueError("reference_eta must have shape (N, 6).")
-    if model_eta.ndim != 3 or model_eta.shape[2] != 6:
-        raise ValueError("model_eta must have shape (M, K, 6).")
-    weights = np.asarray(reference_weights, dtype=np.float64)
-    if weights.shape != (reference_eta.shape[0],):
-        raise ValueError("reference_weights must have shape (N,).")
-    if not np.all(np.isfinite(weights)) or np.any(weights < 0) or np.sum(weights) <= 0:
-        raise ValueError("reference_weights must be finite, non-negative, and nonzero.")
-    if n_radius_bins < 1 or n_component_bins < 4:
-        raise ValueError("n_radius_bins >= 1 and n_component_bins >= 4 are required.")
-    low, high = component_percentile_range
-    if not 0 <= low < high <= 100:
-        raise ValueError("component_percentile_range must lie within [0, 100].")
-
-    reference = cartesian_to_cylindrical_phase_space(
-        reference_eta, radial_epsilon=radial_epsilon
-    )
-    models = np.stack(
-        [
-            cartesian_to_cylindrical_phase_space(rows, radial_epsilon=radial_epsilon)
-            for rows in model_eta
-        ],
-        axis=0,
-    )
-    radius_edges = _strict_quantile_edges(
-        reference[:, 0],
-        weights,
-        np.linspace(0.0, 1.0, int(n_radius_bins) + 1),
-    )
-    component_indices = np.asarray([1, 2, 3, 4, 5], dtype=np.int64)
-    component_names = np.asarray(["phi", "z", "v_R", "v_phi", "v_z"])
-    component_edges = np.empty((5, int(n_component_bins) + 1))
-    for output_index, component_index in enumerate(component_indices):
-        if component_index == 1:
-            lower, upper = -np.pi, np.pi
-        else:
-            ref_values = reference[:, component_index]
-            ref_finite = np.isfinite(ref_values) & (weights > 0)
-            model_values = models[:, :, component_index]
-            model_values = model_values[np.isfinite(model_values)]
-            lower = _weighted_quantile(
-                ref_values[ref_finite], weights[ref_finite], low / 100.0
-            )
-            upper = _weighted_quantile(
-                ref_values[ref_finite], weights[ref_finite], high / 100.0
-            )
-            if model_values.size:
-                model_lower, model_upper = np.percentile(model_values, [low, high])
-                lower, upper = min(lower, model_lower), max(upper, model_upper)
-        scale = max(abs(float(lower)), abs(float(upper)), 1.0)
-        if upper - lower <= scale * 1.0e-12:
-            padding = max(scale * 1.0e-3, 1.0e-12)
-            lower, upper = lower - padding, upper + padding
-        component_edges[output_index] = np.linspace(lower, upper, int(n_component_bins) + 1)
-
-    shape = (int(n_radius_bins), 5, int(n_component_bins))
-    reference_pdf = np.full(shape, np.nan)
-    model_pdf = np.full((models.shape[0],) + shape, np.nan)
-    reference_count = np.zeros(int(n_radius_bins), dtype=np.int64)
-    reference_effective_count = np.zeros(int(n_radius_bins))
-    model_count = np.zeros((models.shape[0], int(n_radius_bins)), dtype=np.int64)
-    reference_tail_coverage = np.full((int(n_radius_bins), 5), np.nan)
-    model_tail_coverage = np.full((models.shape[0], int(n_radius_bins), 5), np.nan)
-    for radius_index in range(int(n_radius_bins)):
-        ref_radius_mask = _bin_mask(reference[:, 0], radius_edges, radius_index)
-        reference_count[radius_index] = np.count_nonzero(ref_radius_mask)
-        reference_effective_count[radius_index] = _effective_count(weights[ref_radius_mask])
-        for component_output, component_index in enumerate(component_indices):
-            edges = component_edges[component_output]
-            ref_values = reference[ref_radius_mask, component_index]
-            ref_weights = weights[ref_radius_mask]
-            finite = np.isfinite(ref_values)
-            reference_pdf[radius_index, component_output], _ = _normalized_histogram(
-                ref_values[finite], edges, weights=ref_weights[finite]
-            )
-            if np.any(finite):
-                in_range = (ref_values[finite] >= edges[0]) & (ref_values[finite] <= edges[-1])
-                reference_tail_coverage[radius_index, component_output] = float(
-                    np.sum(ref_weights[finite][in_range]) / np.sum(ref_weights[finite])
-                )
-            for model_index in range(models.shape[0]):
-                model_radius_mask = _bin_mask(
-                    models[model_index, :, 0], radius_edges, radius_index
-                )
-                if component_output == 0:
-                    model_count[model_index, radius_index] = np.count_nonzero(model_radius_mask)
-                values = models[model_index, model_radius_mask, component_index]
-                finite_model = np.isfinite(values)
-                model_pdf[model_index, radius_index, component_output], _ = _normalized_histogram(
-                    values[finite_model], edges
-                )
-                if np.any(finite_model):
-                    model_tail_coverage[model_index, radius_index, component_output] = float(
-                        np.mean(
-                            (values[finite_model] >= edges[0])
-                            & (values[finite_model] <= edges[-1])
-                        )
-                    )
-    return {
-        "cylindrical_R_edges": radius_edges,
-        "cylindrical_component_indices": component_indices,
-        "cylindrical_component_names": component_names,
-        "cylindrical_component_edges": component_edges,
-        "cylindrical_reference_pdf": reference_pdf,
-        "cylindrical_model_pdf": model_pdf,
-        "cylindrical_reference_count": reference_count,
-        "cylindrical_reference_effective_count": reference_effective_count,
-        "cylindrical_model_count": model_count,
-        "cylindrical_reference_tail_coverage": reference_tail_coverage,
-        "cylindrical_model_tail_coverage": model_tail_coverage,
-        "cylindrical_radial_epsilon": np.asarray(radial_epsilon),
-    }
 
 
 def radial_score_field_diagnostics(
@@ -916,133 +733,136 @@ def conditional_velocity_diagnostics(
     return result
 
 
-def cylindrical_rz_density_by_phi(
-    reference_positions: np.ndarray,
-    model_positions: np.ndarray,
+def _weighted_standardized_moments(
+    values: np.ndarray,
+    weights: np.ndarray,
+) -> tuple[float, float, float, float]:
+    """Return weighted mean, std, skewness, and excess kurtosis."""
+    values = np.asarray(values, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    total = float(np.sum(weights))
+    if values.size == 0 or total <= 0:
+        return float("nan"), float("nan"), float("nan"), float("nan")
+    mean = float(np.sum(values * weights) / total)
+    centered = values - mean
+    m2 = float(np.sum(weights * centered**2) / total)
+    m3 = float(np.sum(weights * centered**3) / total)
+    m4 = float(np.sum(weights * centered**4) / total)
+    std = float(np.sqrt(m2))
+    if m2 <= 0.0:
+        return mean, 0.0, float("nan"), float("nan")
+    skewness = m3 / m2**1.5
+    excess_kurtosis = m4 / (m2 * m2) - 3.0
+    return mean, std, skewness, excess_kurtosis
+
+
+def input_velocity_diagnostics(
+    eta: np.ndarray,
     *,
-    reference_weights: np.ndarray | None,
-    phi_edges: np.ndarray,
-    cylindrical_radius_edges: np.ndarray,
-    z_edges: np.ndarray,
-    min_cell_count: int = 5,
+    conditioning_edges: dict[str, np.ndarray],
+    weights: np.ndarray | None = None,
+    n_velocity_bins: int = 64,
+    velocity_percentile_range: tuple[float, float] = (0.5, 99.5),
 ) -> dict[str, np.ndarray]:
-    """Estimate normalized 3D density in cylindrical ``(phi, R, z)`` cells."""
-    reference_positions = np.asarray(reference_positions, dtype=np.float64)
-    model_positions = np.asarray(model_positions, dtype=np.float64)
-    if reference_positions.ndim != 2 or reference_positions.shape[1] != 3:
-        raise ValueError("reference_positions must have shape (N, 3).")
-    if model_positions.ndim == 2:
-        model_positions = model_positions[None, ...]
-    if model_positions.ndim != 3 or model_positions.shape[2] != 3:
-        raise ValueError(
-            "model_positions must have shape (n_models, n_samples, 3)."
-        )
-    phi_edges = _validate_edges(phi_edges, name="phi_edges")
-    cylindrical_radius_edges = _validate_edges(
-        cylindrical_radius_edges,
-        name="cylindrical_radius_edges",
-    )
-    z_edges = _validate_edges(z_edges, name="z_edges")
-    if cylindrical_radius_edges[0] < 0:
-        raise ValueError("cylindrical_radius_edges must be non-negative.")
-    if min_cell_count < 1:
-        raise ValueError("min_cell_count must be positive.")
-    if reference_weights is None:
-        reference_weights = np.ones(
-            reference_positions.shape[0],
-            dtype=np.float64,
-        )
+    """Summarize input-data spherical velocity distributions in spatial bins.
+
+    For each conditioning coordinate (``r``, ``theta``, or ``phi``) the other
+    two spatial coordinates are marginalized: every particle whose
+    conditioning coordinate falls in a bin contributes its three spherical
+    velocity components to a per-bin weighted histogram. Each bin also
+    records the weighted mean, standard deviation, skewness, and excess
+    kurtosis of every velocity component so the observed shape can be
+    compared against a Gaussian with the same first two moments.
+    """
+    eta = np.asarray(eta, dtype=np.float64)
+    if eta.ndim != 2 or eta.shape[1] != 6:
+        raise ValueError("eta must have shape (N, 6).")
+    if not np.all(np.isfinite(eta)):
+        raise ValueError("eta contains NaN or Inf values.")
+    if n_velocity_bins < 4:
+        raise ValueError("n_velocity_bins must be at least 4.")
+    if weights is None:
+        weights = np.ones(eta.shape[0], dtype=np.float64)
     else:
-        reference_weights = np.asarray(reference_weights, dtype=np.float64)
-    if reference_weights.shape != (reference_positions.shape[0],):
-        raise ValueError(
-            f"Expected reference_weights shape ({reference_positions.shape[0]},)."
+        weights = np.asarray(weights, dtype=np.float64)
+    if weights.shape != (eta.shape[0],):
+        raise ValueError(f"Expected weights shape ({eta.shape[0]},).")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("weights must be finite and positive.")
+
+    requested = ("r", "theta", "phi")
+    missing = [name for name in requested if name not in conditioning_edges]
+    if missing:
+        raise ValueError(f"Missing conditioning edges for {missing}.")
+    resolved_edges = {
+        name: _validate_edges(
+            conditioning_edges[name], name=f"{name}_edges"
         )
-    if (
-        not np.all(np.isfinite(reference_weights))
-        or np.any(reference_weights <= 0)
-    ):
-        raise ValueError("reference_weights must be finite and positive.")
-
-    def coordinates(positions: np.ndarray) -> np.ndarray:
-        return np.column_stack(
-            [
-                np.arctan2(positions[:, 1], positions[:, 0]),
-                np.hypot(positions[:, 0], positions[:, 1]),
-                positions[:, 2],
-            ]
-        )
-
-    bins = [phi_edges, cylindrical_radius_edges, z_edges]
-    reference_coordinates = coordinates(reference_positions)
-    reference_weight_grid, _ = np.histogramdd(
-        reference_coordinates,
-        bins=bins,
-        weights=reference_weights,
-    )
-    reference_count, _ = np.histogramdd(reference_coordinates, bins=bins)
-
-    delta_phi = np.diff(phi_edges)[:, None, None]
-    annular_area = (
-        0.5
-        * (
-            cylindrical_radius_edges[1:] ** 2
-            - cylindrical_radius_edges[:-1] ** 2
-        )[None, :, None]
-    )
-    delta_z = np.diff(z_edges)[None, None, :]
-    cell_volume = delta_phi * annular_area * delta_z
-    total_reference_weight = float(np.sum(reference_weights))
-    reference_density = (
-        reference_weight_grid / total_reference_weight / cell_volume
-    )
-
-    model_count = np.empty(
-        (model_positions.shape[0],) + reference_count.shape,
-        dtype=np.float64,
-    )
-    model_density = np.empty_like(model_count)
-    for model_index, positions in enumerate(model_positions):
-        counts, _ = np.histogramdd(coordinates(positions), bins=bins)
-        model_count[model_index] = counts
-        model_density[model_index] = counts / positions.shape[0] / cell_volume
-
-    model_median_density = np.median(model_density, axis=0)
-    log10_rmse_by_model_phi = np.full(
-        (model_positions.shape[0], phi_edges.size - 1),
-        np.nan,
-        dtype=np.float64,
-    )
-    for model_index in range(model_positions.shape[0]):
-        for phi_index in range(phi_edges.size - 1):
-            valid = (
-                (reference_count[phi_index] >= int(min_cell_count))
-                & (model_count[model_index, phi_index] >= int(min_cell_count))
-                & (reference_density[phi_index] > 0)
-                & (model_density[model_index, phi_index] > 0)
-            )
-            if np.any(valid):
-                log_ratio = np.log10(
-                    model_density[model_index, phi_index][valid]
-                    / reference_density[phi_index][valid]
-                )
-                log10_rmse_by_model_phi[model_index, phi_index] = float(
-                    np.sqrt(np.mean(log_ratio**2))
-                )
-
-    return {
-        "phi_edges": phi_edges,
-        "cylindrical_radius_edges": cylindrical_radius_edges,
-        "z_edges": z_edges,
-        "cell_volume": cell_volume,
-        "reference_density": reference_density,
-        "model_density": model_density,
-        "model_median_density": model_median_density,
-        "reference_count": reference_count.astype(np.int64),
-        "model_count": model_count.astype(np.int64),
-        "log10_rmse_by_model_phi": log10_rmse_by_model_phi,
-        "min_cell_count": np.asarray(min_cell_count, dtype=np.int64),
+        for name in requested
     }
+
+    spherical = cartesian_to_spherical_phase_space(eta)
+    lower_pct, upper_pct = velocity_percentile_range
+    if not 0 <= lower_pct < upper_pct <= 100:
+        raise ValueError("velocity_percentile_range must lie within [0, 100].")
+
+    velocity_edges = np.empty((3, int(n_velocity_bins) + 1), dtype=np.float64)
+    for velocity_index in range(3):
+        values = spherical[:, 3 + velocity_index]
+        lower = _weighted_quantile(values, weights, lower_pct / 100.0)
+        upper = _weighted_quantile(values, weights, upper_pct / 100.0)
+        scale = max(abs(float(lower)), abs(float(upper)), 1.0)
+        if upper - lower <= scale * 1.0e-12:
+            padding = max(scale * 1.0e-3, 1.0e-12)
+            lower, upper = lower - padding, upper + padding
+        velocity_edges[velocity_index] = np.linspace(
+            lower, upper, int(n_velocity_bins) + 1
+        )
+
+    result: dict[str, np.ndarray] = {
+        "input_velocity_edges": velocity_edges,
+        "input_velocity_percentile_range": np.asarray(
+            velocity_percentile_range, dtype=np.float64
+        ),
+    }
+    for coordinate in requested:
+        edges = resolved_edges[coordinate]
+        n_bins = edges.size - 1
+        hist = np.full((n_bins, 3, int(n_velocity_bins)), np.nan)
+        count = np.zeros(n_bins, dtype=np.int64)
+        effective_count = np.zeros(n_bins, dtype=np.float64)
+        mean = np.full((n_bins, 3), np.nan)
+        std = np.full((n_bins, 3), np.nan)
+        skewness = np.full((n_bins, 3), np.nan)
+        excess_kurtosis = np.full((n_bins, 3), np.nan)
+        coordinate_values = spherical[:, {"r": 0, "theta": 1, "phi": 2}[coordinate]]
+        for bin_index in range(n_bins):
+            mask = _bin_mask(coordinate_values, edges, bin_index)
+            count[bin_index] = np.count_nonzero(mask)
+            effective_count[bin_index] = _effective_count(weights[mask])
+            for velocity_index in range(3):
+                values = spherical[mask, 3 + velocity_index]
+                hist[bin_index, velocity_index], _ = _normalized_histogram(
+                    values,
+                    velocity_edges[velocity_index],
+                    weights=weights[mask],
+                )
+                (
+                    mean[bin_index, velocity_index],
+                    std[bin_index, velocity_index],
+                    skewness[bin_index, velocity_index],
+                    excess_kurtosis[bin_index, velocity_index],
+                ) = _weighted_standardized_moments(values, weights[mask])
+        prefix = f"input_{coordinate}_"
+        result[f"{prefix}edges"] = edges
+        result[f"{prefix}hist"] = hist
+        result[f"{prefix}count"] = count
+        result[f"{prefix}effective_count"] = effective_count
+        result[f"{prefix}mean"] = mean
+        result[f"{prefix}std"] = std
+        result[f"{prefix}skewness"] = skewness
+        result[f"{prefix}excess_kurtosis"] = excess_kurtosis
+    return result
 
 
 def binned_potential_truth_by_phi(

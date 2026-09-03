@@ -103,157 +103,6 @@ def plot_density_profile(
     return fig
 
 
-def plot_cylindrical_rz_density(
-    diagnostics: Mapping[str, np.ndarray],
-    *,
-    reference_label: str = "data",
-    model_label: str = "DF model",
-    radius_label: str = "R",
-    height_label: str = "z",
-    density_label: str = "normalized tracer density",
-    title: str | None = None,
-    density_percentiles: tuple[float, float] = (5.0, 99.5),
-    ratio_percentile: float = 98.0,
-    dpi: int = 150,
-) -> Any:
-    """Plot reference/model cylindrical density and their log ratio."""
-    import matplotlib.pyplot as plt
-    from matplotlib import colors
-
-    _require(
-        diagnostics,
-        {
-            "spatial_phi_edges",
-            "spatial_r_edges",
-            "spatial_z_edges",
-            "spatial_reference_density",
-            "spatial_reference_count",
-            "spatial_model_count",
-            "spatial_min_cell_count",
-        },
-    )
-    phi_edges = np.asarray(diagnostics["spatial_phi_edges"])
-    radius_edges = np.asarray(diagnostics["spatial_r_edges"])
-    z_edges = np.asarray(diagnostics["spatial_z_edges"])
-    reference_density = np.asarray(diagnostics["spatial_reference_density"])
-    if "spatial_model_median_density" in diagnostics:
-        model_density = np.asarray(diagnostics["spatial_model_median_density"])
-    else:
-        model_density = np.median(
-            np.asarray(diagnostics["spatial_model_density"]), axis=0
-        )
-    reference_count = np.asarray(diagnostics["spatial_reference_count"])
-    model_count_raw = np.asarray(diagnostics["spatial_model_count"])
-    model_count = (
-        np.median(model_count_raw, axis=0)
-        if model_count_raw.ndim == reference_count.ndim + 1
-        else model_count_raw
-    )
-    min_cell_count = int(np.asarray(diagnostics["spatial_min_cell_count"]).item())
-    n_phi = phi_edges.size - 1
-
-    positive = np.concatenate(
-        [
-            reference_density[reference_density > 0],
-            model_density[model_density > 0],
-        ]
-    )
-    if positive.size == 0:
-        raise ValueError("DF spatial densities contain no positive cells.")
-    density_vmin, density_vmax = np.percentile(positive, density_percentiles)
-    if density_vmax <= density_vmin:
-        density_vmax = density_vmin * 10.0
-    density_norm = colors.LogNorm(
-        vmin=max(float(density_vmin), np.finfo(float).tiny),
-        vmax=float(density_vmax),
-    )
-
-    valid = (
-        (reference_count >= min_cell_count)
-        & (model_count >= min_cell_count)
-        & (reference_density > 0)
-        & (model_density > 0)
-    )
-    log_ratio = np.full_like(reference_density, np.nan, dtype=np.float64)
-    log_ratio[valid] = np.log10(model_density[valid] / reference_density[valid])
-    finite_ratio = np.abs(log_ratio[np.isfinite(log_ratio)])
-    ratio_limit = (
-        max(float(np.percentile(finite_ratio, ratio_percentile)), 0.1)
-        if finite_ratio.size
-        else 1.0
-    )
-    ratio_norm = colors.TwoSlopeNorm(
-        vmin=-ratio_limit,
-        vcenter=0.0,
-        vmax=ratio_limit,
-    )
-
-    fig, axes = plt.subplots(
-        3,
-        n_phi,
-        figsize=(max(14.0, 3.0 * n_phi), 10.0),
-        sharex=True,
-        sharey=True,
-        constrained_layout=True,
-        dpi=dpi,
-    )
-    axes = np.asarray(axes).reshape(3, n_phi)
-    density_mappable = None
-    ratio_mappable = None
-    for phi_index in range(n_phi):
-        phi_left = np.degrees(phi_edges[phi_index])
-        phi_right = np.degrees(phi_edges[phi_index + 1])
-        density_mappable = axes[0, phi_index].pcolormesh(
-            radius_edges,
-            z_edges,
-            np.ma.masked_less_equal(reference_density[phi_index].T, 0.0),
-            cmap="magma",
-            norm=density_norm,
-            shading="auto",
-            rasterized=True,
-        )
-        axes[1, phi_index].pcolormesh(
-            radius_edges,
-            z_edges,
-            np.ma.masked_less_equal(model_density[phi_index].T, 0.0),
-            cmap="magma",
-            norm=density_norm,
-            shading="auto",
-            rasterized=True,
-        )
-        ratio_mappable = axes[2, phi_index].pcolormesh(
-            radius_edges,
-            z_edges,
-            np.ma.masked_invalid(log_ratio[phi_index].T),
-            cmap="coolwarm",
-            norm=ratio_norm,
-            shading="auto",
-            rasterized=True,
-        )
-        axes[0, phi_index].set_title(
-            rf"${phi_left:.0f}^\circ\leq\phi<{phi_right:.0f}^\circ$"
-        )
-        axes[2, phi_index].set_xlabel(radius_label)
-    axes[0, 0].set_ylabel(f"{reference_label}\n{height_label}")
-    axes[1, 0].set_ylabel(f"{model_label}\n{height_label}")
-    axes[2, 0].set_ylabel(f"log10 model/reference\n{height_label}")
-    fig.colorbar(
-        density_mappable,
-        ax=axes[:2, :].ravel().tolist(),
-        label=density_label,
-        shrink=0.85,
-    )
-    fig.colorbar(
-        ratio_mappable,
-        ax=axes[2, :].ravel().tolist(),
-        label="log10 density ratio",
-        shrink=0.85,
-    )
-    if title:
-        fig.suptitle(title)
-    return fig
-
-
 def plot_velocity_marginals(
     diagnostics: Mapping[str, np.ndarray],
     coordinate: str,
@@ -372,6 +221,133 @@ def plot_velocity_marginals(
     return fig
 
 
+def plot_input_velocity_distributions(
+    diagnostics: Mapping[str, np.ndarray],
+    coordinate: str,
+    *,
+    velocity_labels: Sequence[str] = (r"$v_r$", r"$v_\theta$", r"$v_\phi$"),
+    velocity_unit: str = "",
+    length_unit: str = "",
+    data_label: str = "input data",
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot input-data velocity distributions conditioned on a spatial bin.
+
+    Each row is one conditioning bin (r, theta, or phi); the three columns
+    show the weighted histogram of the spherical velocity components inside
+    that bin, overlaid with a Gaussian carrying the bin's weighted mean and
+    standard deviation. Weighted skewness and excess kurtosis annotate how
+    strongly the observed shape deviates from that Gaussian reference.
+    """
+    import matplotlib.pyplot as plt
+
+    if coordinate not in {"r", "theta", "phi"}:
+        raise ValueError("coordinate must be 'r', 'theta', or 'phi'.")
+    prefix = f"input_{coordinate}_"
+    _require(
+        diagnostics,
+        {
+            "input_velocity_edges",
+            f"{prefix}edges",
+            f"{prefix}hist",
+            f"{prefix}count",
+            f"{prefix}effective_count",
+            f"{prefix}mean",
+            f"{prefix}std",
+            f"{prefix}skewness",
+            f"{prefix}excess_kurtosis",
+        },
+    )
+    velocity_edges = np.asarray(diagnostics["input_velocity_edges"])
+    coordinate_edges = np.asarray(diagnostics[f"{prefix}edges"])
+    hist = np.asarray(diagnostics[f"{prefix}hist"])
+    count = np.asarray(diagnostics[f"{prefix}count"])
+    effective_count = np.asarray(diagnostics[f"{prefix}effective_count"])
+    mean = np.asarray(diagnostics[f"{prefix}mean"])
+    std = np.asarray(diagnostics[f"{prefix}std"])
+    skewness = np.asarray(diagnostics[f"{prefix}skewness"])
+    excess_kurtosis = np.asarray(diagnostics[f"{prefix}excess_kurtosis"])
+
+    n_rows = coordinate_edges.size - 1
+    fig, axes = plt.subplots(
+        n_rows,
+        3,
+        figsize=(13.5, max(3.5, 1.9 * n_rows)),
+        sharex="col",
+        squeeze=False,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    for row in range(n_rows):
+        for velocity_index in range(3):
+            ax = axes[row, velocity_index]
+            edges = velocity_edges[velocity_index]
+            ax.stairs(
+                hist[row, velocity_index],
+                edges,
+                color="black",
+                lw=1.8,
+                label=data_label,
+            )
+            mu = mean[row, velocity_index]
+            sigma = std[row, velocity_index]
+            if np.isfinite(mu) and np.isfinite(sigma) and sigma > 0:
+                centers = 0.5 * (edges[1:] + edges[:-1])
+                gaussian = np.exp(
+                    -0.5 * ((centers - mu) / sigma) ** 2
+                ) / (sigma * np.sqrt(2.0 * np.pi))
+                ax.plot(
+                    centers,
+                    gaussian,
+                    linestyle="--",
+                    color="#c2410c",
+                    lw=1.1,
+                    label="Gaussian (bin moments)",
+                )
+            ax.text(
+                0.98,
+                0.93,
+                (
+                    f"γ₁={skewness[row, velocity_index]:+.2f}\n"
+                    f"γ₂={excess_kurtosis[row, velocity_index]:+.2f}"
+                ),
+                ha="right",
+                va="top",
+                transform=ax.transAxes,
+                fontsize=7,
+                color="#c2410c",
+            )
+            ax.grid(True, alpha=0.2)
+            if row == 0:
+                ax.set_title(velocity_labels[velocity_index])
+            if row == n_rows - 1:
+                formatted_unit = format_display_unit(velocity_unit)
+                unit = f" [{formatted_unit}]" if formatted_unit else ""
+                ax.set_xlabel(f"velocity{unit}")
+
+        left = coordinate_edges[row]
+        right = coordinate_edges[row + 1]
+        if coordinate == "r":
+            formatted_unit = format_display_unit(length_unit)
+            unit = f" {formatted_unit}" if formatted_unit else ""
+            interval = f"{left:.2g} <= r < {right:.2g}" + unit
+        else:
+            interval = (
+                f"{np.degrees(left):.0f} deg <= {coordinate} < "
+                f"{np.degrees(right):.0f} deg"
+            )
+        axes[row, 0].set_ylabel(
+            f"{interval}\nPDF\n"
+            f"N={int(count[row])}, N_eff={effective_count[row]:.0f}"
+        )
+    axes[0, -1].legend(loc="upper left", fontsize=7)
+    fig.suptitle(
+        title or f"Input velocity distributions conditioned on {coordinate}"
+    )
+    return fig
+
+
 def plot_score_distribution(
     diagnostics: Mapping[str, np.ndarray],
     *,
@@ -437,99 +413,6 @@ def plot_score_distribution(
 
 def _display_label(symbol: str, unit: str | None) -> str:
     return label_with_unit(symbol, unit)
-
-
-def plot_cylindrical_marginals_by_radius(
-    diagnostics: Mapping[str, np.ndarray],
-    *,
-    length_unit: str = "",
-    velocity_unit: str = "",
-    reference_label: str = "data",
-    model_label: str = "model",
-    title: str | None = None,
-    dpi: int = 150,
-) -> Any:
-    """Plot five cylindrical marginal PDFs in reference-defined R quantiles."""
-    import matplotlib.pyplot as plt
-
-    _require(
-        diagnostics,
-        {
-            "cylindrical_R_edges",
-            "cylindrical_component_names",
-            "cylindrical_component_edges",
-            "cylindrical_reference_pdf",
-            "cylindrical_model_pdf",
-            "cylindrical_reference_effective_count",
-            "cylindrical_model_count",
-        },
-    )
-    radius_edges = np.asarray(diagnostics["cylindrical_R_edges"])
-    names = [str(value) for value in diagnostics["cylindrical_component_names"]]
-    edges = np.asarray(diagnostics["cylindrical_component_edges"])
-    reference_pdf = np.asarray(diagnostics["cylindrical_reference_pdf"])
-    model_pdf = np.asarray(diagnostics["cylindrical_model_pdf"])
-    if model_pdf.ndim == reference_pdf.ndim:
-        model_pdf = model_pdf[None, ...]
-    effective_count = np.asarray(diagnostics["cylindrical_reference_effective_count"])
-    model_count = np.asarray(diagnostics["cylindrical_model_count"])
-    if model_count.ndim == 1:
-        model_count = model_count[None, ...]
-
-    n_radius = radius_edges.size - 1
-    fig, axes = plt.subplots(
-        n_radius,
-        5,
-        figsize=(12.5, max(5.0, 1.55 * n_radius)),
-        squeeze=False,
-        constrained_layout=True,
-        dpi=dpi,
-    )
-    labels = {
-        "phi": r"$\phi$",
-        "z": _display_label(r"$z$", length_unit),
-        "v_R": _display_label(r"$v_R$", velocity_unit),
-        "v_phi": _display_label(r"$v_\phi$", velocity_unit),
-        "v_z": _display_label(r"$v_z$", velocity_unit),
-    }
-    for radius_index in range(n_radius):
-        for component_index, name in enumerate(names):
-            ax = axes[radius_index, component_index]
-            ax.stairs(
-                reference_pdf[radius_index, component_index],
-                edges[component_index],
-                color="black",
-                linewidth=1.35,
-                label=reference_label,
-            )
-            median_model = _nanmedian(
-                model_pdf[:, radius_index, component_index], axis=0
-            )
-            ax.stairs(
-                median_model,
-                edges[component_index],
-                color="#3070b3",
-                linewidth=1.25,
-                label=model_label,
-            )
-            ax.grid(True, alpha=0.18)
-            if radius_index == 0:
-                ax.set_title(labels.get(name, name))
-            if radius_index == n_radius - 1:
-                ax.set_xlabel(labels.get(name, name))
-        unit = (
-            f" {format_display_unit(length_unit)}" if length_unit else ""
-        )
-        axes[radius_index, 0].set_ylabel(
-            rf"${radius_edges[radius_index]:.2g}\leq R<"
-            rf"{radius_edges[radius_index + 1]:.2g}$" + unit + "\nPDF\n"
-            + rf"$N_{{eff}}={effective_count[radius_index]:.0f}$, "
-            + rf"$N_m\sim{np.median(model_count[:, radius_index]):.0f}$"
-        )
-    axes[0, -1].legend(frameon=False, fontsize=8)
-    if title:
-        fig.suptitle(title)
-    return fig
 
 
 def plot_score_field_rv(

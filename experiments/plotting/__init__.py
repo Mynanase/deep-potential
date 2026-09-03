@@ -1,9 +1,8 @@
 """Repository-specific, composable plotting surface."""
 
 from experiments.plotting.df_diagnostics import (
-    plot_cylindrical_rz_density,
-    plot_cylindrical_marginals_by_radius,
     plot_density_profile,
+    plot_input_velocity_distributions,
     plot_radial_speed_comparison,
     plot_radial_speed_density,
     plot_score_field_rv,
@@ -28,9 +27,8 @@ from experiments.plotting.registry import (
 )
 
 __all__ = [
-    "plot_cylindrical_rz_density",
-    "plot_cylindrical_marginals_by_radius",
     "plot_density_profile",
+    "plot_input_velocity_distributions",
     "plot_mass_density_profile",
     "plot_mass_density_residual",
     "plot_mass_density_slice",

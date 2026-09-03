@@ -23,8 +23,6 @@ from experiments.diagnostics.training_artifacts import (
 )
 from experiments.paths import resolve_path
 from experiments.plotting.df_diagnostics import (
-    plot_cylindrical_marginals_by_radius,
-    plot_cylindrical_rz_density,
     plot_density_profile,
     plot_radial_speed_density,
     plot_score_distribution,
@@ -150,17 +148,6 @@ def _density(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
     )
 
 
-def _cylindrical_rz(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
-    unit = _unit(o, "length_unit")
-    return plot_cylindrical_rz_density(
-        arrays,
-        radius_label=label_with_unit("R", unit),
-        height_label=label_with_unit("z", unit),
-        title=o.get("title"),
-        dpi=int(o.get("dpi", 200)),
-    )
-
-
 def _velocity(coordinate: str):
     def builder(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
         return plot_velocity_marginals(
@@ -172,16 +159,6 @@ def _velocity(coordinate: str):
         )
 
     return builder
-
-
-def _cylindrical_marginals(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
-    return plot_cylindrical_marginals_by_radius(
-        arrays,
-        length_unit=_unit(o, "length_unit"),
-        velocity_unit=_unit(o, "velocity_unit"),
-        title=o.get("title"),
-        dpi=int(o.get("dpi", 200)),
-    )
 
 
 def _score_field(arrays: Mapping[str, np.ndarray], o: Mapping[str, Any]):
@@ -466,12 +443,10 @@ DEFAULT_REGISTRY.register(
     _training_residual,
 )
 DEFAULT_REGISTRY.register("df_density_profile", "df", _df_arrays, _density)
-DEFAULT_REGISTRY.register("df_cylindrical_rz_density", "df", _df_arrays, _cylindrical_rz)
 DEFAULT_REGISTRY.register("df_velocity_marginals_by_r", "df", _df_arrays, _velocity("r"))
 DEFAULT_REGISTRY.register("df_velocity_marginals_by_theta", "df", _df_arrays, _velocity("theta"))
 DEFAULT_REGISTRY.register("df_velocity_marginals_by_phi", "df", _df_arrays, _velocity("phi"))
 DEFAULT_REGISTRY.register("df_score_distribution", "df", _df_arrays, _score_distribution)
-DEFAULT_REGISTRY.register("df_cylindrical_marginals_by_R", "df", _df_arrays, _cylindrical_marginals)
 DEFAULT_REGISTRY.register("df_score_field_rv", "df", _df_arrays, _score_field)
 DEFAULT_REGISTRY.register("df_score_slices_by_R", "df", _df_arrays, _score_slices)
 DEFAULT_REGISTRY.register("df_radial_speed_density", "df", _df_arrays, _radial_speed)

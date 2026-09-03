@@ -3,72 +3,9 @@ from __future__ import annotations
 import numpy as np
 
 from experiments.diagnostics.evaluation import (
-    cartesian_to_cylindrical_phase_space,
-    cylindrical_marginal_diagnostics,
     radial_score_field_diagnostics,
     radial_speed_density_diagnostics,
-    weighted_quantile,
 )
-
-
-def test_cylindrical_transform_marks_axis_basis_undefined():
-    eta = np.array(
-        [
-            [0.0, 0.0, 2.0, 3.0, 4.0, 5.0],
-            [3.0, 4.0, 2.0, 3.0, 4.0, 5.0],
-        ]
-    )
-    cylindrical = cartesian_to_cylindrical_phase_space(eta)
-
-    assert cylindrical[0, 0] == 0.0
-    assert np.isnan(cylindrical[0, [1, 3, 4]]).all()
-    np.testing.assert_allclose(cylindrical[0, [2, 5]], [2.0, 5.0])
-    np.testing.assert_allclose(
-        cylindrical[1],
-        [5.0, np.arctan2(4, 3), 2.0, 5.0, 0.0, 5.0],
-        atol=1.0e-14,
-    )
-
-
-def test_weighted_quantile_and_reference_defined_common_histograms():
-    radius = np.linspace(1.0, 9.0, 800)
-    angle = np.linspace(-np.pi, np.pi, radius.size, endpoint=False)
-    reference = np.column_stack(
-        [
-            radius * np.cos(angle),
-            radius * np.sin(angle),
-            np.sin(angle),
-            np.cos(angle),
-            np.sin(angle),
-            np.cos(2 * angle),
-        ]
-    )
-    weights = np.linspace(0.2, 2.0, radius.size)
-    rng = np.random.default_rng(12)
-    indices = rng.choice(radius.size, size=4_000, p=weights / weights.sum())
-    model = reference[indices][None, ...]
-    diagnostics = cylindrical_marginal_diagnostics(
-        reference,
-        model,
-        weights,
-        n_radius_bins=8,
-        n_component_bins=32,
-    )
-
-    expected_median = weighted_quantile(radius, weights, 0.5)
-    assert diagnostics["cylindrical_R_edges"][4] == expected_median
-    assert diagnostics["cylindrical_R_edges"][-1] <= radius.max()
-    widths = np.diff(diagnostics["cylindrical_component_edges"], axis=1)
-    reference_integrals = np.sum(
-        diagnostics["cylindrical_reference_pdf"] * widths[None, :, :],
-        axis=2,
-    )
-    model_integrals = np.sum(
-        diagnostics["cylindrical_model_pdf"] * widths[None, None, :, :],
-        axis=3,
-    )
-    np.testing.assert_allclose(reference_integrals, 1.0, atol=1.0e-12)
-    np.testing.assert_allclose(model_integrals, 1.0, atol=1.0e-12)
 
 
 def test_radial_score_projection_quantiles_support_mask_and_zero_vectors():
