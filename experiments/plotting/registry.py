@@ -269,11 +269,18 @@ def _phi_slice(kind: str):
                 dpi=dpi,
             )
         density_unit = _unit(o, "density_unit")
+        data_positions = None
+        if "residual_x" in arrays and "residual_y" in arrays:
+            data_positions = np.column_stack(
+                [arrays["residual_x"], arrays["residual_y"]]
+            )
         return plot_mass_density_slice(
             arrays["slice_x"],
             arrays["slice_y"],
             arrays["slice_density"],
             truth_density=arrays.get("slice_truth_density"),
+            data_positions=data_positions,
+            min_data_count=int(o.get("min_data_count", 1)),
             x_label=axis("x"),
             y_label=axis("y"),
             density_label=label_with_unit(r"$\rho$", density_unit),

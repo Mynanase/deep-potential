@@ -318,6 +318,15 @@ def plot_potential_slice(
     return fig
 
 
+def _cell_edges(centers: np.ndarray) -> np.ndarray:
+    """Cell edges from pcolormesh-style cell-center coordinates."""
+    centers = np.asarray(centers, dtype=np.float64)
+    inner = 0.5 * (centers[1:] + centers[:-1])
+    first = centers[0] - 0.5 * (centers[1] - centers[0])
+    last = centers[-1] + 0.5 * (centers[-1] - centers[-2])
+    return np.concatenate([[first], inner, [last]])
+
+
 def plot_mass_density_slice(
     x: np.ndarray,
     y: np.ndarray,
@@ -326,6 +335,8 @@ def plot_mass_density_slice(
     truth_density: np.ndarray | None = None,
     mask: np.ndarray | None = None,
     truth_contour_levels: Sequence[float] | None = None,
+    data_positions: np.ndarray | None = None,
+    min_data_count: int = 1,
     x_label: str = "x",
     y_label: str = "y",
     density_label: str = r"$\rho$",
@@ -333,21 +344,55 @@ def plot_mass_density_slice(
     percentile: float = 99.0,
     dpi: int = 150,
 ) -> Any:
-    """Plot total mass density with a signed scale when negatives occur."""
+    """Plot total mass density with a signed scale when negatives occur.
+
+    When ``data_positions`` (the evaluation particles behind this slice) is
+    given, the color range is derived only from cells supported by at least
+    ``min_data_count`` particles, and unsupported cells are grayed out:
+    outside the data support the learned Laplacian is unconstrained
+    extrapolation, and its speckle otherwise dominates the color scale and
+    hides the physical inner structure.
+    """
     import matplotlib.pyplot as plt
     from matplotlib import colors
 
     x, y, model = _slice_arrays(x, y, model_density, mask)
     finite = _finite_slice_values(model)
-    if np.all(finite > 0):
-        vmin, vmax = np.percentile(finite, [100.0 - percentile, percentile])
+
+    data_count: np.ndarray | None = None
+    trusted: np.ndarray | None = None
+    if data_positions is not None:
+        positions = np.asarray(data_positions, dtype=np.float64)
+        if positions.ndim == 2 and positions.shape == (positions.shape[0], 2):
+            data_count, _, _ = np.histogram2d(
+                positions[:, 0],
+                positions[:, 1],
+                bins=[_cell_edges(x), _cell_edges(y)],
+            )
+            data_count = data_count.T  # (n_y, n_x) to match the slice shape
+            if data_count.any():
+                trusted = data_count >= float(min_data_count)
+            else:
+                data_count = None
+
+    def _range_values() -> np.ndarray:
+        if trusted is not None and bool(trusted.any()):
+            values = np.ma.filled(model, np.nan)[trusted]
+            values = values[np.isfinite(values)]
+            if values.size:
+                return values
+        return finite
+
+    range_values = _range_values()
+    if np.all(range_values > 0) and np.all(finite > 0):
+        vmin, vmax = np.percentile(range_values, [100.0 - percentile, percentile])
         norm = colors.LogNorm(
             vmin=max(float(vmin), np.finfo(float).tiny),
             vmax=max(float(vmax), float(vmin) * (1.0 + 1.0e-6)),
         )
         cmap = "viridis"
     else:
-        absolute = np.abs(finite)
+        absolute = np.abs(range_values)
         limit = max(float(np.percentile(absolute, percentile)), 1.0e-12)
         nonzero = absolute[absolute > 0]
         linthresh = max(
@@ -374,6 +419,53 @@ def plot_mass_density_slice(
         norm=norm,
         rasterized=True,
     )
+    if trusted is not None and not bool(trusted.all()):
+        untrusted = ~trusted
+        ax.contourf(
+            x,
+            y,
+            np.where(untrusted, 1.0, 0.0),
+            levels=[0.5, 1.5],
+            colors=["0.82"],
+            alpha=0.65,
+        )
+    if data_positions is not None:
+        from matplotlib.patches import Circle
+
+        flat = np.asarray(data_positions, dtype=np.float64)
+        radii = np.sqrt(flat[:, 0] ** 2 + flat[:, 1] ** 2)
+        for fraction in (68.0, 95.0, 99.5):
+            support_radius = float(np.percentile(radii, fraction))
+            ax.add_patch(
+                Circle(
+                    (0.0, 0.0),
+                    support_radius,
+                    fill=False,
+                    linestyle="--",
+                    linewidth=0.8,
+                    edgecolor="0.30",
+                    alpha=0.85,
+                )
+            )
+            ax.text(
+                0.01 * (x[-1] - x[0]),
+                support_radius,
+                f"{fraction:g}%",
+                fontsize=6,
+                color="0.30",
+                va="bottom",
+            )
+    if trusted is not None and not bool(trusted.all()):
+        ax.text(
+            0.01,
+            0.01,
+            f"gray: < {min_data_count} data particles (extrapolated);"
+            " dashed: data radii",
+            transform=ax.transAxes,
+            fontsize=7,
+            color="0.30",
+            va="bottom",
+        )
     if truth_density is not None:
         _, _, truth = _slice_arrays(x, y, truth_density, mask)
         positive_truth = _finite_slice_values(truth)

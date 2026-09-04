@@ -82,3 +82,49 @@ def test_mass_density_slice_keeps_negative_model_values_visible():
     norm = figure.axes[0].collections[0].norm
     assert norm.vmin < 0 < norm.vmax
     plt.close(figure)
+
+
+def test_mass_density_slice_color_range_ignores_unsupported_cells():
+    import matplotlib.pyplot as plt
+
+    x = np.linspace(-1.0, 1.0, 7)
+    y = np.linspace(-1.0, 1.0, 5)
+    density = np.ones((5, 7))
+    density[2, 3] = -0.25
+    # Extreme extrapolated speckle in a corner cell that receives no data.
+    density[0, 0] = -1.0e6
+    rng = np.random.default_rng(3)
+    positions = rng.uniform(-0.4, 0.4, size=(500, 2))
+
+    figure = plot_mass_density_slice(
+        x,
+        y,
+        density,
+        data_positions=positions,
+        min_data_count=5,
+    )
+
+    norm = figure.axes[0].collections[0].norm
+    # The unsupported corner outlier must not set the color range.
+    assert abs(norm.vmax) < 1.0e3
+    assert norm.vmin < 0 < norm.vmax
+    # The unsupported region is grayed out (an extra contourf collection).
+    assert len(figure.axes[0].collections) >= 2
+    # Data-support radius reference circles are drawn.
+    assert len(figure.axes[0].patches) == 3
+    plt.close(figure)
+
+
+def test_mass_density_slice_without_data_positions_keeps_legacy_behavior():
+    import matplotlib.pyplot as plt
+
+    x = np.linspace(-1.0, 1.0, 7)
+    y = np.linspace(-1.0, 1.0, 5)
+    density = np.ones((5, 7))
+    density[2, 3] = -0.25
+
+    figure = plot_mass_density_slice(x, y, density)
+
+    norm = figure.axes[0].collections[0].norm
+    assert norm.vmin < 0 < norm.vmax
+    plt.close(figure)
