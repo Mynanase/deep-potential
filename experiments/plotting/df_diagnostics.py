@@ -348,6 +348,266 @@ def plot_input_velocity_distributions(
     return fig
 
 
+def _joint_cell_require(diagnostics: Mapping[str, np.ndarray]) -> None:
+    _require(
+        diagnostics,
+        {
+            "joint_velocity_edges",
+            "joint_r_edges",
+            "joint_theta_abs_cos_edges",
+            "joint_theta_class_names",
+            "joint_phi_edges",
+            "joint_hist",
+            "joint_count",
+            "joint_effective_count",
+            "joint_mean",
+            "joint_std",
+            "joint_skewness",
+            "joint_excess_kurtosis",
+        },
+    )
+
+
+def plot_input_velocity_joint_wedge(
+    diagnostics: Mapping[str, np.ndarray],
+    theta_index: int,
+    phi_index: int,
+    *,
+    min_effective_count: float = 500.0,
+    velocity_labels: Sequence[str] = (r"$v_r$", r"$v_\theta$", r"$v_\phi$"),
+    velocity_unit: str = "",
+    length_unit: str = "",
+    data_label: str = "input data",
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Plot input velocity distributions for one joint (theta, phi) wedge.
+
+    Rows are radial bins; the three columns show the weighted histogram of
+    each spherical velocity component inside that 3D cell, overlaid with a
+    Gaussian built from the cell's own weighted moments. Cells whose
+    effective count falls below ``min_effective_count`` are rendered as
+    gray placeholders instead of histograms.
+    """
+    import matplotlib.pyplot as plt
+
+    _joint_cell_require(diagnostics)
+    r_edges = np.asarray(diagnostics["joint_r_edges"])
+    theta_names = [
+        str(value) for value in diagnostics["joint_theta_class_names"]
+    ]
+    phi_edges = np.asarray(diagnostics["joint_phi_edges"])
+    n_theta = len(theta_names)
+    n_phi = phi_edges.size - 1
+    if not 0 <= theta_index < n_theta:
+        raise ValueError(f"theta_index must be in [0, {n_theta}).")
+    if not 0 <= phi_index < n_phi:
+        raise ValueError(f"phi_index must be in [0, {n_phi}).")
+    velocity_edges = np.asarray(diagnostics["joint_velocity_edges"])
+    hist = np.asarray(diagnostics["joint_hist"])[:, theta_index, phi_index]
+    count = np.asarray(diagnostics["joint_count"])[:, theta_index, phi_index]
+    effective = np.asarray(
+        diagnostics["joint_effective_count"]
+    )[:, theta_index, phi_index]
+    mean = np.asarray(diagnostics["joint_mean"])[:, theta_index, phi_index]
+    std = np.asarray(diagnostics["joint_std"])[:, theta_index, phi_index]
+    skewness = np.asarray(
+        diagnostics["joint_skewness"]
+    )[:, theta_index, phi_index]
+    excess_kurtosis = np.asarray(
+        diagnostics["joint_excess_kurtosis"]
+    )[:, theta_index, phi_index]
+    theta_name = theta_names[theta_index]
+    phi_left = np.degrees(phi_edges[phi_index])
+    phi_right = np.degrees(phi_edges[phi_index + 1])
+
+    n_rows = r_edges.size - 1
+    fig, axes = plt.subplots(
+        n_rows,
+        3,
+        figsize=(13.5, max(3.5, 1.9 * n_rows)),
+        sharex="col",
+        squeeze=False,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    formatted_length = format_display_unit(length_unit)
+    length_suffix = f" {formatted_length}" if formatted_length else ""
+    for row in range(n_rows):
+        masked = effective[row] < float(min_effective_count)
+        for velocity_index in range(3):
+            ax = axes[row, velocity_index]
+            if masked:
+                ax.text(
+                    0.5,
+                    0.5,
+                    f"masked\nN_eff={effective[row]:.0f} < {min_effective_count:.0f}",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=8,
+                    color="gray",
+                )
+                ax.grid(True, alpha=0.1)
+            else:
+                edges = velocity_edges[velocity_index]
+                ax.stairs(
+                    hist[row, velocity_index],
+                    edges,
+                    color="black",
+                    lw=1.8,
+                    label=data_label,
+                )
+                mu = mean[row, velocity_index]
+                sigma = std[row, velocity_index]
+                if np.isfinite(mu) and np.isfinite(sigma) and sigma > 0:
+                    centers = 0.5 * (edges[1:] + edges[:-1])
+                    gaussian = np.exp(
+                        -0.5 * ((centers - mu) / sigma) ** 2
+                    ) / (sigma * np.sqrt(2.0 * np.pi))
+                    ax.plot(
+                        centers,
+                        gaussian,
+                        linestyle="--",
+                        color="#c2410c",
+                        lw=1.1,
+                        label="Gaussian (bin moments)",
+                    )
+                ax.text(
+                    0.98,
+                    0.93,
+                    (
+                        f"γ₁={skewness[row, velocity_index]:+.2f}\n"
+                        f"γ₂={excess_kurtosis[row, velocity_index]:+.2f}"
+                    ),
+                    ha="right",
+                    va="top",
+                    transform=ax.transAxes,
+                    fontsize=7,
+                    color="#c2410c",
+                )
+                ax.grid(True, alpha=0.2)
+            if row == 0:
+                ax.set_title(velocity_labels[velocity_index])
+            if row == n_rows - 1:
+                formatted_velocity = format_display_unit(velocity_unit)
+                unit = f" [{formatted_velocity}]" if formatted_velocity else ""
+                ax.set_xlabel(f"velocity{unit}")
+        left = r_edges[row]
+        right = r_edges[row + 1]
+        axes[row, 0].set_ylabel(
+            f"{left:.2g} <= r < {right:.2g}" + length_suffix + "\nPDF\n"
+            f"N={int(count[row])}, N_eff={effective[row]:.0f}"
+        )
+    if n_rows > 0 and np.any(
+        np.asarray(diagnostics["joint_effective_count"])[:, theta_index, phi_index]
+        < float(min_effective_count)
+    ):
+        axes[0, -1].text(
+            0.03,
+            0.02,
+            f"gray cells: N_eff < {min_effective_count:.0f}",
+            transform=axes[0, -1].transAxes,
+            fontsize=7,
+            color="gray",
+            va="bottom",
+        )
+    axes[0, -1].legend(loc="upper left", fontsize=7)
+    fig.suptitle(
+        title
+        or (
+            f"Input velocity, wedge θ={theta_name}, "
+            f"φ∈[{phi_left:.0f}°, {phi_right:.0f}°)"
+        )
+    )
+    return fig
+
+
+def plot_input_velocity_joint_summary(
+    diagnostics: Mapping[str, np.ndarray],
+    *,
+    velocity_index: int = 2,
+    metric: str = "skewness",
+    min_effective_count: float = 500.0,
+    velocity_labels: Sequence[str] = (r"$v_r$", r"$v_\theta$", r"$v_\phi$"),
+    length_unit: str = "",
+    title: str | None = None,
+    dpi: int = 150,
+) -> Any:
+    """Summarize a joint shape statistic across radial bins per wedge.
+
+    One panel per theta class; within a panel the four phi sectors are thin
+    lines and their median is bold. Sector-to-sector agreement is an
+    axisymmetry check; radial structure shows where the shape signal lives.
+    """
+    import matplotlib.pyplot as plt
+
+    _joint_cell_require(diagnostics)
+    if metric not in {"skewness", "excess_kurtosis", "mean", "std"}:
+        raise ValueError(
+            "metric must be 'skewness', 'excess_kurtosis', 'mean', or 'std'."
+        )
+    values = np.asarray(diagnostics[f"joint_{metric}"])
+    effective = np.asarray(diagnostics["joint_effective_count"])
+    r_edges = np.asarray(diagnostics["joint_r_edges"])
+    theta_names = [
+        str(value) for value in diagnostics["joint_theta_class_names"]
+    ]
+    phi_edges = np.asarray(diagnostics["joint_phi_edges"])
+    n_phi = phi_edges.size - 1
+    masked = effective < float(min_effective_count)
+    values = np.where(masked[..., None], np.nan, values)
+    centers = np.sqrt(r_edges[:-1] * r_edges[1:])
+
+    formatted_length = format_display_unit(length_unit)
+    unit = f" [{formatted_length}]" if formatted_length else ""
+    fig, axes = plt.subplots(
+        len(theta_names),
+        1,
+        figsize=(8.0, 3.0 * len(theta_names)),
+        sharex=True,
+        squeeze=False,
+        constrained_layout=True,
+        dpi=dpi,
+    )
+    sector_colors = plt.get_cmap("tab10")
+    for theta_index, theta_name in enumerate(theta_names):
+        ax = axes[theta_index, 0]
+        for phi_index in range(n_phi):
+            left = np.degrees(phi_edges[phi_index])
+            right = np.degrees(phi_edges[phi_index + 1])
+            ax.plot(
+                centers,
+                values[:, theta_index, phi_index, velocity_index],
+                color=sector_colors(phi_index % 10),
+                lw=1.0,
+                alpha=0.75,
+                label=f"φ∈[{left:.0f}°, {right:.0f}°)",
+            )
+        with np.errstate(invalid="ignore"):
+            median = np.nanmedian(
+                values[:, theta_index, :, velocity_index], axis=1
+            )
+        ax.plot(centers, median, color="black", lw=2.2, label="sector median")
+        ax.axhline(0.0, color="gray", lw=0.8, alpha=0.6)
+        ax.set_xlim(left=float(r_edges[0]), right=float(r_edges[-1]))
+        ax.set_xscale("log")
+        ax.set_ylabel(
+            f"{metric}\nof {velocity_labels[velocity_index]}\n({theta_name})"
+        )
+        ax.grid(True, alpha=0.25)
+    axes[0, 0].legend(loc="upper left", fontsize=7, ncol=2)
+    axes[-1, 0].set_xlabel(f"r{unit}")
+    fig.suptitle(
+        title
+        or (
+            f"Joint wedge {metric} of {velocity_labels[velocity_index]}"
+            f" (N_eff >= {min_effective_count:.0f})"
+        )
+    )
+    return fig
+
+
 def plot_score_distribution(
     diagnostics: Mapping[str, np.ndarray],
     *,

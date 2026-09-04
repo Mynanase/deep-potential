@@ -865,6 +865,153 @@ def input_velocity_diagnostics(
     return result
 
 
+JOINT_THETA_ABS_COS_EDGES = (0.0, 0.3, 0.7, 1.0)
+JOINT_THETA_CLASS_NAMES = ("disk", "intermediate", "polar")
+
+
+def input_velocity_diagnostics_joint(
+    eta: np.ndarray,
+    *,
+    r_edges: np.ndarray,
+    weights: np.ndarray | None = None,
+    theta_abs_cos_edges: tuple[float, ...] | np.ndarray = (
+        JOINT_THETA_ABS_COS_EDGES
+    ),
+    phi_edges: np.ndarray | None = None,
+    n_velocity_bins: int = 32,
+    velocity_percentile_range: tuple[float, float] = (0.5, 99.5),
+) -> dict[str, np.ndarray]:
+    """Joint (R, theta-class, phi-sector) input velocity diagnostics.
+
+    Unlike :func:`input_velocity_diagnostics`, which conditions on one
+    spherical coordinate at a time and marginalizes the other two, this
+    variants bins all three simultaneously: every cell is a genuine 3D
+    region, so non-Gaussian velocity structure can be localized to the
+    part of space that produces it.
+
+    ``theta`` classes are defined on ``|cos(theta)|`` so each class is one
+    contiguous interval that merges the northern and southern hemispheres:
+    ``disk`` (|cos| < 0.3), ``intermediate`` (0.3 <= |cos| < 0.7), and
+    ``polar`` (|cos| >= 0.7). ``phi`` sectors default to four 90-degree
+    sectors; agreement between sectors is an axisymmetry test, and
+    sector-to-sector differences expose residual non-axisymmetric
+    substructure.
+    """
+    eta = np.asarray(eta, dtype=np.float64)
+    if eta.ndim != 2 or eta.shape[1] != 6:
+        raise ValueError("eta must have shape (N, 6).")
+    if not np.all(np.isfinite(eta)):
+        raise ValueError("eta contains NaN or Inf values.")
+    if n_velocity_bins < 4:
+        raise ValueError("n_velocity_bins must be at least 4.")
+    if weights is None:
+        weights = np.ones(eta.shape[0], dtype=np.float64)
+    else:
+        weights = np.asarray(weights, dtype=np.float64)
+    if weights.shape != (eta.shape[0],):
+        raise ValueError(f"Expected weights shape ({eta.shape[0]},).")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("weights must be finite and positive.")
+
+    r_edges = _validate_edges(r_edges, name="r_edges")
+    abs_cos_edges = np.asarray(theta_abs_cos_edges, dtype=np.float64)
+    if (
+        abs_cos_edges.ndim != 1
+        or abs_cos_edges.size < 3
+        or abs_cos_edges[0] != 0.0
+        or abs_cos_edges[-1] != 1.0
+        or np.any(np.diff(abs_cos_edges) <= 0)
+        or np.any(abs_cos_edges < 0.0)
+        or np.any(abs_cos_edges > 1.0)
+    ):
+        raise ValueError(
+            "theta_abs_cos_edges must increase within [0, 1] and start at 0, end at 1."
+        )
+    if phi_edges is None:
+        phi_edges = np.linspace(-np.pi, np.pi, 5)
+    phi_edges = _validate_edges(phi_edges, name="phi_edges")
+
+    spherical = cartesian_to_spherical_phase_space(eta)
+    lower_pct, upper_pct = velocity_percentile_range
+    if not 0 <= lower_pct < upper_pct <= 100:
+        raise ValueError("velocity_percentile_range must lie within [0, 100].")
+
+    velocity_edges = np.empty((3, int(n_velocity_bins) + 1), dtype=np.float64)
+    for velocity_index in range(3):
+        values = spherical[:, 3 + velocity_index]
+        lower = _weighted_quantile(values, weights, lower_pct / 100.0)
+        upper = _weighted_quantile(values, weights, upper_pct / 100.0)
+        scale = max(abs(float(lower)), abs(float(upper)), 1.0)
+        if upper - lower <= scale * 1.0e-12:
+            padding = max(scale * 1.0e-3, 1.0e-12)
+            lower, upper = lower - padding, upper + padding
+        velocity_edges[velocity_index] = np.linspace(
+            lower, upper, int(n_velocity_bins) + 1
+        )
+
+    n_r = r_edges.size - 1
+    n_theta = abs_cos_edges.size - 1
+    n_phi = phi_edges.size - 1
+    abs_cos = np.abs(np.cos(spherical[:, 1]))
+    radius = spherical[:, 0]
+    azimuth = spherical[:, 2]
+
+    hist = np.full((n_r, n_theta, n_phi, 3, int(n_velocity_bins)), np.nan)
+    count = np.zeros((n_r, n_theta, n_phi), dtype=np.int64)
+    effective_count = np.zeros((n_r, n_theta, n_phi), dtype=np.float64)
+    mean = np.full((n_r, n_theta, n_phi, 3), np.nan)
+    std = np.full((n_r, n_theta, n_phi, 3), np.nan)
+    skewness = np.full((n_r, n_theta, n_phi, 3), np.nan)
+    excess_kurtosis = np.full((n_r, n_theta, n_phi, 3), np.nan)
+
+    for r_index in range(n_r):
+        r_mask = _bin_mask(radius, r_edges, r_index)
+        for theta_index in range(n_theta):
+            theta_mask = _bin_mask(abs_cos, abs_cos_edges, theta_index)
+            for phi_index in range(n_phi):
+                phi_mask = _bin_mask(azimuth, phi_edges, phi_index)
+                mask = r_mask & theta_mask & phi_mask
+                count[r_index, theta_index, phi_index] = np.count_nonzero(mask)
+                effective_count[r_index, theta_index, phi_index] = _effective_count(
+                    weights[mask]
+                )
+                for velocity_index in range(3):
+                    values = spherical[mask, 3 + velocity_index]
+                    hist[r_index, theta_index, phi_index, velocity_index], _ = (
+                        _normalized_histogram(
+                            values,
+                            velocity_edges[velocity_index],
+                            weights=weights[mask],
+                        )
+                    )
+                    (
+                        mean[r_index, theta_index, phi_index, velocity_index],
+                        std[r_index, theta_index, phi_index, velocity_index],
+                        skewness[r_index, theta_index, phi_index, velocity_index],
+                        excess_kurtosis[
+                            r_index, theta_index, phi_index, velocity_index
+                        ],
+                    ) = _weighted_standardized_moments(values, weights[mask])
+
+    return {
+        "joint_velocity_edges": velocity_edges,
+        "joint_velocity_percentile_range": np.asarray(
+            velocity_percentile_range, dtype=np.float64
+        ),
+        "joint_r_edges": r_edges,
+        "joint_theta_abs_cos_edges": abs_cos_edges,
+        "joint_theta_class_names": np.asarray(JOINT_THETA_CLASS_NAMES[:n_theta]),
+        "joint_phi_edges": phi_edges,
+        "joint_hist": hist,
+        "joint_count": count,
+        "joint_effective_count": effective_count,
+        "joint_mean": mean,
+        "joint_std": std,
+        "joint_skewness": skewness,
+        "joint_excess_kurtosis": excess_kurtosis,
+    }
+
+
 def binned_potential_truth_by_phi(
     positions: np.ndarray,
     potential: np.ndarray,
