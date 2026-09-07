@@ -8,12 +8,18 @@ potential:
 train:
   optimizer: radam
   batch_size: 32768
-  epochs: 128
+  epochs: 192
   loss_type: mse
   alpha: 1.0
-  beta: 1.0
-  lambda_mass: 1.0
+  beta: 10.0
+  lambda_mass: 2000.0
   mass_batch_size: 4096
+  mass_uniform_points: 4096
+  mass_uniform_domain: cube
+  mass_uniform_r_max: 75.0
+  mass_uniform_weight: 1.0
+  mass_uniform_weight_start: 0.1
+  mass_uniform_ramp_frac: 0.5
   l2_reg: 0.001
   reweight:
     gamma: 0.0

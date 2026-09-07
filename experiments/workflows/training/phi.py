@@ -200,6 +200,45 @@ def run_phi_training(
             "train.mass_batch_size must be positive, "
             f"got {mass_batch_size}."
         )
+    mass_uniform_points = int(train_cfg.get("mass_uniform_points", 0))
+    mass_uniform_r_max = float(train_cfg.get("mass_uniform_r_max", 75.0))
+    mass_uniform_domain = str(
+        train_cfg.get("mass_uniform_domain", "cube")
+    ).lower()
+    mass_uniform_weight = float(train_cfg.get("mass_uniform_weight", 1.0))
+    mass_uniform_weight_start = float(
+        train_cfg.get("mass_uniform_weight_start", mass_uniform_weight)
+    )
+    mass_uniform_ramp_frac = float(
+        train_cfg.get("mass_uniform_ramp_frac", 0.0)
+    )
+    if mass_uniform_points < 0:
+        raise ValueError(
+            "train.mass_uniform_points must be >= 0, "
+            f"got {mass_uniform_points}."
+        )
+    if mass_uniform_points > 0:
+        if mass_uniform_r_max <= 0.0:
+            raise ValueError(
+                "train.mass_uniform_r_max must be > 0, "
+                f"got {mass_uniform_r_max}."
+            )
+        if mass_uniform_weight < 0.0 or mass_uniform_weight_start < 0.0:
+            raise ValueError(
+                "train.mass_uniform_weight and "
+                "train.mass_uniform_weight_start must be >= 0, "
+                f"got {mass_uniform_weight} / {mass_uniform_weight_start}."
+            )
+        if mass_uniform_ramp_frac < 0.0 or mass_uniform_ramp_frac > 1.0:
+            raise ValueError(
+                "train.mass_uniform_ramp_frac must be in [0, 1], "
+                f"got {mass_uniform_ramp_frac}."
+            )
+        if mass_uniform_domain not in {"sphere", "cube"}:
+            raise ValueError(
+                "train.mass_uniform_domain must be 'sphere' or 'cube', "
+                f"got {mass_uniform_domain!r}."
+            )
 
     seed = int(config.get("seed", 1))
     rng = jax.random.key(seed)
@@ -262,6 +301,20 @@ def run_phi_training(
         f"lambda_mass={lambda_mass}, beta={beta}, "
         f"mass_batch_size={min(mass_batch_size, batch_size)}"
     )
+    if mass_uniform_points > 0:
+        ramp_info = ""
+        if mass_uniform_ramp_frac > 0.0:
+            ramp_info = (
+                f", ramp={mass_uniform_weight_start}"
+                f"->{mass_uniform_weight} over "
+                f"{mass_uniform_ramp_frac * 100:.0f}% of steps"
+            )
+        print(
+            "[train_phi] mass uniform probes: "
+            f"n={mass_uniform_points}, domain={mass_uniform_domain}, "
+            f"r_max={mass_uniform_r_max}, weight={mass_uniform_weight}"
+            f"{ramp_info}"
+        )
 
     # Configure learning rate
     lr_config = train_cfg.get("lr", 1.0e-3)
@@ -321,7 +374,7 @@ def run_phi_training(
         df_params_host = df_params
 
     @jax.jit
-    def train_step(phi_params, opt_state, eta_std_batch):
+    def train_step(phi_params, opt_state, eta_std_batch, mass_key, mass_weight_now):
         x_std = eta_std_batch[:, :3]
         std_x = jnp.asarray(normalizer.std[:3], dtype=eta_std_batch.dtype)
         mean_x = jnp.asarray(normalizer.mean[:3], dtype=eta_std_batch.dtype)
@@ -368,6 +421,7 @@ def run_phi_training(
 
             mass_loss = jnp.zeros((), dtype=residual.dtype)
             negative_fraction = jnp.zeros((), dtype=residual.dtype)
+            negative_fraction_uniform = jnp.zeros((), dtype=residual.dtype)
             if lambda_mass > 0.0:
                 n_mass = min(mass_batch_size, x_std.shape[0])
                 x_mass = x_std[:n_mass]
@@ -385,6 +439,57 @@ def run_phi_training(
                 )
                 negative_fraction = jnp.mean(laplacian_phi_phys < 0.0)
 
+                if mass_uniform_points > 0 and (
+                    mass_uniform_weight > 0.0
+                    or mass_uniform_weight_start > 0.0
+                ):
+                    if mass_uniform_domain == "sphere":
+                        dirs = jax.random.normal(
+                            mass_key,
+                            (mass_uniform_points, 3),
+                            dtype=x_std.dtype,
+                        )
+                        dirs = dirs / jnp.sqrt(
+                            jnp.sum(dirs**2, axis=-1, keepdims=True)
+                            + 1.0e-12
+                        )
+                        radii = mass_uniform_r_max * jax.random.uniform(
+                            mass_key,
+                            (mass_uniform_points, 1),
+                            dtype=x_std.dtype,
+                        ) ** (1.0 / 3.0)
+                        x_uniform_phys = dirs * radii
+                    else:
+                        x_uniform_phys = (
+                            2.0
+                            * jax.random.uniform(
+                                mass_key,
+                                (mass_uniform_points, 3),
+                                dtype=x_std.dtype,
+                            )
+                            - 1.0
+                        ) * mass_uniform_r_max
+                    x_uniform_std = (
+                        x_uniform_phys - mean_x[None, :]
+                    ) / std_x[None, :]
+                    laplacian_uniform = laplacian_phi_apply(
+                        phi_model,
+                        p,
+                        x_uniform_std,
+                        std_x=std_x,
+                    )
+                    mass_loss_uniform = loss_negative_density(
+                        laplacian_uniform,
+                        beta=beta,
+                    )
+                    negative_fraction_uniform = jnp.mean(
+                        laplacian_uniform < 0.0
+                    )
+                    mass_loss = (
+                        mass_loss
+                        + mass_weight_now * mass_loss_uniform
+                    ) / (1.0 + mass_weight_now)
+
             total_loss = (
                 residual_loss
                 + lambda_mass * mass_loss
@@ -394,13 +499,14 @@ def run_phi_training(
                 residual_loss,
                 mass_loss,
                 negative_fraction,
+                negative_fraction_uniform,
             )
 
         (loss, aux), grads = jax.value_and_grad(
             loss_fn,
             has_aux=True,
         )(phi_params)
-        residual_loss, mass_loss, negative_fraction = aux
+        residual_loss, mass_loss, negative_fraction, negative_fraction_uniform = aux
         updates, opt_state2 = opt.update(grads, opt_state, phi_params)
         phi_params2 = optax.apply_updates(phi_params, updates)
         return (
@@ -410,6 +516,7 @@ def run_phi_training(
             residual_loss,
             mass_loss,
             negative_fraction,
+            negative_fraction_uniform,
         )
 
     metrics_path = run_dir / "metrics.csv"
@@ -420,6 +527,7 @@ def run_phi_training(
         "residual_loss",
         "mass_penalty",
         "negative_laplacian_fraction",
+        "negative_laplacian_fraction_uniform",
         "residual_mean",
         "residual_std",
         "residual_p99_abs",
@@ -471,6 +579,22 @@ def run_phi_training(
                 eta_b = jnp.asarray(batch_np)
                 if use_sharding:
                     eta_b = jax.device_put(eta_b, batch_sharding)
+                mass_key = jax.random.fold_in(rng, global_step)
+                if mass_uniform_points > 0 and mass_uniform_ramp_frac > 0.0:
+                    ramp_steps = max(
+                        1, int(mass_uniform_ramp_frac * total_steps)
+                    )
+                    ramp_t = min(global_step / ramp_steps, 1.0)
+                    mass_weight_now = (
+                        mass_uniform_weight_start
+                        + (
+                            mass_uniform_weight
+                            - mass_uniform_weight_start
+                        )
+                        * ramp_t
+                    )
+                else:
+                    mass_weight_now = mass_uniform_weight
                 (
                     phi_params,
                     opt_state,
@@ -478,16 +602,22 @@ def run_phi_training(
                     residual_loss,
                     mass_loss,
                     negative_fraction,
+                    negative_fraction_uniform,
                 ) = train_step(
                     phi_params,
                     opt_state,
                     eta_b,
+                    mass_key,
+                    mass_weight_now,
                 )
                 loss_scalar = float(jax.device_get(loss))
                 residual_loss_scalar = float(jax.device_get(residual_loss))
                 mass_loss_scalar = float(jax.device_get(mass_loss))
                 negative_fraction_scalar = float(
                     jax.device_get(negative_fraction)
+                )
+                negative_fraction_uniform_scalar = float(
+                    jax.device_get(negative_fraction_uniform)
                 )
 
                 need_host_state = (global_step % log_every) == 0
@@ -524,6 +654,7 @@ def run_phi_training(
                             residual_loss_scalar,
                             mass_loss_scalar,
                             negative_fraction_scalar,
+                            negative_fraction_uniform_scalar,
                             r_mean,
                             r_std,
                             r_p99,
@@ -538,17 +669,32 @@ def run_phi_training(
                             "negative_laplacian_fraction": (
                                 negative_fraction_scalar
                             ),
+                            "negative_laplacian_fraction_uniform": (
+                                negative_fraction_uniform_scalar
+                            ),
                             "residual_mean": r_mean, "residual_std": r_std,
                             "residual_p99_abs": r_p99,
                         })
-                    pbar.set_postfix(
-                        loss=loss_scalar,
-                        mass=mass_loss_scalar,
-                        neg_frac=negative_fraction_scalar,
-                        r_std=r_std,
-                        r_p99=r_p99,
-                        epoch=epoch,
-                    )
+                    if mass_uniform_points > 0:
+                        pbar.set_postfix(
+                            loss=loss_scalar,
+                            mass=mass_loss_scalar,
+                            neg_frac=negative_fraction_scalar,
+                            neg_frac_u=negative_fraction_uniform_scalar,
+                            w_u=mass_weight_now,
+                            r_std=r_std,
+                            r_p99=r_p99,
+                            epoch=epoch,
+                        )
+                    else:
+                        pbar.set_postfix(
+                            loss=loss_scalar,
+                            mass=mass_loss_scalar,
+                            neg_frac=negative_fraction_scalar,
+                            r_std=r_std,
+                            r_p99=r_p99,
+                            epoch=epoch,
+                        )
 
                 if ckpt_every and (global_step % ckpt_every) == 0 and global_step != step0:
                     save(ckpt_mgr, global_step, {"params": phi_params_host, "opt_state": opt_state_host, "step": global_step})

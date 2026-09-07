@@ -194,6 +194,61 @@ def run_df_training(
               f"({100.0 * (n_before - n_after) / n_before:.2f}%), "
               f"kept {n_after}.")
 
+    # Optional center-hole cut: remove the very dense, centrally concentrated
+    # particles (r < r_center_cut) that can dominate FFJORD training and leave
+    # the sparse outer region underfit. Applied AFTER coordinate transform /
+    # sigma clip, BEFORE normalizer fitting. DataFrame rows are physically
+    # removed (support_indices updated), so the normalizer and downstream
+    # evaluation see the same annular support.
+    r_center_cut = float(data_cfg.get("r_center_cut", 0.0))
+    if r_center_cut > 0.0:
+        radius = np.linalg.norm(eta[:, :3], axis=-1)
+        keep = radius >= r_center_cut
+        n_before = eta.shape[0]
+        support_indices = support_indices[keep]
+        eta = eta[keep]
+        if weights is not None:
+            weights = weights[keep]
+        n_after = eta.shape[0]
+        print(f"[train_df] Center-hole cut at r_in={r_center_cut} kpc: removed "
+              f"{n_before - n_after}/{n_before} samples "
+              f"({100.0 * (n_before - n_after) / n_before:.2f}%), "
+              f"kept {n_after} (annular support).")
+
+    # External boundary padding (Kalda & Green 2025, sec. 3.4): smooth the
+    # hard outer edge that flows model poorly by rolling off the weight of
+    # particles beyond r_pad_outer with a Gaussian of width pad_sigma_scale *
+    # r_pad_outer. Then clip weights to [w_min, w_max] as in the paper.
+    r_pad_outer = float(data_cfg.get("r_pad_outer", 0.0))
+    if r_pad_outer > 0.0:
+        pad_sigma_scale = float(data_cfg.get("pad_sigma_scale", 0.1))
+        pad_sigma = pad_sigma_scale * r_pad_outer
+        radius = np.linalg.norm(eta[:, :3], axis=-1)
+        # Paper (Kalda & Green 2025, sec. 3.4): S_target = 1 inside r_out, and
+        # a Gaussian roll-off f(r - r_out, sigma) outside. Only particles with
+        # r > r_out are down-weighted; interior particles keep full weight.
+        dist = radius - r_pad_outer
+        rolloff = np.where(
+            dist > 0.0,
+            np.exp(-0.5 * (dist / max(pad_sigma, 1.0e-6)) ** 2),
+            1.0,
+        )
+        if weights is None:
+            weights = np.ones(eta.shape[0], dtype=np.float64)
+        weights = np.asarray(weights, dtype=np.float64) * rolloff
+        print(f"[train_df] External padding at r_out={r_pad_outer} kpc "
+              f"with sigma={pad_sigma:.2f} kpc (scale={pad_sigma_scale}): "
+              f"rolled off {np.sum(dist > 0.0)}/{rolloff.size} particles.")
+
+    w_min = float(data_cfg.get("w_min", 0.0))
+    w_max = float(data_cfg.get("w_max", 0.0))
+    if weights is not None and (w_min > 0.0 or w_max > 0.0):
+        lo = w_min if w_min > 0.0 else 0.0
+        hi = w_max if w_max > 0.0 else np.inf
+        weights = np.clip(np.asarray(weights, dtype=np.float64), lo, hi)
+        print(f"[train_df] Clipped weights to [{lo:.3f}, "
+              f"{'inf' if np.isinf(hi) else f'{hi:.3f}'}].")
+
     normalizer = fit_normalizer(
         eta,
         eps=float(config.get("normalizer", {}).get("eps", 1.0e-6)),
