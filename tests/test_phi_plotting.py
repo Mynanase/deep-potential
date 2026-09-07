@@ -128,3 +128,31 @@ def test_mass_density_slice_without_data_positions_keeps_legacy_behavior():
     norm = figure.axes[0].collections[0].norm
     assert norm.vmin < 0 < norm.vmax
     plt.close(figure)
+
+
+def test_mass_density_slice_smoothing_suppresses_high_frequency_checkerboard():
+    import matplotlib.pyplot as plt
+
+    x = np.linspace(-1.0, 1.0, 25)
+    y = np.linspace(-1.0, 1.0, 25)
+    xx, yy = np.meshgrid(x, y, indexing="xy")
+    # Alternating +/-1e6: pure high-frequency content that point constraints
+    # between probe spacings cannot see, but a fine slice grid renders.
+    density = 1.0e6 * ((np.indices(xx.shape).sum(axis=0)) % 2) - 5.0e5
+    rng = np.random.default_rng(9)
+    positions = rng.uniform(-1.0, 1.0, size=(4000, 2))
+
+    raw = plot_mass_density_slice(
+        x, y, density, data_positions=positions, min_data_count=1,
+        smooth_cells=None,
+    )
+    smooth = plot_mass_density_slice(
+        x, y, density, data_positions=positions, min_data_count=1,
+        smooth_cells=2.0,
+    )
+    raw_limit = abs(raw.axes[0].collections[0].norm.vmax)
+    smooth_limit = abs(smooth.axes[0].collections[0].norm.vmax)
+    assert raw_limit > 1.0e5
+    assert smooth_limit < 0.1 * raw_limit
+    plt.close(raw)
+    plt.close(smooth)

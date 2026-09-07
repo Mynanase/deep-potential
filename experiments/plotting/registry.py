@@ -281,6 +281,8 @@ def _phi_slice(kind: str):
             truth_density=arrays.get("slice_truth_density"),
             data_positions=data_positions,
             min_data_count=int(o.get("min_data_count", 1)),
+            smooth_cells=o.get("smooth_cells", 2.0),
+            length_unit=unit,
             x_label=axis("x"),
             y_label=axis("y"),
             density_label=label_with_unit(r"$\rho$", density_unit),

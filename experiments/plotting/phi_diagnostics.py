@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from experiments.plotting.style import format_display_unit
+
 
 def _profile_arrays(
     radius: np.ndarray,
@@ -337,6 +339,8 @@ def plot_mass_density_slice(
     truth_contour_levels: Sequence[float] | None = None,
     data_positions: np.ndarray | None = None,
     min_data_count: int = 1,
+    smooth_cells: float | None = None,
+    length_unit: str = "",
     x_label: str = "x",
     y_label: str = "y",
     density_label: str = r"$\rho$",
@@ -352,11 +356,34 @@ def plot_mass_density_slice(
     outside the data support the learned Laplacian is unconstrained
     extrapolation, and its speckle otherwise dominates the color scale and
     hides the physical inner structure.
+
+    ``smooth_cells`` applies a NaN-aware Gaussian smoothing to the slice
+    before rendering. Point constraints (probe spacing of a few kpc) cannot
+    pin the Laplacian between samples, so the raw field carries
+    constraint-free curvature ripples below the probe spacing; smoothing to
+    roughly the constraint resolution renders the constrained density
+    instead. Set to 0 or None to show the raw field.
     """
     import matplotlib.pyplot as plt
     from matplotlib import colors
 
+    from scipy.ndimage import gaussian_filter
+
     x, y, model = _slice_arrays(x, y, model_density, mask)
+    if smooth_cells is not None and smooth_cells > 0:
+        valid = ~np.ma.getmaskarray(model) & np.isfinite(
+            np.ma.filled(model, np.nan)
+        )
+        filled = np.ma.filled(model, 0.0) * valid
+        denom = gaussian_filter(valid.astype(float), float(smooth_cells))
+        safe = denom > 1.0e-12
+        smoothed = np.where(
+            safe,
+            gaussian_filter(filled, float(smooth_cells))
+            / np.where(safe, denom, 1.0),
+            np.nan,
+        )
+        model = np.ma.masked_invalid(smoothed)
     finite = _finite_slice_values(model)
 
     data_count: np.ndarray | None = None
@@ -461,6 +488,21 @@ def plot_mass_density_slice(
             0.01,
             f"gray: < {min_data_count} data particles (extrapolated);"
             " dashed: data radii",
+            transform=ax.transAxes,
+            fontsize=7,
+            color="0.30",
+            va="bottom",
+        )
+    if smooth_cells is not None and smooth_cells > 0:
+        cell_size = float(x[1] - x[0])
+        sigma = float(smooth_cells) * cell_size
+        formatted = format_display_unit(length_unit)
+        unit_note = f" {formatted}" if formatted else ""
+        ax.text(
+            0.01,
+            0.045 if trusted is not None and not bool(trusted.all()) else 0.01,
+            f"smoothed: Gaussian sigma = {sigma:.2g}{unit_note}"
+            f" ({smooth_cells:g} cells, ~constraint resolution)",
             transform=ax.transAxes,
             fontsize=7,
             color="0.30",
