@@ -36,14 +36,3 @@
 - 科研图改动除测试外还要实际渲染并目视检查；GPU 相关结果明确区分已验证与待验证。
 - 常规验证使用 `ruff check dpjax experiments analysis tests`、CPU pytest、
   `compileall`、CLI help、`uv lock --check` 和 `git diff --check`。
-
-## Changelog 提醒规则
-
-仅在以下情况下，在回复末尾加一句提醒：
-- 执行了 `git push`
-- TODO list 中所有任务变为 completed
-
-提醒内容（固定格式，不展开）：
-> 📝 需要更新 CHANGELOG 吗？运行 `/log` 自动生成。
-
-**不触发**的场景：debug、问答、调参、小修改、无 git 操作的对话。
