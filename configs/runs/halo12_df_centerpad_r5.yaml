@@ -1,0 +1,79 @@
+# Halo12 DF with center hole (r_in=5 kpc) + external padding baseline.
+# Larger center hole than halo12_df_centerpad (r_in=2) to free more capacity
+# for the outer region. Same external padding (r_out=60, sigma=6 kpc) and
+# weight clipping. No sigma clip. DF-only.
+schema: dpjax.run.v2
+name: halo12-df-centerpad-r5
+case: halo12
+output_dir: runs/halo12_df_centerpad_r5
+
+data:
+  path: data/auriga/halo12_all_mass.h5
+  dataset: eta
+  weight_dataset: tracer_weight
+  split:
+    validation_fraction: 0.25
+    seed: 1043
+  preprocessing:
+    clip_sigma: 0.0
+    jitter_std: 0.002
+    r_center_cut: 5.0        # kpc: larger center hole (~46% of particles)
+    r_pad_outer: 60.0        # kpc: external padding boundary
+    pad_sigma_scale: 0.1     # paper: sigma = 0.1 * r_out = 6 kpc
+    w_min: 0.1
+    w_max: 3.0
+    transform:
+      type: none
+      dims: []
+
+df:
+  model: configs/models/df/halo12_ffjord_compact_v1.yaml
+  seed: 43
+
+phi:
+  model: configs/models/phi/halo12_mse_no_output_scale_v1.yaml
+  seed: 42
+
+logging:
+  backend: csv
+  project: deep-potential
+
+execution:
+  resume: false
+  stages:
+    df:
+      multi_gpu: false
+      log_every: 25
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+    phi:
+      multi_gpu: false
+      log_every: 50
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+
+evaluation:
+  system: halo
+  df:
+    enabled: true
+    n_samples_per_model: 262144
+    n_score_points: 32768
+    score_batch_size: 1024
+    seed: 42
+    n_theta_bins: 6
+    n_phi_bins: 8
+    n_velocity_bins: 64
+  phi:
+    enabled: false   # DF-only control
+
+plots:
+  formats: [png, pdf]
+  dpi: 200
+  display_units:
+    length_unit: kpc
+    velocity_unit: 'km\,s^{-1}'
+    potential_unit: '(km\,s^{-1})^2'
+  df:
+    dpi: 200
+  phi:
+    dpi: 200

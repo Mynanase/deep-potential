@@ -1,0 +1,95 @@
+# v6 lam1000: lambda_mass sweep member (probe setup identical to v5:
+# sphere 16384, ramp_frac 0.1). See v5 header for motivation.
+# Changes vs v4 (all on the Phi mass penalty):
+#   - uniform probes: cube -> sphere (isotropic per solid angle), 4096 -> 16384
+#   - ramp finishes at 10% of steps instead of 50%, leaving the low-LR tail
+#     enough steps to remove residual sign violations
+# Motivation: v4 ended with 20.6% negative Laplacian on uniform probes
+# (v3: 11%) and 28.7% negative cells in the z=0 density slice, lopsided
+# toward +y where the data itself carries real extended material
+# (+y half-plane mass 52.5%, r_p99 48.6 kpc). The data-batch penalty pins
+# the Laplacian positive at data points; the surplus negative curvature is
+# displaced into the least-constrained gaps, which the cube-probe geometry
+# and the late ramp made anisotropic.
+# Reuses the v1 DF checkpoint like v4.
+schema: dpjax.run.v2
+name: halo12-clean-outer-clump-v6-lam1000
+case: halo12
+output_dir: runs/halo12/clean-outer-clump-v6-lam1000
+
+data:
+  path: data/auriga/halo12_all_mass_clean_outer_clump.h5
+  dataset: eta
+  weight_dataset: tracer_weight
+  split:
+    validation_fraction: 0.25
+    seed: 1042
+  preprocessing:
+    clip_sigma: 0.0
+    jitter_std: 0.002
+    transform:
+      type: none
+      dims: []
+
+df:
+  model: configs/models/df/halo12_ffjord_compact_v1.yaml
+  seed: 42
+
+phi:
+  model: configs/models/phi/halo12_static_mlp_v3_lam1000.yaml
+  seed: 42
+  df_run: runs/halo12/clean-outer-clump-v1/df
+
+logging:
+  backend: csv
+  project: deep-potential
+
+execution:
+  resume: false
+  stages:
+    df:
+      multi_gpu: true
+      log_every: 25
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+    phi:
+      multi_gpu: true
+      log_every: 50
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+
+evaluation:
+  system: halo
+  df:
+    enabled: false
+    n_samples_per_model: 262144
+    n_score_points: 32768
+    score_batch_size: 1024
+    seed: 42
+    n_theta_bins: 6
+    n_phi_bins: 8
+    n_velocity_bins: 64
+  phi:
+    enabled: true
+    n_eval: 32768
+    batch_size: 4096
+    seed: 0
+    r_min: 0.001
+    r_max: 75.0
+    n_r: 256
+    r_ref: 20.0
+    compute_slice: true
+    slice_grid: 128
+    slice_rmax: 75.0
+
+plots:
+  formats: [png, pdf]
+  dpi: 200
+  display_units:
+    length_unit: kpc
+    velocity_unit: 'km\,s^{-1}'
+    potential_unit: '(km\,s^{-1})^2'
+  df:
+    dpi: 200
+  phi:
+    dpi: 200

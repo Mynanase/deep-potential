@@ -1,0 +1,45 @@
+# v4 a2: probe-density experiment. lambda_mass=250.0,
+# sphere probes 32768 (v6 used 16384). Goal: suppress the
+# between-probe Laplacian ripples (~7 kpc wavelength at 16384 probes,
+# amplitude ~1e5, comparable to the true outer-halo density) by
+# shrinking the constraint-free gap between probes.
+schema: dpjax.model.v1
+kind: phi
+
+potential:
+  hidden_sizes: [512, 512, 512, 512]
+  output_scale: 50000.0
+
+train:
+  optimizer: radam
+  batch_size: 32768
+  epochs: 192
+  loss_type: mse
+  alpha: 1.0
+  beta: 10.0
+  lambda_mass: 250.0
+  mass_batch_size: 4096
+  # v5: 4x denser isotropic uniform probes. The v4 cube domain put ~6.4x
+  # more probes per solid angle along body diagonals than along axes and
+  # left axes unconstrained beyond 75 kpc; a volume-uniform sphere removes
+  # that angular bias. 16384 points raise the outer-shell constraint
+  # density ~4x (v4 ended with 20.6% negative Laplacian on uniform probes).
+  mass_uniform_points: 32768
+  mass_uniform_domain: sphere
+  mass_uniform_r_max: 75.0
+  mass_uniform_weight: 1.0
+  # Short ramp: full penalty weight after 10% of steps so the low-LR tail
+  # has enough steps to remove residual sign violations (v4's 50% ramp left
+  # them stuck at low LR).
+  mass_uniform_weight_start: 0.1
+  mass_uniform_ramp_frac: 0.1
+  l2_reg: 0.001
+  reweight:
+    gamma: 0.0
+    r_ref: 20.0
+  lr:
+    schedule: cosine
+    max: 0.003
+    final: 1.0e-6
+    warmup_frac: 0.03
+  grad_clip: 1.0

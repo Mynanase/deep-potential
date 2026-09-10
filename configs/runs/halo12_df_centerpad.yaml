@@ -1,0 +1,82 @@
+# Halo12 DF with center hole + external padding baseline.
+# - No sigma clip (isolates halo12_df_noclip result as the base).
+# - Center hole: physically removes particles with r < 2 kpc.
+# - External padding (Kalda & Green 2025, sec. 3.4): rolling off particle
+#   weights beyond 60 kpc with a Gaussian of width 0.1 * 60 = 6 kpc, then
+#   clipping weights to [w_min, w_max].
+# DF-only; the Phi stage is declared for schema compatibility and not run.
+schema: dpjax.run.v2
+name: halo12-df-centerpad
+case: halo12
+output_dir: runs/halo12_df_centerpad
+
+data:
+  path: data/auriga/halo12_all_mass.h5
+  dataset: eta
+  weight_dataset: tracer_weight
+  split:
+    validation_fraction: 0.25
+    seed: 1043
+  preprocessing:
+    clip_sigma: 0.0          # no sigma clip (base = noclip run)
+    jitter_std: 0.002
+    r_center_cut: 2.0        # kpc: remove dense central hole
+    r_pad_outer: 60.0        # kpc: external padding boundary
+    pad_sigma_scale: 0.1     # paper: sigma = 0.1 * r_out = 6 kpc
+    w_min: 0.1               # weight clip lower bound (paper)
+    w_max: 3.0               # weight clip upper bound (paper)
+    transform:
+      type: none
+      dims: []
+
+df:
+  model: configs/models/df/halo12_ffjord_compact_v1.yaml
+  seed: 43
+
+phi:
+  model: configs/models/phi/halo12_mse_no_output_scale_v1.yaml
+  seed: 42
+
+logging:
+  backend: csv
+  project: deep-potential
+
+execution:
+  resume: false
+  stages:
+    df:
+      multi_gpu: false
+      log_every: 25
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+    phi:
+      multi_gpu: false
+      log_every: 50
+      checkpoint_every: 500
+      checkpoints_to_keep: 3
+
+evaluation:
+  system: halo
+  df:
+    enabled: true
+    n_samples_per_model: 262144
+    n_score_points: 32768
+    score_batch_size: 1024
+    seed: 42
+    n_theta_bins: 6
+    n_phi_bins: 8
+    n_velocity_bins: 64
+  phi:
+    enabled: false   # DF-only control
+
+plots:
+  formats: [png, pdf]
+  dpi: 200
+  display_units:
+    length_unit: kpc
+    velocity_unit: 'km\,s^{-1}'
+    potential_unit: '(km\,s^{-1})^2'
+  df:
+    dpi: 200
+  phi:
+    dpi: 200
