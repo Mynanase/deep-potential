@@ -104,6 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-*/
 env/
 venv/
 ENV/
@@ -137,6 +138,8 @@ misc/
 
 # Data files
 *.json
+!scripts/auriga/options*.json
+!scripts/auriga/numerical_checks*.json
 
 # Checkpoints
 checkpoints/

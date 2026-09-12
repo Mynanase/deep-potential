@@ -1,0 +1,99 @@
+{
+  "df": {
+    "training_method": "FlowMatching",
+    "seed": 0,
+    "validation_frac": 0.25,
+    "time_scheduler_type": "uniform",
+    "checkpoint_frequency_epochs": 25,
+    "benchmarking_r0": 0,
+    "spatial_flow_opts": {
+      "vector_field_opts": {
+        "type": "MLP",
+        "width": 128,
+        "depth": 3
+      },
+      "n_epochs": 256,
+      "batch_size": 4096,
+      "loss_opts": {
+        "sb_constant": 0.0,
+        "kinetic_reg": 0.0,
+        "jacobian_reg": 0.0
+      },
+      "lr_opts": {
+        "type": "warmup_cosine_decay",
+        "init": 0.001,
+        "final": 1e-05,
+        "warmup_epochs": 1,
+        "global_norm_clip": 1
+      }
+    },
+    "conditional_velocity_flow_opts": {
+      "vector_field_opts": {
+        "type": "MLP",
+        "width": 128,
+        "depth": 3
+      },
+      "n_epochs": 256,
+      "batch_size": 4096,
+      "loss_opts": {
+        "sb_constant": 0.0,
+        "kinetic_reg": 0.0,
+        "jacobian_reg": 0.0
+      },
+      "lr_opts": {
+        "type": "warmup_cosine_decay",
+        "init": 0.001,
+        "final": 1e-05,
+        "warmup_epochs": 1,
+        "global_norm_clip": 1
+      }
+    }
+  },
+  "flow_sampling": {
+    "seed": 1,
+    "n_samples": 262144,
+    "grad_batch_size": 64,
+    "sample_batch_size": 1024
+  },
+  "Phi": {
+    "seed": 2,
+    "potential_nn_opts": {
+      "type": "MLP",
+      "width": 128,
+      "depth": 3
+    },
+    "frameshift_opts": {
+      "omega": 0,
+      "r0": 0,
+      "v0_x": 0,
+      "v0_y": 0,
+      "v0_z": 0,
+      "omega_trainable": false,
+      "r0_trainable": false,
+      "v0_x_trainable": false,
+      "v0_y_trainable": false,
+      "v0_z_trainable": false
+    },
+    "selection_function_opts": null,
+    "n_epochs_noselfn": 256,
+    "n_epochs_selfn": 0,
+    "batch_size": 1024,
+    "validation_frac": 0.25,
+    "checkpoint_frequency_epochs": 25,
+    "lr_opts": {
+      "type": "warmup_cosine_decay",
+      "init": 0.001,
+      "final": 1e-05,
+      "warmup_epochs": 1,
+      "global_norm_clip": 1
+    },
+    "loss_opts": {
+      "alpha": 1,
+      "beta": 1,
+      "lambda_": 1,
+      "gamma": 0,
+      "mu": 0,
+      "l2_potential": 0.01
+    }
+  }
+}

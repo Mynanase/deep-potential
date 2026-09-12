@@ -14,3 +14,6 @@ potential (and of the distribution function).
 This version is implemented in JAX, with some legacy code in Tensorflow 2.x.
 There is an out-of-date PyTorch implementation at
 [tingyuansen/deep-potential](https://github.com/tingyuansen/deep-potential).
+
+For the Auriga Halo12 data adapter, example parameters, and step-by-step
+training instructions, see [scripts/auriga/README.md](scripts/auriga/README.md).

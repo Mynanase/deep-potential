@@ -1,0 +1,29 @@
+{
+  "halo12-smoke": {
+    "n_score": 128,
+    "score_finite_difference_max_abs_error": 0.00024628639221191406,
+    "phi_last_train_loss": 0.28411224484443665,
+    "phi_last_val_loss": 0.26580239087343216,
+    "all_artifact_arrays_finite": true,
+    "sample_radius_range_kpc": [
+      2.125802516937256,
+      30.173992156982422
+    ]
+  },
+  "halo12-pilot": {
+    "n_score": 2048,
+    "score_finite_difference_max_abs_error": 0.0002985149621963501,
+    "phi_last_train_loss": 0.15366016328334808,
+    "phi_last_val_loss": 0.1709519475698471,
+    "all_artifact_arrays_finite": true,
+    "sample_radius_range_kpc": [
+      1.2238242626190186,
+      34.86505889892578
+    ]
+  },
+  "harmonic_cbe_units": {
+    "residual": 0.0,
+    "laplacian": 7.5,
+    "pass": true
+  }
+}

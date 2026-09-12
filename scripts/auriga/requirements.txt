@@ -1,0 +1,25 @@
+# Versions exercised by the Halo12 CPU smoke run (Python 3.11, 2026-09-12).
+-r ../../dpot_requirements.txt
+numpy==2.4.6
+scipy==1.17.1
+matplotlib==3.11.2
+h5py==3.16.0
+astropy==8.0.1
+astropy-healpix==2.0.1
+reproject==0.21.0
+equinox==0.13.8
+optax==0.2.8
+diffrax==0.7.2
+pot==0.9.7.post1
+flowjax==19.1.1
+e3nn-jax==0.21.0
+jax==0.10.2
+jaxlib==0.10.2
+pandas==3.0.5
+tqdm==4.70.1
+cmasher==1.9.2
+progressbar2==4.6.0
+lineax==0.1.1
+optimistix==0.1.0
+paramax==0.0.5
+jaxtyping==0.3.11
