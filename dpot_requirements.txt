@@ -13,3 +13,7 @@ flowjax
 e3nn-jax
 jax
 jaxlib
+pandas
+tqdm
+cmasher
+progressbar2

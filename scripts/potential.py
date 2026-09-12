@@ -926,7 +926,7 @@ def get_phi_loss(
 
     # Punishing negative matter densities
     if lambda_ != 0:
-        prior_neg = jnp.arcsinh(beta * jnp.clip(-d2phi_dq2, a_min=0.0)) / beta
+        prior_neg = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2, 0.0)) / beta
         likelihood = likelihood + lambda_ * prior_neg
 
     if lambda_selection_function != 0 and log_selection_function_model is not None:
@@ -934,12 +934,12 @@ def get_phi_loss(
 
     # Punishing positive matter densities
     if mu != 0:
-        prior_pos = jnp.arcsinh(jnp.clip(d2phi_dq2, a_min=0.0))
+        prior_pos = jnp.arcsinh(jnp.maximum(d2phi_dq2, 0.0))
         likelihood = likelihood + mu * prior_pos
 
     # Punishing positive matter densities linearly
     if gamma != 0:
-        prior_pos = jnp.clip(d2phi_dq2, a_min=0.0)
+        prior_pos = jnp.maximum(d2phi_dq2, 0.0)
         likelihood = likelihood + gamma * prior_pos
 
     loss = jnp.log(jnp.mean(likelihood))
