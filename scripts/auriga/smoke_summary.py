@@ -12,8 +12,9 @@ import numpy as np
 def final_metrics(path):
     with open(path) as f:
         history = json.load(f)
-    out = {"epochs": len(history.get("train", []))}
-    for key in ("train", "val", "train_noreg", "val_noreg"):
+    loss_keys = sorted(k for k in history if k.startswith(("train", "val")))
+    out = {"epochs": max((len(history[k]) for k in loss_keys if k.startswith("train")), default=0)}
+    for key in loss_keys:
         if key in history and len(history[key]):
             out[key] = float(history[key][-1])
             out[key + "_min"] = float(np.min(history[key]))
@@ -49,7 +50,8 @@ def main():
         for path in sorted(model_dir.glob("*_loss.json")):
             m = final_metrics(path)
             line = f"  {subdir}/{path.name}: epochs={m['epochs']}"
-            for key in ("train", "val", "train_noreg", "val_noreg"):
+            for key in sorted(k for k in m
+                              if k.startswith(("train", "val")) and not k.endswith("_min")):
                 if key in m:
                     line += f"  {key}={m[key]:.6g} (min {m[key + '_min']:.6g})"
             print(line)
