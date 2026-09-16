@@ -1,0 +1,1 @@
+/localdisk/kosmos/my-deep-potential/data/auriga/halo12-phi-rmin2.h5

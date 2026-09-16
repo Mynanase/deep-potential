@@ -52,7 +52,7 @@
   "flow_sampling": {
     "seed": 1,
     "n_samples": 262144,
-    "grad_batch_size": 64,
+    "grad_batch_size": 256,
     "sample_batch_size": 1024
   },
   "Phi": {
