@@ -67,6 +67,32 @@ def get_labels_and_keys(is_gaia):
     return labels, ikeys, keys
 
 
+# Dimensions whose coordinate arrays are spatial positions in code length units.
+SPATIAL_DIMS = ('x', 'y', 'z', 'r', 'cylR', 'cylz')
+
+
+def scale_spatial_coords(coords, length_scale, dims=None):
+    """Multiply spatial coordinate arrays by length_scale (code units -> kpc) for display."""
+    if length_scale == 1.0:
+        return coords
+    dims = SPATIAL_DIMS if dims is None else dims
+    return {k: (v * length_scale if k in dims else v) for k, v in coords.items()}
+
+
+def spatial_labels_kpc(labels):
+    """Return a copy of the labels dict with '(kpc)' appended to spatial-dim labels."""
+    out = dict(labels)
+    for k in SPATIAL_DIMS:
+        if 'kpc' not in out[k]:
+            # '$R$' -> '$R\mathrm{\ (kpc)}$' (insert before the closing $ so the
+            # mathtext stays valid); plain labels just get a suffixed unit.
+            if out[k].endswith('$'):
+                out[k] = out[k][:-1] + r'\mathrm{\ (kpc)}$'
+            else:
+                out[k] = out[k] + r'\ \mathrm{(kpc)}'
+    return out
+
+
 def plot_2d_slice_pot(phi_model, coords_ref, dim1, dim2, dim_plot, fig_dir, z_fill=0, attrs=None, fig_fmt=('png',), logscale=True, lims=None, fname_mask=None, is_gaia=True):
     """
     Currently only supports cartesian.
@@ -169,7 +195,7 @@ def plot_2d_slice_pot(phi_model, coords_ref, dim1, dim2, dim_plot, fig_dir, z_fi
 
 
 def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_fmt=('png',),
-                   fname_mask=None, is_gaia=True, value_type='rho'):
+                   fname_mask=None, is_gaia=True, value_type='rho', length_scale=1.0):
     """
     Plots 2D slices of density (rho) or selection function.
 
@@ -185,6 +211,8 @@ def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_
         value_type: 'rho' for density or 'selfn' for selection function
     """
     labels, _, keys = get_labels_and_keys(is_gaia)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
 
     if dim1 not in ['x', 'y', 'z'] or dim2 not in ['x', 'y', 'z']:
         raise ValueError('dim1 and dim2 must be from x,y,z')
@@ -201,6 +229,8 @@ def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_
     caxs = all_axs[0, :]
     axs = all_axs[1, :]
 
+    # Limits and grid in CODE units: the q_grid passed to the model and the mask
+    # (r_in/r_out) must stay in code units. Display copies below are scaled to kpc.
     lims = [get_lims(coords_grid[dim1]), get_lims(coords_grid[dim2])]
     xmin, xmax = lims[0]
     ymin, ymax = lims[1]
@@ -211,11 +241,24 @@ def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_
     y = np.linspace(ymin, ymax, grid_size + 1)
     X, Y = np.meshgrid(0.5 * (x[1:] + x[:-1]), 0.5 * (y[1:] + y[:-1]))
 
+    # Display copies in kpc (only for pcolormesh coordinates and axis limits)
+    x_disp, y_disp = x * length_scale, y * length_scale
+    xmin_disp, xmax_disp = xmin * length_scale, xmax * length_scale
+    ymin_disp, ymax_disp = ymin * length_scale, ymax * length_scale
+
     # Configure based on value type
     if value_type == 'rho':
-        kw = dict(cmap='cmr.rainforest', vmin=0, rasterized=True)
         if is_gaia:
-            kw['vmax'] = 0.15
+            kw = dict(cmap='cmr.rainforest', vmin=0, vmax=0.15, rasterized=True)
+        else:
+            # Log color scale: the central density peak saturates a linear
+            # scale and hides all the lower-density structure in the slice.
+            # Negative model densities (unphysical NN noise) are masked by
+            # LogNorm; render them with the bottom cmap color instead of the
+            # default transparent/white.
+            cmap_rho = matplotlib.colormaps['cmr.rainforest'].copy()
+            cmap_rho.set_bad(cmap_rho(0.0))
+            kw = dict(cmap=cmap_rho, rasterized=True)
         title = '$\\rho_\\mathrm{{\\ (M_\\odot/pc^3)}}$' if is_gaia else '$\\rho_\\mathrm{{model}}$'
         fname_base = f'2d_rho_slices_{dim1}_{dim2}'
     else:  # selfn
@@ -244,34 +287,48 @@ def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_
         values = np.ma.masked_where(mask, values)
         values = np.reshape(values, X.shape)
 
+        if value_type == 'rho' and not is_gaia:
+            pos = values.compressed()
+            pos = pos[pos > 0]
+            if pos.size == 0:
+                # Degenerate slice (no positive values): fall back to a linear scale
+                kw = dict(cmap=cmap_rho, vmin=0, vmax=1.0, rasterized=True)
+            else:
+                vmin = np.nanpercentile(pos, 2)
+                vmax = np.nanpercentile(pos, 99.9)
+                if not np.isfinite(vmin) or vmin <= 0:
+                    vmin = max(vmax / 1e4, 1e-12)
+                kw = dict(cmap=cmap_rho, norm=colors.LogNorm(vmin=vmin, vmax=vmax), rasterized=True)
+
         ax, cax = axs[i], caxs[i]
-        hh = ax.pcolormesh(x, y, values, **kw)
+        hh = ax.pcolormesh(x_disp, y_disp, values, **kw)
 
         # Add text label for the z value
         z_label = keys[keys.index(dim3)] if value_type == 'rho' else labels[dim3].replace('$', '')
         if value_type == 'rho':
-            text = f'${z_label}={z_fill:.2f}$'
+            text = f'${z_label}={z_fill * length_scale:.2f}$'
             if is_gaia:
                 text += ' kpc'
         else:
-            text = f'${z_label}={z_fill:.2f}$'
+            text = f'${z_label}={z_fill * length_scale:.2f}$'
             if is_gaia:
-                text = f'${z_label[0]}={z_fill:.2f}$ kpc'
+                text = f'${z_label[0]}={z_fill * length_scale:.2f}$ kpc'
 
         t = ax.text(0.04, 0.92, text, transform=ax.transAxes, fontsize=8, color='black')
         t.set_bbox(dict(facecolor='white', alpha=0.5, edgecolor='none'))
 
         cb = fig.colorbar(hh, cax=cax, orientation='horizontal')
         cb.ax.xaxis.set_ticks_position('top')
-        cb.ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+        if cb.ax.get_xscale() == 'linear':
+            cb.ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
 
     caxs[1].set_title(title, fontsize=10)
 
     axs[0].set_ylabel(labels[dim2], labelpad=2)
     for ax in axs:
         ax.set_xlabel(labels[dim1], labelpad=0)
-        ax.set_xlim(xmin, xmax)
-        ax.set_ylim(ymin, ymax)
+        ax.set_xlim(xmin_disp, xmax_disp)
+        ax.set_ylim(ymin_disp, ymax_disp)
         ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
         ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(5))
         ax.set_box_aspect(1)
@@ -282,14 +339,14 @@ def plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_
     plt.close(fig)
 
 
-def plot_2d_slices_rho(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_fmt=('png',), fname_mask=None, is_gaia=True):
+def plot_2d_slices_rho(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_fmt=('png',), fname_mask=None, is_gaia=True, length_scale=1.0):
     """Plots 2D slices of density. Wrapper for backward compatibility."""
-    plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir, fig_fmt, fname_mask, is_gaia, value_type='rho')
+    plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir, fig_fmt, fname_mask, is_gaia, value_type='rho', length_scale=length_scale)
 
 
-def plot_2d_slices_selfn(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_fmt=('png',), fname_mask=None, is_gaia=True):
+def plot_2d_slices_selfn(phi_model, coords_grid, dim1, dim2, attrs, fig_dir=None, fig_fmt=('png',), fname_mask=None, is_gaia=True, length_scale=1.0):
     """Plots 2D slices of selection function. Wrapper for backward compatibility."""
-    plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir, fig_fmt, fname_mask, is_gaia, value_type='selfn')
+    plot_2d_slices(phi_model, coords_grid, dim1, dim2, attrs, fig_dir, fig_fmt, fname_mask, is_gaia, value_type='selfn', length_scale=length_scale)
 
 
 def plot_potential_param_evolution(potential_params_hist, fig_dir, fig_fmt=("png",)):
@@ -506,11 +563,13 @@ def plot_2dhist_custom(
                 cax.set_ylabel(cax_label)
 
         # TODO: The following bit of code currently only works when the cax is horizontal..
+        cax_scale = cb.ax.get_xscale() if cax_orientation == 'horizontal' else cb.ax.get_yscale()
         if cax_spacing is not None:
             cb.ax.xaxis.set_major_locator(ticker.MultipleLocator(cax_spacing))
-        else:
+        elif cax_scale == 'linear':
+            # locator_params(nbins=...) is unsupported on logarithmic axes (LogLocator)
             cb.ax.locator_params(nbins=cax_nbins)
-        if cax_minor_auto_frequency is not None:
+        if cax_minor_auto_frequency is not None and cax_scale == 'linear':
             cb.ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(cax_minor_auto_frequency))
 
 
@@ -521,10 +580,17 @@ def plot_2dhist_custom(
     return fig, (ax, cax)
 
 
-def plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('png',), gamma=0.7, is_gaia=True):
+def plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('png',), gamma=0.7, is_gaia=True, length_scale=1.0):
     coef = 1
     if is_gaia:
         coef = (100**2*u.km**2/u.s**2/u.kpc).to(u.km/u.s/u.Myr).value
+
+    # Display coordinates in kpc; acceleration component values stay in code
+    # units. r0 is scaled so the polar grid overlay matches the scaled axes.
+    # NOTE: vcirc-like quantities built from positions (y = sqrt(-R*a_R) in the
+    # vcirc panel) are VALUES, not axes, and must not be scaled.
+    coords_grid_disp = scale_spatial_coords(coords_grid, length_scale)
+    dR = coords_grid['cylR'] - r0  # code units (unused downstream; kept as-is)
 
     fig, axs = plt.subplots(1, 4, figsize=(9, 4), width_ratios=[1, 1, 1, 0.05], layout='compressed')
 
@@ -532,7 +598,6 @@ def plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('pn
 
     kw_line = dict(lw=1, alpha=2/3, color='tab:red')
 
-    dR = coords_grid['cylR'] - r0
     x_coord = (coords_grid['cylphi'] - np.pi)
 
     xlabel = "$(\phi - \pi)R_0$"
@@ -550,37 +615,41 @@ def plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('pn
         fig=fig, ax=axs[0], cax=axs[-1], cmap=cmap,
     )
 
+    # vcirc is a VALUE derived from position x acceleration: build it from the
+    # CODE-unit coordinates, then plot against the kpc-scaled axis coordinate.
     y = np.sqrt(np.abs(-coords_grid['cylR']*acc_components_grid['cylR']))
     if is_gaia:
         y *= 100
 
     xlabel = "$R$"
     ylabel = "$v_\mathrm{circ}=\sqrt{-Ra_R}$"
-    if is_gaia:
+    if is_gaia or length_scale != 1.0:
         xlabel += "$\mathrm{\>(kpc)}$"
+    if is_gaia:
         ylabel += "$\mathrm{\>(km/s)}$"
 
     plot_2dhist_custom(
-        coords_grid['cylR'], y, np.ones(len(coords_grid['cylR'])), operation=np.sum,
+        coords_grid_disp['cylR'], y, np.ones(len(coords_grid['cylR'])), operation=np.sum,
         xlabel=xlabel, ylabel=ylabel,
         norm=colors.PowerNorm(vmin=0, gamma=gamma),
         bins=(81, 128),
-        lims=[get_lims(coords_grid['cylR']), get_lims(y, False)],
+        lims=[get_lims(coords_grid_disp['cylR']), get_lims(y, False)],
         normalize_along_axis=2,
         fig=fig, ax=axs[1], cax=axs[-1], cmap=cmap,
     )
 
     xlabel = "$z$"
     ylabel = "$a_z$"
-    if is_gaia:
+    if is_gaia or length_scale != 1.0:
         xlabel += "$\mathrm{\>(kpc)}$"
+    if is_gaia:
         ylabel += "$\mathrm{\>(km/(s\cdot Myr))}$"
 
     plot_2dhist_custom(
-        coords_grid['z'], coef*acc_components_grid['z'], np.ones(len(coords_grid['cylR'])), operation=np.sum,
+        coords_grid_disp['z'], coef*acc_components_grid['z'], np.ones(len(coords_grid['cylR'])), operation=np.sum,
         xlabel=xlabel, ylabel=ylabel,
         norm=colors.PowerNorm(vmin=0, gamma=gamma), bins=(81, 128),
-        lims=[get_lims(coords_grid['z']), get_lims(coef*acc_components_grid['z'], False)],
+        lims=[get_lims(coords_grid_disp['z']), get_lims(coef*acc_components_grid['z'], False)],
         normalize_along_axis=2,
         fig=fig, ax=axs[2], cax=axs[-1], cmap=cmap,
         cax_label='Normalized count',
@@ -600,12 +669,15 @@ def plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('pn
     return
 
 
-def plot_1d_rho(coords_grid, rho_grid, dim, fig_dir, fig_fmt, gamma=0.7, is_gaia=True):
+def plot_1d_rho(coords_grid, rho_grid, dim, fig_dir, fig_fmt, gamma=0.7, is_gaia=True, length_scale=1.0):
     """
     Makes a 1d plot of the matter density rho as a function of a dimension, marginalizing over the other
     spatial dimensions.
     """
     labels, _, _ = get_labels_and_keys(is_gaia)
+    coords_grid = scale_spatial_coords(coords_grid, length_scale)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
     fig, (ax, cax) = plt.subplots(1, 2, figsize=(3.6, 3), width_ratios=[3, 0.1], layout='compressed')
 
     cmap = 'Greys'
@@ -634,12 +706,15 @@ def plot_1d_rho(coords_grid, rho_grid, dim, fig_dir, fig_fmt, gamma=0.7, is_gaia
         plt.close(fig)
 
 
-def plot_1d_selfn(coords_grid, selfn_grid, dim, fig_dir, fig_fmt, gamma=0.7, is_gaia=True):
+def plot_1d_selfn(coords_grid, selfn_grid, dim, fig_dir, fig_fmt, gamma=0.7, is_gaia=True, length_scale=1.0):
     """
     Makes a 1d plot of the selection function as a function of a dimension,
     marginalizing over the other spatial dimensions.
     """
     labels, _, _ = get_labels_and_keys(is_gaia)
+    coords_grid = scale_spatial_coords(coords_grid, length_scale)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
     fig, (ax, cax) = plt.subplots(1, 2, figsize=(3.6, 3), width_ratios=[3, 0.1], layout='compressed')
 
     cmap = 'Greys'
@@ -680,8 +755,10 @@ def add_polar_grid(ax, r0, radii=None, kw_overwrite=dict()):
         ax.add_patch(circle)
 
 
-def plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('png',), is_gaia=True):
+def plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('png',), is_gaia=True, length_scale=1.0):
     labels, _, _ = get_labels_and_keys(is_gaia)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
     fig, all_axs = plt.subplots(
         2, 3, figsize=(9, 4), width_ratios=[1, 1, 1], height_ratios=[0.2, 3],
         layout='compressed'
@@ -689,19 +766,26 @@ def plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('pn
     axs = all_axs[1,:]
     caxs = all_axs[0,:]
 
-    for ax in axs[:2]:
-        add_polar_grid(ax, r0)
-    add_polar_grid(axs[2], 0, [r0])
-
     cmap = 'RdBu'
     bins = (101, 101)
 
     coef_acc = 1
     if is_gaia:
         coef_acc = (((100*u.km/u.s)**2/u.kpc).to(u.km/u.s/u.Myr)).value
+        # vcirc mixes acceleration and position: compute it from CODE-unit
+        # coordinates BEFORE scaling coords for display.
         acc_components_grid['vcirc'] = 100 * np.sqrt(-acc_components_grid['cylR'] * coords_grid['cylR'])
     else:
         acc_components_grid['vcirc'] = np.sqrt(-acc_components_grid['cylR'] * coords_grid['cylR'])
+
+    # Display coordinates in kpc; acceleration/vcirc values stay as-is.
+    # r0 is scaled so the polar grid overlay matches the scaled axes.
+    coords_grid = scale_spatial_coords(coords_grid, length_scale)
+    r0 = r0 * length_scale
+
+    for ax in axs[:2]:
+        add_polar_grid(ax, r0)
+    add_polar_grid(axs[2], 0, [r0])
 
 
     def get_xyz(dimx, dimy, dimz, dimval):
@@ -770,8 +854,13 @@ def plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=None, fig_fmt=('pn
         plt.close(fig)
 
 
-def plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=None, fig_fmt=('png',), is_gaia=True):
+def plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=None, fig_fmt=('png',), is_gaia=True, length_scale=1.0):
     labels, _, _ = get_labels_and_keys(is_gaia)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
+    # Display coordinates in kpc (axes, extents and the z-integration window);
+    # rho values and the LogNorm color_kw logic below are coordinate-independent.
+    coords_grid = scale_spatial_coords(coords_grid, length_scale)
     fig, all_axs = plt.subplots(
         2, 3, figsize=(9, 4), width_ratios=[1, 1, 1], height_ratios=[0.15, 3],
         layout='compressed'
@@ -779,7 +868,13 @@ def plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=None, fig_fmt=('png',), is_ga
     axs = all_axs[1,:]
     caxs = all_axs[0,:]
 
-    cmap = 'cmr.rainforest'
+    if is_gaia:
+        cmap = 'cmr.rainforest'
+    else:
+        # LogNorm masks nonpositive binned means (negative-density noise);
+        # render them with the bottom cmap color instead of transparent/white.
+        cmap = matplotlib.colormaps['cmr.rainforest'].copy()
+        cmap.set_bad(cmap(0.0))
 
     def get_xyz(dimx, dimy, dimz):
         z_lim = get_lims(coords_grid[dimz])
@@ -799,30 +894,69 @@ def plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=None, fig_fmt=('png',), is_ga
     bins = (161, 161)
 
     x, y, values, xlabel, ylabel, z_lim = get_xyz('x', 'y', 'z')
+    if is_gaia:
+        color_kw = dict(vmin=0, vmax=vmax)
+    else:
+        pos = values[values > 0]
+        if pos.size == 0:
+            # Degenerate panel (no positive values): fall back to a linear scale
+            color_kw = dict(vmin=0, vmax=1.0)
+        else:
+            vmin = np.nanpercentile(pos, 2)
+            vmax_p = np.nanpercentile(pos, 99.9)
+            if not np.isfinite(vmin) or vmin <= 0:
+                vmin = max(vmax_p / 1e4, 1e-12)
+            color_kw = dict(norm=colors.LogNorm(vmin=vmin, vmax=vmax_p))
     plot_2dhist_custom(
         x, y, values, operation=np.mean,
         xlabel=xlabel, ylabel=ylabel,
         bins=bins, lims=[get_lims(x), get_lims(y)],
         fig=fig, ax=axs[0], cax=caxs[0], cmap=cmap, cax_orientation='horizontal', rotate_cax_label=False,
-        cax_label=cax_label + f', ${z_lim[0]} < z < {z_lim[1]}$', vmin=0, vmax=vmax, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
+        cax_label=cax_label + f', ${z_lim[0]} < z < {z_lim[1]}$', **color_kw, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
     )
 
     x, y, values, xlabel, ylabel, z_lim = get_xyz('y', 'z', 'x')
+    if is_gaia:
+        color_kw = dict(vmin=0, vmax=vmax)
+    else:
+        pos = values[values > 0]
+        if pos.size == 0:
+            # Degenerate panel (no positive values): fall back to a linear scale
+            color_kw = dict(vmin=0, vmax=1.0)
+        else:
+            vmin = np.nanpercentile(pos, 2)
+            vmax_p = np.nanpercentile(pos, 99.9)
+            if not np.isfinite(vmin) or vmin <= 0:
+                vmin = max(vmax_p / 1e4, 1e-12)
+            color_kw = dict(norm=colors.LogNorm(vmin=vmin, vmax=vmax_p))
     plot_2dhist_custom(
         x, y, values, operation=np.mean,
         xlabel=xlabel, ylabel=ylabel,
         bins=bins, lims=[get_lims(x), get_lims(y)],
         fig=fig, ax=axs[1], cax=caxs[1], cmap=cmap, cax_orientation='horizontal', rotate_cax_label=False,
-        cax_label=cax_label + f', ${z_lim[0]} < x < {z_lim[1]}$', vmin=0, vmax=vmax, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
+        cax_label=cax_label + f', ${z_lim[0]} < x < {z_lim[1]}$', **color_kw, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
     )
 
     x, y, values, xlabel, ylabel, z_lim = get_xyz('x', 'z', 'y')
+    if is_gaia:
+        color_kw = dict(vmin=0, vmax=vmax)
+    else:
+        pos = values[values > 0]
+        if pos.size == 0:
+            # Degenerate panel (no positive values): fall back to a linear scale
+            color_kw = dict(vmin=0, vmax=1.0)
+        else:
+            vmin = np.nanpercentile(pos, 2)
+            vmax_p = np.nanpercentile(pos, 99.9)
+            if not np.isfinite(vmin) or vmin <= 0:
+                vmin = max(vmax_p / 1e4, 1e-12)
+            color_kw = dict(norm=colors.LogNorm(vmin=vmin, vmax=vmax_p))
     plot_2dhist_custom(
         x, y, values, operation=np.mean,
         xlabel=xlabel, ylabel=ylabel,
         bins=bins, lims=[get_lims(x), get_lims(y)],
         fig=fig, ax=axs[2], cax=caxs[2], cmap=cmap, cax_orientation='horizontal', rotate_cax_label=False,
-        cax_label=cax_label + f', ${z_lim[0]} < y < {z_lim[1]}$', vmin=0, vmax=vmax, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
+        cax_label=cax_label + f', ${z_lim[0]} < y < {z_lim[1]}$', **color_kw, cax_nbins=cax_nbins, cax_minor_auto_frequency=5
     )
 
     for ax in axs:
@@ -841,7 +975,9 @@ def get_potential_dfdt(phi_model, df_data, dphi_dq):
     """ Returns the \partial f/\partial t predicted by the potential in the associated rotating frame.
     """
     eta = df_data['eta']
-    df_deta = df_data['dlnf_deta'] * np.exp(df_data['lnf'])
+    # lnf may be (N,) or (N,1) depending on the pipeline version; reshape for broadcasting
+    lnf = np.asarray(df_data['lnf']).reshape(-1, 1)
+    df_deta = df_data['dlnf_deta'] * np.exp(lnf)
 
     fs = phi_model.frameshift_model
     model_omega = float(fs.omega)
@@ -861,8 +997,10 @@ def get_potential_dfdt(phi_model, df_data, dphi_dq):
     return pdf_dt_CBE - pdf_dt_stat
 
 
-def plot_dfdt_comparison(phi_model, df_data, coords, acc, dim1, dim2, grid_size=64, idx=None, fig_dir=None, fig_fmt=('png',), is_gaia=True):
+def plot_dfdt_comparison(phi_model, df_data, coords, acc, dim1, dim2, grid_size=64, idx=None, fig_dir=None, fig_fmt=('png',), is_gaia=True, length_scale=1.0):
     labels, _, _ = get_labels_and_keys(is_gaia)
+    if length_scale != 1.0:
+        labels = spatial_labels_kpc(labels)
 
     if idx is None:
         idx = np.full(len(acc), True)
@@ -880,6 +1018,10 @@ def plot_dfdt_comparison(phi_model, df_data, coords, acc, dim1, dim2, grid_size=
     def get_coef_and_lims(dim):
         coef = 1
         is_spatial = True
+        if dim in SPATIAL_DIMS:
+            # Spatial display coords are in kpc; velocity dims stay dimensionless
+            # (or km/s for is_gaia=True).
+            coef *= length_scale
         if '(km/s)' in labels[dim] and is_gaia:
             coef = 100
             is_spatial = False
@@ -926,7 +1068,8 @@ def plot_dfdt_comparison(phi_model, df_data, coords, acc, dim1, dim2, grid_size=
     )
     cb = fig.colorbar(im, cax=caxs[0], orientation='horizontal')
     cb.ax.xaxis.set_ticks_position('top')
-    cb.ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
+    if cb.ax.get_xscale() == 'linear':
+        cb.ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(5))
 
     title = 'Inverse timescale of non-stationarities\n$\partial \ln f / \partial t$'
     if is_gaia:
@@ -1048,7 +1191,7 @@ def create_random_grid(attrs_train, fname_mask, n_points=100000, batch_size=-1, 
     return q_grids[:n_grid]
 
 
-def benchmark_potential(phi_model, loss_history, fname_mask, data_train, attrs_train, df_data, spherical_origin=(0.0, 0.0, 0.0), cylindrical_origin=(8.277, 0.0, 0.0), fig_fmt=('png',), checkpoint_index=None, is_gaia=True):
+def benchmark_potential(phi_model, loss_history, fname_mask, data_train, attrs_train, df_data, spherical_origin=(0.0, 0.0, 0.0), cylindrical_origin=(8.277, 0.0, 0.0), fig_fmt=('png',), checkpoint_index=None, is_gaia=True, length_scale=1.0):
     if checkpoint_index is None:
         checkpoint_index = phi_model.checkpoint_index
     save_dir = Path(str(phi_model.model_dir).replace('models', 'plots'))
@@ -1079,7 +1222,7 @@ def benchmark_potential(phi_model, loss_history, fname_mask, data_train, attrs_t
     print("Generating a grid of potential values ...")
     # If attrs_train doesn't have outer and inner radii, then we set them here
     if 'r_out' not in attrs_train:
-        attrs_train['r_out'] = np.percentile(np.sum(data_train['eta'][:,:3]**2, axis=1)**0.5, 99)
+        attrs_train['r_out'] = np.nanpercentile(np.sum(data_train['eta'][:,:3]**2, axis=1)**0.5, 99)
     if 'r_in' not in attrs_train:
         attrs_train['r_in'] = 0
     print(f"Using r_in={attrs_train['r_in']:.3f} kpc and r_out={attrs_train['r_out']:.3f} kpc for the grid")
@@ -1108,34 +1251,34 @@ def benchmark_potential(phi_model, loss_history, fname_mask, data_train, attrs_t
     if has_selfn:
         print("Plotting 2D histogram of selection function slices ...")
         for dim1, dim2 in [('x', 'y'), ('x', 'z'), ('y', 'z')]:
-            plot_2d_slices_selfn(phi_model, coords_grid, dim1, dim2, attrs_train, fig_dir=save_dir, fig_fmt=fig_fmt, fname_mask=fname_mask, is_gaia=is_gaia)
+            plot_2d_slices_selfn(phi_model, coords_grid, dim1, dim2, attrs_train, fig_dir=save_dir, fig_fmt=fig_fmt, fname_mask=fname_mask, is_gaia=is_gaia, length_scale=length_scale)
 
         print("Plotting 1D histogram of selection function ...")
         for dim in ['x', 'y', 'z', 'r', 'cylR', 'cylphi']:
-            plot_1d_selfn(coords_grid, selfn_grid, dim, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia)
+            plot_1d_selfn(coords_grid, selfn_grid, dim, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia, length_scale=length_scale)
 
     print("Plotting 1D histogram of accelerations ...")
-    plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia)
+    plot_1d_acc(coords_grid, acc_components_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia, length_scale=length_scale)
 
     print("Plotting 1D histogram of matter density ...")
     for dim in ['x', 'y', 'z', 'r', 'cylR', 'cylphi']:
-        plot_1d_rho(coords_grid, rho_grid, dim, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia)
+        plot_1d_rho(coords_grid, rho_grid, dim, fig_dir=save_dir, fig_fmt=fig_fmt, gamma=0.7, is_gaia=is_gaia, length_scale=length_scale)
 
     print("Plotting 2D histogram of matter density slices ...")
     for dim1, dim2 in [('x', 'y'), ('x', 'z'), ('y', 'z')]:
-        plot_2d_slices_rho(phi_model, coords_grid, dim1, dim2, attrs_train, fig_dir=save_dir, fig_fmt=fig_fmt, fname_mask=fname_mask, is_gaia=is_gaia)
+        plot_2d_slices_rho(phi_model, coords_grid, dim1, dim2, attrs_train, fig_dir=save_dir, fig_fmt=fig_fmt, fname_mask=fname_mask, is_gaia=is_gaia, length_scale=length_scale)
 
     print("Plotting 2D integrated histograms of accelerations ...")
-    plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia)
+    plot_2d_acc(coords_grid, acc_components_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia, length_scale=length_scale)
 
     print("Plotting 2D integrated histograms of densities ...")
-    plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia)
+    plot_2d_rho(coords_grid, rho_grid, r0, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia, length_scale=length_scale)
 
     phi, acc, rho = utils.get_model_values(phi_model, df_data['eta'][:,:3], convert_rho_to_msunpc3=is_gaia) # , fname=save_dir / 'potential_train_values.npz')
     print("Plotting 2D marginals of non-stationarities ...")
     for dim1, dim2 in [('x', 'y'), ('z', 'vz'), ('cylvR', 'cylvT')]:
         # Make the plot for the innermost 50% of the radii
         idx = (np.sum(df_data['eta'][:,:3]**2, axis=1)**0.5 < 0.5 * attrs_train['r_out'])
-        plot_dfdt_comparison(phi_model, df_data, coords_df_eta, acc, dim1, dim2, grid_size=64, idx=idx, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia)
+        plot_dfdt_comparison(phi_model, df_data, coords_df_eta, acc, dim1, dim2, grid_size=64, idx=idx, fig_dir=save_dir, fig_fmt=fig_fmt, is_gaia=is_gaia, length_scale=length_scale)
 
     return

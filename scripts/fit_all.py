@@ -671,7 +671,10 @@ def main():
             loss_history, spherical_origin, cylindrical_origin,
             n_samples=args.basic_flow_benchmarking_n_samples,
             skip_loss_calculation=args.basic_flow_benchmarking_skip_loss_calculation,
-            fig_fmt=args.basic_flow_benchmarking_fig_fmt
+            fig_fmt=args.basic_flow_benchmarking_fig_fmt,
+            length_scale=float(attrs.get('length_scale_kpc', 1.0)),
+            velocity_scale=float(attrs.get('velocity_scale_kms', 1.0)),
+            is_gaia=args.basic_potential_benchmarking_gaia_units
         )
 
     # Exit if nothing else needs to be done
@@ -756,6 +759,7 @@ def main():
             fname_mask, data, attrs, df_data,
             spherical_origin, cylindrical_origin,
             is_gaia=args.basic_potential_benchmarking_gaia_units,
+            length_scale=float(attrs.get('length_scale_kpc', 1.0)),
         )
 
     return 0

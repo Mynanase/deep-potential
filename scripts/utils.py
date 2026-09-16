@@ -131,7 +131,9 @@ def load_training_data(
     data = {}
     if ext in (".h5", ".hdf5"):
         with h5py.File(fname, "r") as f:
-            attrs = dict(f["eta"].attrs.items())
+            attrs = dict(f.attrs.items())
+            # Dataset-level attrs take precedence over file-level attrs
+            attrs.update(dict(f["eta"].attrs.items()))
 
             data["eta"] = f["eta"][:].astype("f4")
             if "weights" in f.keys():

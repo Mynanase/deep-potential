@@ -12,7 +12,7 @@ import json
 import utils
 
 
-def plot_simple_1d_marginal(coords_sample, coords_train, weights_train, *dims, lims=None, n_rows=1, fig_dir=None, fname=None, fig_fmt=('png',)):
+def plot_simple_1d_marginal(coords_sample, coords_train, weights_train, *dims, lims=None, n_rows=1, fig_dir=None, fname=None, fig_fmt=('png',), length_scale=1.0, velocity_scale=1.0, is_gaia=False):
     """
     Plots 1D marginal distributions for a given set of dimensions, including a z-score (pull) plot
     for each marginal to compare the 'data' and 'flow' distributions.
@@ -58,13 +58,16 @@ def plot_simple_1d_marginal(coords_sample, coords_train, weights_train, *dims, l
 
     # --- Data Extraction and Preparation ---
     def extract_dim(dim):
-        # Apply scaling coefficients for velocities and angle conversions
+        # Apply scaling coefficients to convert dimensionless eta units back to
+        # physical units (kpc, km/s) for plotting
         coef = 1
         if dim in ['cylvR', 'cylvz', 'cylvT', 'vx', 'vy', 'vz', 'vr', 'vth', 'vT']:
-            coef = 100
+            coef = velocity_scale
+        if dim in ['x', 'y', 'z', 'r', 'cylR', 'cylz']:
+            coef = length_scale
         if dim in ['phi', 'cylphi']:
             coef = 180 / np.pi
-        if dim in ['cylvT']:
+        if dim in ['cylvT'] and is_gaia:
             coef *= -1
         return coef * coords_train[dim], coef * coords_sample[dim]
 
@@ -79,7 +82,7 @@ def plot_simple_1d_marginal(coords_sample, coords_train, weights_train, *dims, l
     if lims is None:
         lims = []
         for dim, x_train in zip(dims, x_trains):
-            low, high = np.percentile(x_train, [1, 99])
+            low, high = np.nanpercentile(x_train, [1, 99])
             width = np.abs(high - low) * 0.2
             lim = [low - width, high + width]
             # Override with default limits for specific dimensions
@@ -191,7 +194,7 @@ def plot_simple_1d_marginal(coords_sample, coords_train, weights_train, *dims, l
         plt.close(fig)
 
 
-def plot_simple_2d_marginal(coords_sample, coords_train, weights_train, dim1, dim2, lims=None, cmap='viridis', logscale=False, fig_dir=None, fig_fmt=('png',)):
+def plot_simple_2d_marginal(coords_sample, coords_train, weights_train, dim1, dim2, lims=None, cmap='viridis', logscale=False, fig_dir=None, fig_fmt=('png',), length_scale=1.0, velocity_scale=1.0, is_gaia=False):
     labels = [
         '$R\mathrm{\ (kpc)}$', '$z\mathrm{\ (kpc)}$', r'cylindrical $\phi$ (deg)', '$v_R\mathrm{\ (km/s)}$', '$v_z\mathrm{\ (km/s)}$', r'$v_{\phi}\mathrm{\ (km/s)}$',
         '$x\mathrm{\ (kpc)}$', '$y\mathrm{\ (kpc)}$', '$z\mathrm{\ (kpc)}$', '$v_x\mathrm{\ (km/s)}$', '$v_y\mathrm{\ (km/s)}$', '$v_z\mathrm{\ (km/s)}$',
@@ -214,10 +217,16 @@ def plot_simple_2d_marginal(coords_sample, coords_train, weights_train, dim1, di
     caxs = all_axs[0,:]
 
     def extract_dims(dim):
-        coef = 100 if dim in ['cylvR', 'cylvz', 'cylvT', 'vx', 'vy', 'vz'] else 1
+        # Apply scaling coefficients to convert dimensionless eta units back to
+        # physical units (kpc, km/s) for plotting
+        coef = 1
+        if dim in ['cylvR', 'cylvz', 'cylvT', 'vx', 'vy', 'vz', 'vr', 'vth', 'vT']:
+            coef = velocity_scale
+        if dim in ['x', 'y', 'z', 'r', 'cylR', 'cylz']:
+            coef = length_scale
         if dim in ['phi']:
             coef = 180/np.pi
-        if dim in ['cylvT']:
+        if dim in ['cylvT'] and is_gaia:
             coef *= -1
 
         return coef*coords_train[dim], coef*coords_sample[dim]
@@ -229,8 +238,8 @@ def plot_simple_2d_marginal(coords_sample, coords_train, weights_train, dim1, di
     if lims is None:
         # Take the 1th and 99th percentile
         lims = [
-            [np.percentile(x_train, 1), np.percentile(x_train, 99)],
-            [np.percentile(y_train, 1), np.percentile(y_train, 99)]
+            [np.nanpercentile(x_train, 1), np.nanpercentile(x_train, 99)],
+            [np.nanpercentile(y_train, 1), np.nanpercentile(y_train, 99)]
         ]
         k = 0.2
         for lim in lims:
@@ -250,25 +259,41 @@ def plot_simple_2d_marginal(coords_sample, coords_train, weights_train, dim1, di
     n_sample = len(x_sample)
 
     if logscale:
-        kw_col = dict(cmap=cmap, norm=colors.LogNorm(vmin=1, vmax=3000))
+        # Shared log color scale over both panels: compute the train histogram
+        # first, then set the norm from its robust range so the two panels are
+        # directly comparable and low-count regions stay visible next to the
+        # (much higher) central disk density.
+        kw_hist = dict(range=lims_ordered, bins=64)
+        nt_pre, _, _ = np.histogram2d(x_train, y_train, weights=weights_train, **kw_hist)
+        vmin = 1.0
+        vmax = max(np.nanpercentile(nt_pre[nt_pre > 0], 99.9), vmin * 10)
+        kw_col = dict(cmap=cmap, norm=colors.LogNorm(vmin=vmin, vmax=vmax))
+        vmax = None
     else:
         kw_col = dict(cmap=cmap)
+        vmax = None
 
-    #vmax = np.max(np.histogram2d(x_train, y_train, **kw)[0])
-    vmax = None
     kw['rasterized'] = True
-    nt, _, _, im = axs[0].hist2d(x_train, y_train, weights=weights_train, **kw, **kw_col, vmax=vmax, vmin=0)
+    nt, _, _, im = axs[0].hist2d(x_train, y_train, weights=weights_train, **kw, **kw_col, vmax=vmax, vmin=0 if not logscale else None)
     cb = fig.colorbar(im, cax=caxs[0], orientation='horizontal')
     cb.ax.xaxis.set_ticks_position('top')
 
-    ns,_,_,im = axs[1].hist2d(x_sample, y_sample, **kw, **kw_col, weights=np.full(len(x_sample), n_train/n_sample), vmax=vmax, vmin=0)
+    ns,_,_,im = axs[1].hist2d(x_sample, y_sample, **kw, **kw_col, weights=np.full(len(x_sample), n_train/n_sample), vmax=vmax, vmin=0 if not logscale else None)
     ns *= n_sample/n_train
     cb = fig.colorbar(im, cax=caxs[1], orientation='horizontal')
     cb.ax.xaxis.set_ticks_position('top')
 
     dn = ns/n_sample - nt/n_train
+    # Poisson significance of the sample counts vs the data expectation.
+    # ns is back in raw sample counts; the expected count in each bin is
+    # lambda = (nt/n_train) * n_sample. dn is the difference in fractions,
+    # so sigma = (ns - lambda)/sqrt(lambda) = dn * n_sample / sqrt(lambda).
+    # The old form (dn * n_train / sqrt(ns * n_train/n_sample)) was wrong on
+    # two counts: it normalized by the observed count ns instead of the
+    # expectation lambda, and scaled by n_train instead of n_sample.
     with np.errstate(divide='ignore', invalid='ignore'):
-        dn /= np.sqrt(ns * (n_train/n_sample)) / n_train
+        lam = (nt/n_train) * n_sample
+        dn *= n_sample / np.sqrt(lam)
     vmax = 5.
 
     im = axs[2].imshow(
@@ -328,26 +353,29 @@ def value_and_grad_fn(model, eta_batch):
     return jax.vmap(eqx.filter_value_and_grad(model.log_prob))(eta_batch)
 
 
-def do_plots(coords_sample, coords_train, weights_train, fig_dir, fig_fmt=('png',)):
+def do_plots(coords_sample, coords_train, weights_train, fig_dir, fig_fmt=('png',), length_scale=1.0, velocity_scale=1.0, is_gaia=False):
     # Cartesian projections
     plot_simple_1d_marginal(
         coords_sample, coords_train, weights_train,
         'x', 'y', 'z', 'vx', 'vy', 'vz',
-        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_cartesian', fig_fmt=fig_fmt
+        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_cartesian', fig_fmt=fig_fmt,
+        length_scale=length_scale, velocity_scale=velocity_scale, is_gaia=is_gaia
     )
 
     # Spherical projections
     plot_simple_1d_marginal(
         coords_sample, coords_train, weights_train,
         'r', 'phi', 'cth', 'vr', 'vT', 'vth',
-        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_spherical', fig_fmt=fig_fmt
+        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_spherical', fig_fmt=fig_fmt,
+        length_scale=length_scale, velocity_scale=velocity_scale, is_gaia=is_gaia
     )
 
     # Cylindrical projections
     plot_simple_1d_marginal(
         coords_sample, coords_train, weights_train,
         'cylR', 'cylz', 'cylphi', 'cylvR', 'cylvz', 'cylvT',
-        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_cylindrical', fig_fmt=fig_fmt
+        n_rows=2, fig_dir=fig_dir, fname='1d_sample_density_cylindrical', fig_fmt=fig_fmt,
+        length_scale=length_scale, velocity_scale=velocity_scale, is_gaia=is_gaia
     )
 
     print("Saved 1d sample density plots")
@@ -360,7 +388,8 @@ def do_plots(coords_sample, coords_train, weights_train, fig_dir, fig_fmt=('png'
     ]:
         plot_simple_2d_marginal(
             coords_sample, coords_train, weights_train,
-            dim1=dim1, dim2=dim2, cmap='viridis', fig_dir=fig_dir, fig_fmt=fig_fmt
+            dim1=dim1, dim2=dim2, cmap='viridis', logscale=True, fig_dir=fig_dir, fig_fmt=fig_fmt,
+            length_scale=length_scale, velocity_scale=velocity_scale, is_gaia=is_gaia
         )
 
     print("Saved 2d sample density plots")
@@ -368,7 +397,8 @@ def do_plots(coords_sample, coords_train, weights_train, fig_dir, fig_fmt=('png'
 
 def benchmark(
     flow_model, key, time_logger, train_data, val_data, loss_history, spherical_origin=(0.0, 0.0, 0.0),
-    cylindrical_origin=(8.277, 0.0, 0.0), fig_fmt=('png',), n_samples=100000, skip_loss_calculation=False
+    cylindrical_origin=(8.277, 0.0, 0.0), fig_fmt=('png',), n_samples=100000, skip_loss_calculation=False,
+    length_scale=1.0, velocity_scale=1.0, is_gaia=False
 ):
     """
     For benchmarking we do the following, while keeping track how much time each
@@ -489,7 +519,8 @@ def benchmark(
     coords_sample = utils.calc_coords(samples, spherical_origin, cylindrical_origin)
     coords_train = utils.calc_coords(train_data["eta"], spherical_origin, cylindrical_origin)
 
-    do_plots(coords_sample, coords_train, train_data["weights"], save_dir, fig_fmt)
+    do_plots(coords_sample, coords_train, train_data["weights"], save_dir, fig_fmt,
+             length_scale=length_scale, velocity_scale=velocity_scale, is_gaia=is_gaia)
 
     # Calculating gradients
     n_samples = 1000
@@ -568,4 +599,6 @@ if __name__ == '__main__':
     coords_sample = utils.calc_coords(samples, spherical_origin, cylindrical_origin)
     coords_train = utils.calc_coords(train_data["eta"], spherical_origin, cylindrical_origin)
 
-    do_plots(coords_sample, coords_train, train_data["weights"], fig_dir, args.fig_fmt)
+    do_plots(coords_sample, coords_train, train_data["weights"], fig_dir, args.fig_fmt,
+             length_scale=float(attrs.get('length_scale_kpc', 1.0)),
+             velocity_scale=float(attrs.get('velocity_scale_kms', 1.0)))
