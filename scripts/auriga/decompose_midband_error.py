@@ -119,10 +119,9 @@ def main():
     R_model = A - np.sum(g_phi * dlnf[:, 3:], axis=1)
 
     truth = load_truth(args.truth)
-    m_cum = np.r_[0.0, truth["M_cum_total"]]  # at r_edges[1:]
     r_edges = truth["r_edges"]
     M_at = lambda rr: np.interp(rr, r_edges[1:], truth["M_cum_total"])
-    a_true = G_KPC_KMS2_MSUN * M_at(r_kpc) / r_kpc ** 2
+    a_true = -G_KPC_KMS2_MSUN * M_at(r_kpc) / r_kpc ** 2  # inward sign
 
     rows = []
     print()
@@ -153,7 +152,12 @@ def main():
         for spec in args.alt_flow:
             label, flow_dir = spec.split("=", 1)
             print(f"evaluating alt flow {label} at {len(idx)} points ...")
-            flow = fit_all.load_flow(flow_dir, checkpoint_index=-1)
+            prev2 = bool(jax.config.jax_enable_x64)
+            jax.config.update("jax_enable_x64", False)
+            try:
+                flow = fit_all.load_flow(flow_dir, checkpoint_index=-1)
+            finally:
+                jax.config.update("jax_enable_x64", prev2)
             d_alt = flow_grads(flow, eta_sub)
             A2 = np.sum(eta_sub[:, 3:] * d_alt[:, :3], axis=1)
             C2 = np.sum(d_alt[:, 3:] * (eta_sub[:, :3] / np.linalg.norm(eta_sub[:, :3], axis=1, keepdims=True)), axis=1)
