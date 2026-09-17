@@ -325,6 +325,37 @@ def gen_halfsplit_bin(gen_b, rng, b_split):
 # ----------------------------------------------------------------------
 # 2. model-dependent part: fresh conditional draws at the held-out positions
 # ----------------------------------------------------------------------
+def protocol_consistency(gen_k4, gen_k1, v_true, w_pos, ir, n_bins, k, rel_tol=0.15):
+    """Agreement between two sample sets of the SAME model at the SAME positions.
+
+    `gen_k4` maps a model name to its (n, K, 3) fresh spherical draws and
+    `gen_k1` to its (n, 3) persisted single draw -- a different Monte-Carlo
+    realization of the same conditional.  Every bin and component must agree to
+    well inside that component's own spread.  Nothing here is a scientific
+    statement: it is the guard that catches a sampling basis or unit mistake
+    before any table is written.  Returns the worst mismatch per model (km/s).
+    """
+    worst = {}
+    for m, g4 in gen_k4.items():
+        w_ = 0.0
+        for b in range(n_bins):
+            mb = ir == b
+            rec4 = component_stats(v_true[mb], w_pos[mb], g4[mb].reshape(-1, 3),
+                                   np.repeat(w_pos[mb], k) / k)
+            rec1 = component_stats(v_true[mb], w_pos[mb],
+                                   gen_k1[m][mb].reshape(-1, 3), w_pos[mb])
+            for n in COMP:
+                d = abs(rec4[n]["w1"] - rec1[n]["w1"])
+                tol = rel_tol * rec4[n]["sigma_true"]
+                assert d < tol, (
+                    f"{m} bin{b} {n}: the K={k} and K=1 samples of the same model"
+                    f" disagree by {d:.2f} km/s (allowed {tol:.2f}); check the"
+                    f" sampling basis and units before trusting any table")
+                w_ = max(w_, d)
+        worst[m] = w_
+    return worst
+
+
 def load_context():
     """Import the training-side stack and the loader (GPU host only)."""
     sys.path.insert(0, str(REPO / "scripts"))
@@ -690,6 +721,25 @@ def main(argv=None):
               f"  N_eff={n_eff(w_pos[mb]):8.1f}  mass_frac={w_pos[mb].sum() / w_pos.sum():.4f}",
               flush=True)
 
+    # The persisted full-coverage single draw of the same models, when the
+    # phase-1 audit products are on this host.  It is a second Monte-Carlo
+    # realization of the same conditional, so it both cross-checks the fresh
+    # draws (protocol_consistency, run per model as soon as it is sampled) and
+    # is reported as its own sample set.
+    gen_k1 = {}
+    for m in MODELS:
+        f = AUDIT_DIR / f"model_{m}.npz"
+        if not f.exists():
+            print(f"WARNING: {f} missing -> no k1 comparison for {m}", flush=True)
+            continue
+        with np.load(f) as d:
+            v_cart = d["vel_samples_all"]
+        assert v_cart.shape[0] == len(pos), (m, v_cart.shape)
+        gen_k1[m], _ = sph_vel(pos, v_cart)
+        del v_cart
+    if gen_k1:
+        print(f"k1 comparison sample loaded for {sorted(gen_k1)}", flush=True)
+
     # ---------------------------------------------------------------- samples
     eqx = jax = jnp = fit_all = None
     rng = np.random.default_rng(SEED)
@@ -708,24 +758,16 @@ def main(argv=None):
             assert deg_gen["n_degenerate_r"] == deg["n_degenerate_r"]
             assert deg_gen["n_degenerate_R"] == deg["n_degenerate_R"]
             print(f"  {tag}: {time.time() - t1:.0f}s", flush=True)
+            if ck == FINAL_CKPT and m in gen_k1:
+                worst = protocol_consistency({m: gen_late[(m, ck)]}, gen_k1, v_true,
+                                             w_pos, ir, n_bins, K_DRAWS)[m]
+                print(f"  protocol consistency {m}: max |W1(k4)-W1(k1)| ="
+                      f" {worst:.3f} km/s (inside 15% of each spread)", flush=True)
 
     gen = {(m, FINAL_CKPT): gen_late[(m, FINAL_CKPT)] for m in MODELS}
 
     # cross-check: the persisted full-coverage single draw of the phase-1 audit
-    gen_k1 = {}
-    for m in MODELS:
-        f = AUDIT_DIR / f"model_{m}.npz"
-        if not f.exists():
-            print(f"WARNING: {f} missing -> no k1 cross-check for {m}", flush=True)
-            continue
-        with np.load(f) as d:
-            v_cart = d["vel_samples_all"]
-        assert v_cart.shape[0] == len(pos), (m, v_cart.shape)
-        v_sph, _ = sph_vel(pos, v_cart)
-        gen_k1[m] = v_sph
-        del v_cart
-    if gen_k1:
-        print(f"k1 cross-check loaded for {sorted(gen_k1)}", flush=True)
+    # (loaded before the sampling loop so the consistency check can run per model)
 
     # ------------------------------------------------------------- display window
     # km/s, the same unit as every reported number
@@ -738,34 +780,6 @@ def main(argv=None):
     print("display window (0.05-99.95% range, rounded outward to 10 km/s): "
           + ", ".join(f"{k} [{v[0]:.0f}, {v[1]:.0f}]" for k, v in window.items()), flush=True)
 
-    # ------------------------------------------------- protocol consistency check
-    # The fresh K=4 draws and the persisted K=1 audit draw are the same model at
-    # the same positions, so every bin and component must agree to well inside
-    # the component's own spread.  Nothing reported here is a scientific
-    # statement: it is the guard that catches a sampling basis or unit mistake
-    # before any table is written (on 2026-09-17 it caught exactly that: the
-    # fresh draws were still Cartesian while the truth columns are spherical,
-    # which showed up as a 133 km/s discrepancy).
-    if gen_k1:
-        for m in MODELS:
-            worst = 0.0
-            for b in range(n_bins):
-                mb = ir == b
-                g4 = gen[(m, FINAL_CKPT)][mb]
-                rec4 = component_stats(v_true[mb], w_pos[mb], g4.reshape(-1, 3),
-                                       np.repeat(w_pos[mb], K_DRAWS) / K_DRAWS)
-                rec1 = component_stats(v_true[mb], w_pos[mb],
-                                       gen_k1[m][mb][:, None, :], w_pos[mb])
-                for n in COMP:
-                    d = abs(rec4[n]["w1"] - rec1[n]["w1"])
-                    tol = 0.15 * rec4[n]["sigma_true"]
-                    assert d < tol, (
-                        f"{m} bin{b} {n}: the K=4 and K=1 samples of the same model"
-                        f" disagree by {d:.2f} km/s (allowed {tol:.2f}); check the"
-                        f" sampling basis and units before trusting any table")
-                    worst = max(worst, d)
-            print(f"protocol consistency {m}: max |W1(k4) - W1(k1)| = {worst:.3f} km/s"
-                  f" (inside 15% of each component's spread)", flush=True)
 
     # ------------------------------------------------------------- point estimates
     samples = {}

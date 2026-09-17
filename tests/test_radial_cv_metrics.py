@@ -193,3 +193,50 @@ def test_out_of_window_fraction_and_reading_helpers():
     assert table.splitlines()[0] == "| a | b |"
     assert table.splitlines()[2] == "| 1 | 2 |"
     assert len(table.splitlines()) == 4
+
+
+def test_choose_window_keeps_the_units_of_its_input():
+
+    """The display window must come out in the unit of the samples it is given.
+
+    A km/s sample range has to give a km/s window; the 2026-09-17 review found
+    this computed in code units, which made the drawn range 100x too narrow and
+    the reported out-of-window mass fraction describe a range no figure showed.
+    """
+    v = np.linspace(-412.0, 388.0, 5001)
+    lo, hi = rcv.choose_window({"vr": v})["vr"]
+    assert lo <= np.percentile(v, 0.05) and hi >= np.percentile(v, 99.95)
+    assert lo % 10 == 0 and hi % 10 == 0
+    assert lo < -400.0 and hi > 380.0
+
+
+def test_protocol_consistency_rejects_a_basis_mismatch():
+    """Two draws of the same model must agree; a Cartesian one must not pass.
+
+    This is the guard that caught, on 2026-09-17, the fresh draws being compared
+    against the spherical truth columns while still in Cartesian coordinates:
+    the K=4 and K=1 samples of the same model then disagreed by up to 133 km/s.
+    """
+    rng = np.random.default_rng(13)
+    n, k = 4000, rcv.K_DRAWS
+    r = rng.uniform(0.05, 7.4, n)
+    sig = (1.2, 1.0, 0.9)
+    ir = np.clip(np.digitize(r, [0.0, 1.0, 2.0, 3.0, 4.5, 6.0, 7.5]) - 1, 0, 6)
+    w = rng.uniform(0.5, 1.5, n)
+    v_true = np.stack([rng.normal(0, s, n) for s in sig], axis=1)
+    g4 = np.stack([rng.normal(0, s, (n, k)) for s in sig], axis=2)
+    g1 = np.stack([rng.normal(0, s, n) for s in sig], axis=1)
+    worst = rcv.protocol_consistency({"w128": g4}, {"w128": g1}, v_true, w, ir, 6, k)
+    # two honest draws of one model differ only by Monte-Carlo noise, which for
+    # these few outer-bin positions is a few km/s -- inside the guard's own
+    # tolerance of 15% of the narrowest component's spread (0.9 code = 90 km/s)
+    assert worst["w128"] < 0.15 * 90.0
+    # a draw left in Cartesian coordinates spreads v_phi like v_r does
+    bad = g1.copy()
+    bad[:, 2] *= 1.4
+    try:
+        rcv.protocol_consistency({"w128": g4}, {"w128": bad}, v_true, w, ir, 6, k)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("a sampling basis mismatch must be caught")
