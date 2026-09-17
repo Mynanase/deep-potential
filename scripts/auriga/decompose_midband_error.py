@@ -57,7 +57,7 @@ def flow_grads(flow, eta, batch=512):
     out = []
     for i in range(0, len(eta), batch):
         _, g = flow_sampling.value_and_grad_lnf_fn(flow, eta[i:i + batch])
-        out.append(np.asarray(g).block_until_ready() if hasattr(g, "block_until_ready") else np.asarray(g))
+        out.append(np.asarray(g))
     return np.concatenate(out)
 
 
