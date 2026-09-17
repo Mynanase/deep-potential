@@ -206,6 +206,7 @@ fig.savefig(OUT / "figs" / "fig_radial_rbin_own_outer.png", dpi=150)
 plt.close(fig)
 
 df = pd.DataFrame(rows)
+df = df.drop_duplicates(subset=["bin_lo", "bin_hi", "comp", "model", "truth"])
 df.to_csv(OUT / "radial_rbin_own_w1.csv", index=False)
 print("=== W1(vT) per bin, own truth (full/128 vs h12; clean vs clean-val) ===", flush=True)
 print(df[df["comp"] == "vT"].pivot(index="bin_lo", columns="model", values="w1").round(4).to_string(), flush=True)
