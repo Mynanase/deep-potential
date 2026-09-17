@@ -885,7 +885,8 @@ def get_phi_loss(
     gamma=0.0,
     mu=0.0,
     l2_potential=0.01,
-    l2_selection_function=0.01
+    l2_selection_function=0.01,
+    weights=None
 ):
     """
     Calculates the loss based on the collisionless Boltzmann equation (CBE).
@@ -942,7 +943,11 @@ def get_phi_loss(
         prior_pos = jnp.maximum(d2phi_dq2, 0.0)
         likelihood = likelihood + gamma * prior_pos
 
-    loss = jnp.log(jnp.mean(likelihood))
+    if weights is None:
+        loss = jnp.log(jnp.mean(likelihood))
+    else:
+        # Stratified importance sampling: restore the mass-weighted estimand
+        loss = jnp.log(jnp.sum(weights * likelihood) / jnp.sum(weights))
     loss_noreg = loss
 
     def get_l2_loss(net, l2):
@@ -974,23 +979,33 @@ def get_phi_loss(
     return loss, loss_noreg
 
 
+def _unpack_phi_batch(batch):
+    """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None) from a 4- or 5-tuple batch."""
+    if len(batch) == 5:
+        q, p, dlnf_dq, dlnf_dp, weights = batch
+    else:
+        q, p, dlnf_dq, dlnf_dp = batch
+        weights = None
+    return q, p, dlnf_dq, dlnf_dp, weights
+
+
 @eqx.filter_value_and_grad(has_aux=True)
 def loss_fn(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp = batch
+    q, p, dlnf_dq, dlnf_dp, weights = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, **loss_params
     )
     return loss, loss_noreg
 
 @eqx.filter_jit
 def loss_fn_val(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp = batch
+    q, p, dlnf_dq, dlnf_dp, weights = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, **loss_params
     )
     return loss, loss_noreg
 
@@ -1085,6 +1100,14 @@ def train_potential(
             df_data["dlnf_deta"][:, :n_dim],
             df_data["dlnf_deta"][:, n_dim:],
         )
+
+    if "importance_weights" in df_data:
+        weights = jnp.asarray(df_data["importance_weights"])
+        if len(weights) != n_samples:
+            raise ValueError(f"importance_weights length {len(weights)} != n_samples {n_samples}")
+        print(f"Using stratified importance weights: mean={float(weights.mean()):.4f}, "
+              f"range=[{float(weights.min()):.4f}, {float(weights.max()):.4f}]")
+        data = data + (weights,)
 
     n_val = int(validation_frac * n_samples)
     n_train = n_samples - n_val
