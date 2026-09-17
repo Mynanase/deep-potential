@@ -53,19 +53,65 @@ def tag(ax, text):
     ax.text(0.97, 0.95, text, transform=ax.transAxes, ha="right", va="top", fontsize=6.5)
 
 
-def check_units(a, win):
-    """The persisted arrays and the display window must be in the same unit.
+def display_window(a):
+    """Per-component display window in km/s, from the persisted samples.
 
-    The window comes from the persisted 0.05-99.95% range, so a units mismatch
-    (code units against a km/s window) shows up as an implausibly narrow sample
-    range; fail loudly instead of drawing a 100x-wrong axis.
+    The window is the pooled 0.05-99.95% range of the held-out data and every
+    model's draws, rounded outward to 10 km/s.  It is a display choice only: W1
+    and every other reported number uses all samples, and the histograms divide
+    by each series' whole weight rather than renormalising inside the window.
+    Deriving it here (rather than trusting a stored window) keeps the unit
+    contract in one place, and the check below fails loudly if the arrays are not
+    in km/s after all.
     """
+    assert a["velocity_unit"].item() == "km/s", "the persisted velocities must be km/s"
+    win = {}
     for c, name in enumerate(COMP):
+        v = np.concatenate([a["v_true"][:, c]]
+                           + [a[f"gen_k4_{m}"][:, :, c].reshape(-1) for m in MODELS])
+        lo, hi = np.nanpercentile(v, [0.05, 99.95])
+        win[name] = [float(np.floor(lo / 10.0) * 10.0), float(np.ceil(hi / 10.0) * 10.0)]
+        span = max(abs(win[name][0]), abs(win[name][1]))
         scale = float(np.nanpercentile(np.abs(a["v_true"][:, c]), 99.9))
-        span = max(abs(float(win[c][0])), abs(float(win[c][1])))
-        assert scale > 0.05 * span, (
-            f"{name}: sample 99.9% scale {scale:.2f} is far below the display window"
-            f" {span:.0f}; the persisted velocities must be km/s")
+        assert 0.3 * span < scale < 3.0 * span, (
+            f"{name}: the data 99.9% scale {scale:.1f} and the window {span:.0f} are"
+            f" not in the same unit")
+    return win
+
+
+def write_display_table(a, win, run_dir):
+    """rcv_display.csv: the drawn range and the mass each series puts outside it.
+
+    The plan requires the out-of-window mass fraction whenever the display range
+    cuts the velocity tails, reported separately for every series so the reader
+    can see how much of each distribution the figure does not show.
+    """
+    ir, w, r_edges = a["ir_strict"], a["w_strict"].astype(np.float64), a["r_edges"]
+    k = int(a["k_draws"])
+    rows = []
+    for b in range(len(r_edges) - 1):
+        mb = ir == b
+        for c, name in enumerate(COMP):
+            lo, hi = float(win[name][0]), float(win[name][1])
+            series = [("data", a["v_true"][mb, c], w[mb])]
+            for m in MODELS:
+                g = a[f"gen_k4_{m}"][mb, :, c].reshape(-1)
+                series.append((m, g, np.repeat(w[mb], g.size // int(mb.sum())) / k))
+            for sname, v, wgt in series:
+                ok = np.isfinite(v)
+                tot = float(wgt[ok].sum())
+                outside = float(wgt[ok & ((v < lo) | (v > hi))].sum())
+                rows.append(dict(bin=b, r_lo_kpc=float(r_edges[b] * 10),
+                                 r_hi_kpc=float(r_edges[b + 1] * 10), comp=name,
+                                 series=sname, window_lo_kms=lo, window_hi_kms=hi,
+                                 n_samples=int(ok.sum()), mass_frac=float(tot / w.sum()),
+                                 frac_out_window=float(outside / tot) if tot > 0 else float("nan")))
+    pd.DataFrame(rows).to_csv(run_dir / "rcv_display.csv", index=False)
+    worst = max(r["frac_out_window"] for r in rows)
+    print("display window: " + ", ".join(f"{c} {v[0]:.0f}..{v[1]:.0f} km/s"
+                                         for c, v in win.items())
+          + f"; largest out-of-window mass fraction over series/bins: {worst:.2e}", flush=True)
+    return worst
 
 
 def one_legend(axes, title, ncols=4):
@@ -108,13 +154,12 @@ def model_curves(ax, d, col, with_ci=True):
 # ----------------------------------------------------------------------
 # 1. conditional distribution: truth vs model, six radial panels
 # ----------------------------------------------------------------------
-def fig_dist(a, out_dir):
+def fig_dist(a, win, out_dir):
     ir, w = a["ir_strict"], a["w_strict"].astype(np.float64)
-    v_true, r_edges, win = a["v_true"], a["r_edges"], a["window_edges"]
-    check_units(a, win)
+    v_true, r_edges = a["v_true"], a["r_edges"]
     ranges = {}
     for c, name in enumerate(COMP):
-        lo, hi = float(win[c][0]), float(win[c][1])
+        lo, hi = float(win[name][0]), float(win[name][1])
         bins = np.arange(lo, hi + 1e-6, VBIN)
         fig, axes = plt.subplots(2, 3, figsize=(WIDE, WIDE * 0.60), sharex=True,
                                  sharey=True, layout="constrained")
@@ -183,7 +228,7 @@ def fig_curves(stats, corr, ref, out_dir):
               "conditional mean per radial bin, K=4 (bars: 95% intervals)")
     curve_fig(out_dir, "fig_dispersion_radial", st, "sigma_gen", "sigma_true",
               r"$\sigma$  [km s$^{-1}$]", [COMP_MATH[x] for x in COMP],
-              "centred $\sigma$ per radial bin, K=4 (bars: 95% intervals)")
+              r"centred $\sigma$ per radial bin, K=4 (bars: 95% intervals)")
     curve_fig(out_dir, "fig_correlation_radial", c, "rho_gen", "rho_true",
               r"mass-weighted Pearson $\rho$", [PAIR_MATH[x] for x in PAIRS],
               "velocity-pair correlation, K=4 (bars: 95% intervals)")
@@ -275,7 +320,9 @@ def main(argv=None):
           f"   model {k4['sigma_gen'].min():.2f} .. {k4['sigma_gen'].max():.2f}", flush=True)
     print(f"correlation bias    {c4['drho'].min():+.3f} .. {c4['drho'].max():+.3f}", flush=True)
 
-    rng = fig_dist(a, out_dir)
+    win = display_window(a)
+    write_display_table(a, win, run)
+    rng = fig_dist(a, win, out_dir)
     for name, (lo, hi, peak) in rng.items():
         print(f"dist panel {name}: window [{lo:.0f}, {hi:.0f}] km/s, peak density"
               f" {peak:.4f} per km/s per panel", flush=True)
