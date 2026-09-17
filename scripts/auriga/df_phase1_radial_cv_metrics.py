@@ -343,6 +343,10 @@ def sample_model_velocity(flow_dir, checkpoint, pos, k, z0, eqx, jax, jnp, fit_a
     for every checkpoint and every model (common random numbers); the transform
     is the one `ConditionalPhaseSpaceFlow.sample` uses, and the first chunk is
     cross-checked against that builtin sampler before anything is accepted.
+
+    The flow works in CARTESIAN velocity; the spherical basis (v_r, v_theta,
+    v_phi) is applied here, once, so that no caller can compare a Cartesian draw
+    against the spherical truth columns.
     """
     flow = fit_all.load_flow(Path(flow_dir), checkpoint_index=checkpoint)
     cvf = flow.conditional_velocity_flow
@@ -368,9 +372,10 @@ def sample_model_velocity(flow_dir, checkpoint, pos, k, z0, eqx, jax, jnp, fit_a
     for i in range(0, len(pos), chunk):
         sl = slice(i, min(i + chunk, len(pos)))
         out[sl] = np.asarray(stage(cvf, z0[sl], jnp.asarray(pos[sl])))
+    flat, flags = sph_vel(np.repeat(np.asarray(pos), k, axis=0), out.reshape(-1, 3))
     del flow, cvf, stage
     jax.clear_caches()
-    return out
+    return flat.reshape(len(pos), k, 3), flags
 
 
 # ----------------------------------------------------------------------
@@ -408,16 +413,18 @@ def sha256(path):
 
 
 def choose_window(series):
-    """Display window per component from the data: the 0.05-99.95% range.
+    """Display window per component: the 0.05-99.95% range of the samples, km/s.
 
-    Kept in the summary so the figure script plots the same window and the
-    reported out-of-window mass fractions describe exactly what is shown.  The
+    The input is a mapping from component name to samples and must already be in
+    km/s (the same key set is returned); the result is
+    rounded outward to a multiple of 10 km/s.  It is persisted so the reported
+    out-of-window mass fractions describe exactly the range that is drawn.  The
     window never enters a statistic: W1 always uses every sample.
     """
     win = {}
-    for c, name in enumerate(COMP):
-        lo = np.nanpercentile(series[c], 0.05)
-        hi = np.nanpercentile(series[c], 99.95)
+    for name in series:
+        lo = np.nanpercentile(series[name], 0.05)
+        hi = np.nanpercentile(series[name], 99.95)
         win[name] = [float(np.floor(lo / 10.0) * 10.0), float(np.ceil(hi / 10.0) * 10.0)]
     return win
 
@@ -696,8 +703,10 @@ def main(argv=None):
             t1 = time.time()
             tag = f"{m} flow-{ck}"
             print(f"sampling {tag} (K={K_DRAWS}, full coverage) ...", flush=True)
-            gen_late[(m, ck)] = sample_model_velocity(
+            gen_late[(m, ck)], deg_gen = sample_model_velocity(
                 flow_dir, ck, pos, K_DRAWS, z0, eqx, jax, jnp, fit_all, tag=tag)
+            assert deg_gen["n_degenerate_r"] == deg["n_degenerate_r"]
+            assert deg_gen["n_degenerate_R"] == deg["n_degenerate_R"]
             print(f"  {tag}: {time.time() - t1:.0f}s", flush=True)
 
     gen = {(m, FINAL_CKPT): gen_late[(m, FINAL_CKPT)] for m in MODELS}
@@ -719,13 +728,44 @@ def main(argv=None):
         print(f"k1 cross-check loaded for {sorted(gen_k1)}", flush=True)
 
     # ------------------------------------------------------------- display window
-    all_series = {c: v_true[:, c] for c, _ in enumerate(COMP)}
-    for c in range(3):
-        all_series[c] = np.concatenate([all_series[c]] + [gen[(m, FINAL_CKPT)][:, :, c].reshape(-1)
+    # km/s, the same unit as every reported number
+    all_series = {n: v_true[:, c] * KMS for c, n in enumerate(COMP)}
+    for c, n in enumerate(COMP):
+        all_series[n] = np.concatenate([all_series[n]]
+                                       + [gen[(m, FINAL_CKPT)][:, :, c].reshape(-1) * KMS
                                                           for m in MODELS])
     window = choose_window(all_series)
     print("display window (0.05-99.95% range, rounded outward to 10 km/s): "
           + ", ".join(f"{k} [{v[0]:.0f}, {v[1]:.0f}]" for k, v in window.items()), flush=True)
+
+    # ------------------------------------------------- protocol consistency check
+    # The fresh K=4 draws and the persisted K=1 audit draw are the same model at
+    # the same positions, so every bin and component must agree to well inside
+    # the component's own spread.  Nothing reported here is a scientific
+    # statement: it is the guard that catches a sampling basis or unit mistake
+    # before any table is written (on 2026-09-17 it caught exactly that: the
+    # fresh draws were still Cartesian while the truth columns are spherical,
+    # which showed up as a 133 km/s discrepancy).
+    if gen_k1:
+        for m in MODELS:
+            worst = 0.0
+            for b in range(n_bins):
+                mb = ir == b
+                g4 = gen[(m, FINAL_CKPT)][mb]
+                rec4 = component_stats(v_true[mb], w_pos[mb], g4.reshape(-1, 3),
+                                       np.repeat(w_pos[mb], K_DRAWS) / K_DRAWS)
+                rec1 = component_stats(v_true[mb], w_pos[mb],
+                                       gen_k1[m][mb][:, None, :], w_pos[mb])
+                for n in COMP:
+                    d = abs(rec4[n]["w1"] - rec1[n]["w1"])
+                    tol = 0.15 * rec4[n]["sigma_true"]
+                    assert d < tol, (
+                        f"{m} bin{b} {n}: the K=4 and K=1 samples of the same model"
+                        f" disagree by {d:.2f} km/s (allowed {tol:.2f}); check the"
+                        f" sampling basis and units before trusting any table")
+                    worst = max(worst, d)
+            print(f"protocol consistency {m}: max |W1(k4) - W1(k1)| = {worst:.3f} km/s"
+                  f" (inside 15% of each component's spread)", flush=True)
 
     # ------------------------------------------------------------- point estimates
     samples = {}
@@ -755,9 +795,9 @@ def main(argv=None):
                     stats[(m, b, n, sname)] = dict(
                         **rec[n], w1_lo=lo, w1_hi=hi,
                         dmean_lo=dlo, dmean_hi=dhi, dsigma_lo=slo, dsigma_hi=shi,
-                        frac_out_true=frac_out(vt_b[:, COMP.index(n)], wt_b,
+                        frac_out_true=frac_out(vt_b[:, COMP.index(n)] * KMS, wt_b,
                                                *window[n]),
-                        frac_out_gen=frac_out(g[:, :, COMP.index(n)].reshape(-1), wg,
+                        frac_out_gen=frac_out(g[:, :, COMP.index(n)].reshape(-1) * KMS, wg,
                                               *window[n]),
                         n_true=len(vt_b), n_eff=n_eff(wt_b), mass_frac=wt_b.sum() / w_pos.sum(),
                         n_positions=len(vt_b), k_draws=k,
