@@ -64,13 +64,24 @@ def main():
     print(f"anchor r={r_in:.4f} kpc; {len(edges_in)} truth edges to "
           f"{args.r_outer} kpc; {len(nodes)} radial nodes x {args.n_dirs} dirs")
 
+    def load_phi_f32(run_dir, ckpt):
+        # checkpoints are f32; loading under x64 makes the empty model f64 and
+        # eqx refuses the dtype change. Load with x64 off, restore afterwards
+        # (same pattern as validate_enclosed_mass._load_phi_smoke).
+        prev = bool(jax.config.jax_enable_x64)
+        jax.config.update("jax_enable_x64", False)
+        try:
+            model = fit_all.load_potential(Path(run_dir) / "models" / "Phi",
+                                           checkpoint_index=ckpt)
+            return model.phi_model
+        finally:
+            jax.config.update("jax_enable_x64", prev)
+
     labels, results = [], {}
     for spec in args.model:
         label, run_dir = spec.split("=", 1)
         labels.append(label)
-        model = fit_all.load_potential(Path(run_dir) / "models" / "Phi",
-                                       checkpoint_index=args.phi_ckpt)
-        phi = model.phi_model
+        phi = load_phi_f32(run_dir, args.phi_ckpt)
         t0 = time.time()
         m_flux = np.array([m_flux_at_radius(phi, float(r), dirs, L_KPC, V_KMS)
                            for r in nodes])
