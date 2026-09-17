@@ -140,13 +140,21 @@ def data_curve(ax, d, col):
 
 
 def model_curves(ax, d, col, with_ci=True):
+    """One series per model across radial bins.
+
+    A percentile bootstrap interval need not contain the point estimate, so the
+    raw lower difference can be negative and errorbar rejects it; the bars are
+    clipped at the point, which is the honest reading of an interval that sits
+    entirely above or below the estimate.
+    """
     for m in MODELS:
         dm = d[d["model"] == m].sort_values("bin")
         if not len(dm):
             continue
         err = None
         if with_ci and f"{col}_lo" in dm.columns:
-            err = np.vstack([dm[col] - dm[f"{col}_lo"], dm[f"{col}_hi"] - dm[col]])
+            err = np.vstack([np.maximum(dm[col] - dm[f"{col}_lo"], 0.0),
+                             np.maximum(dm[f"{col}_hi"] - dm[col], 0.0)])
         ax.errorbar(xcenter(dm), dm[col], yerr=err, color=COLOR[m], ls=LS[m],
                     marker=MARK[m], ms=3.0, lw=1.0, capsize=2, label=m)
 
