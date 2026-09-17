@@ -115,12 +115,12 @@ print("clump-star conditioning positions (bin4 val): %d" % len(pos_cl), flush=Tr
 # clean-val residual membership around the clump (8 kpc = 0.8 code units)
 tree = cKDTree(clump_pos_all)
 d_cv, _ = tree.query(eta_cv[:, :3], k=1)
-near = outer_c & (d_cv < 0.8) & (ir_out_c == 0)
+near = outer_c & (d_cv < 0.8) & (ir_cv == 4)
 x, y, z = eta_cv[:, 0], eta_cv[:, 1], eta_cv[:, 2]
 r_c_ = np.linalg.norm(eta_cv[:, :3], axis=1)
 cth_c = z / r_c_
 phi_c = np.mod(np.arctan2(y, x), 2 * np.pi) - np.pi
-far_cell = outer_c & (ir_out_c == 0) & (cth_c < -0.6) \
+far_cell = outer_c & (ir_cv == 4) & (cth_c < -0.6) \
     & (phi_c >= np.pi / 2) & (phi_c < np.pi) & (d_cv >= 0.8)
 print("clean-val residual near clump (d<8kpc, bin4): %d ; cell field (d>=8kpc): %d"
       % (int(near.sum()), int(far_cell.sum())), flush=True)
