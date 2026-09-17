@@ -113,9 +113,9 @@ for nm, run_dir, tag in MODELS:
     z_chk = cvf.flow.base_dist.sample(key_chk, (256,)).block_until_ready()
     x_chk = jnp.asarray(tr["pos"][:256])
     explicit = np.asarray(sample_flat(cvf, np.tile(z_chk[:, None, :], (1, K, 1)).reshape(-1, 3),
-                                       jnp.repeat(x_chk, K, axis=0)))
+                                       jnp.repeat(x_chk, K, axis=0))).reshape(256, K, 3)
     builtin = np.asarray(cvf.sample(key_chk, 256, condition=x_chk))
-    dmax = float(np.abs(explicit[:, 0] - builtin).max())
+    dmax = float(np.abs(explicit[:, 0] - builtin[:, 0]).max())
     print("guard %s max|explicit-builtin| = %.2e" % (nm, dmax), flush=True)
     assert dmax < 2e-2
     n = tr["n"]
