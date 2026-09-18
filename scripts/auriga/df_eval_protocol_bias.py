@@ -425,6 +425,8 @@ def main(argv=None):
     max_raw_err = float((rew["pool_sigma_raw"] - rew["pop_sigma"]).abs().max())
     min_rec = float(rew.groupby("bin")["mass_recovery"].min().min())
     max_noise = float(sd.max())
+    b0_dsig = (frames["strict2"].set_index(["bin", "comp"])["sigma_kms"]
+               - base["sigma_kms"]).xs(0, level="bin")
     lines = [
         "# Evaluation-protocol bias diagnosis (seed-0 file family)",
         "",
@@ -460,9 +462,7 @@ def main(argv=None):
         "",
         "Full per-bin table: `truth_stats.csv`.  Headline (strict2, bin0, "
         "sigma difference in km/s): "
-        + ", ".join(f"{c} {(frames['strict2'].set_index(['bin','comp'])['sigma_kms']
-                      - base['sigma_kms']).xs(0, level='bin')[c]:+.2f}"
-                    for c in ("vr", "vth", "vT")) + ".",
+        + ", ".join(f"{c} {b0_dsig[c]:+.2f}" for c in ("vr", "vth", "vT")) + ".",
         "",
         "## 4. Independent pid-hash protocol",
         "",
