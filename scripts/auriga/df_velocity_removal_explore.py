@@ -13,11 +13,13 @@ selection). Schemes:
   S1  iterative self-consistent gate: recompute (mu, sigma) from the
       removed set on raw, re-gate, iterate until the pid set converges;
   S2  per-r-bin 3-component GMM in (vT, vr, vth), features standardized by
-      the 75-105 kpc far-field dispersion; debris = component with the most
-      negative vT mean; remove P(debris) > 0.5 (weighted EM in numpy,
+      the far-field control-cell vT dispersion; debris = component with the
+      most negative vT mean; remove P(debris) > 0.5 (weighted EM in numpy,
       no sklearn dependency);
   S3  1D vT tail cut vT < mu_far(r) - k sigma_far(r) for k in {1.5, 2.5},
-      (mu_far, sigma_far) linearly interpolated from the 75-105 kpc bins
+      (mu_far, sigma_far) from the per-r-bin far-field control cell (same
+      sky cell, >= 8 kpc from the detection members; the raw catalog only
+      covers r < 75 kpc, so no 75-105 kpc bins exist)
       (control: expected large collateral, quantifies why 1D fails).
 
 Reference sets: frozen v1 (129) and v2 (638) candidates for coverage; the
@@ -61,7 +63,6 @@ REG_NPZ = REPO / "data" / "auriga" / "clump_pid_registry.npz"
 OUT = REPO / "runs" / "velocity-removal-explore"
 
 R_BINS = [(45.0, 55.0), (55.0, 65.0), (65.0, 75.0)]
-R_FAR = [(75.0, 90.0), (90.0, 105.0)]
 R_HI_EXPLORE = 75.0
 VT_CUT = -100.0
 N_SIGMA = 2.5
@@ -130,6 +131,9 @@ with h5py.File(RAW_H5, "r") as f:
 
 v = sph_v(pos, vel)
 r = np.linalg.norm(pos, axis=1)
+with np.errstate(invalid="ignore", divide="ignore"):
+    cth = np.divide(pos[:, 2], r, out=np.zeros_like(r), where=r > 0)
+phi = np.mod(np.arctan2(pos[:, 1], pos[:, 0]), 2 * np.pi) - np.pi
 print(f"raw n={len(pid_raw)}", flush=True)
 
 # template (in-cell detection members), identical to the frozen v2 run
@@ -140,9 +144,7 @@ det_pos = pos[mem_det]
 r_det = np.linalg.norm(det_pos, axis=1)
 cth_det = det_pos[:, 2] / r_det
 phi_det = np.mod(np.arctan2(det_pos[:, 1], det_pos[:, 0]), 2 * np.pi) - np.pi
-in_cell = mem_det & (pos[:, 2] / r < -0.6) \
-    & (np.mod(np.arctan2(pos[:, 1], pos[:, 0]), 2 * np.pi) - np.pi >= np.pi / 2) \
-    & (np.mod(np.arctan2(pos[:, 1], pos[:, 0]), 2 * np.pi) - np.pi < np.pi)
+in_cell = mem_det & (cth < -0.6) & (phi >= np.pi / 2) & (phi < np.pi)
 tpl_mu = v[in_cell].mean(axis=0)
 tpl_sd = v[in_cell].std(axis=0)
 print("template (vr, vth, vT) mean:", np.round(tpl_mu, 1), "std:", np.round(tpl_sd, 1), flush=True)
@@ -163,8 +165,7 @@ print(f"reference set v1|v2 union: n={len(ref_pids)}, in raw={int(is_ref.sum())}
 # far-field control cell (measurement only): same sky cell, >= 8 kpc from
 # any detection member, r 45-75
 d_det = cKDTree(det_pos).query(pos, k=1)[0]
-phi = np.mod(np.arctan2(pos[:, 1], pos[:, 0]), 2 * np.pi) - np.pi
-far_cell = (r >= 45.0) & (r < 75.0) & (pos[:, 2] / r < -0.6) \
+far_cell = (r >= 45.0) & (r < 75.0) & (cth < -0.6) \
     & (phi >= np.pi / 2) & (phi < np.pi) & (d_det >= 8.0)
 print(f"far-field control cell: n={int(far_cell.sum())} "
       f"m={mass[far_cell].sum() / 1e6:.2f}e6 "
@@ -173,15 +174,25 @@ print(f"far-field control cell: n={int(far_cell.sum())} "
 
 explore = (r >= 45.0) & (r < R_HI_EXPLORE)
 
-# far-field calibration for S3 and GMM standardization
+# far-field calibration for S3 and GMM standardization: per-r-bin control
+# cell (same sky cell, d>=8 kpc from detection members). The raw catalog
+# has no particles at r >= 75 kpc, so radial 75-105 kpc bins are empty.
 far_pts, far_mu, far_sd = [], [], []
-for lo, hi in R_FAR:
-    m = (r >= lo) & (r < hi)
+for lo, hi in R_BINS:
+    m = far_cell & (r >= lo) & (r < hi)
+    assert m.sum() > 0, f"empty far-field control bin {lo:.0f}-{hi:.0f}"
+    mu_b = float((mass[m] * v[m, VT_IDX]).sum() / mass[m].sum())
+    sd_b = float(np.sqrt((mass[m] * (v[m, VT_IDX] - mu_b) ** 2).sum() / mass[m].sum()))
     far_pts.append(0.5 * (lo + hi))
-    far_mu.append(float((mass[m] * v[m, VT_IDX]).sum() / mass[m].sum()))
-    far_sd.append(float(np.sqrt((mass[m] * (v[m, VT_IDX] - far_mu[-1]) ** 2).sum() / mass[m].sum())))
+    far_mu.append(mu_b)
+    far_sd.append(sd_b)
 print(f"far-field vT calibration: r={far_pts} mu={np.round(far_mu, 1)} sd={np.round(far_sd, 1)}", flush=True)
-sd_far3 = np.array([far_sd[0]] * 3)  # vT dispersion used to standardize all 3 comps
+# vT dispersion of the full far-field control cell, used to standardize
+# all 3 GMM components (full covariance learns per-component scales).
+mfc = far_cell
+sd_far = float(np.sqrt((mass[mfc] * (v[mfc, VT_IDX]
+            - (mass[mfc] * v[mfc, VT_IDX]).sum() / mass[mfc].sum()) ** 2).sum() / mass[mfc].sum()))
+sd_far3 = np.array([sd_far] * 3)
 
 
 def box_gate(mask, mu, sd, nsig=N_SIGMA):
@@ -234,7 +245,10 @@ for lo, hi in R_BINS:
 # S3: 1D vT tail cuts
 rem_s3 = {}
 for k in (1.5, 2.5):
-    thr = np.interp(r, far_pts, far_mu) - k * np.interp(r, far_pts, far_sd)
+    thr = np.zeros(len(r))
+    for (lo, hi), mu_b, sd_b in zip(R_BINS, far_mu, far_sd):
+        b = (r >= lo) & (r < hi)
+        thr[b] = mu_b - k * sd_b
     rem_s3[k] = explore & (v[:, VT_IDX] < thr)
 
 # cascade reference kept population (stage1 + v1 + v2 removed)
