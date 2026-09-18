@@ -3,7 +3,7 @@
 
 Usage: check_s11_file.py NEW REF
 Checks: same particle count, shuffle_seed == 11, identical particle_id set,
-physical units.  Exits non-zero on any mismatch.
+converted (dimensionless) units.  Exits non-zero on any mismatch.
 """
 import sys
 
@@ -25,9 +25,11 @@ def main():
         attrs = dict(f_new.attrs)
         attrs.update(dict(f_new["eta"].attrs))
         units = (attrs.get("length_unit"), attrs.get("velocity_unit"))
-        assert units == ("kpc", "km/s"), f"unexpected units: {units}"
+        # prepare_data.py output is already nondimensionalized (q=x/L, p=v/V);
+        # the kpc / km-s requirement applies to the *source* file, not here.
+        assert units == ("dimensionless", "dimensionless"), f"unexpected units: {units}"
         print(f"s11 file verified: n={n_new}, shuffle_seed=11, pid set matches "
-              f"reference, units kpc/km-s, weighting={attrs.get('weighting')}")
+              f"reference, dimensionless units, weighting={attrs.get('weighting')}")
     return 0
 
 
