@@ -185,7 +185,7 @@ for ax, (key, label) in zip(axes, COMP):
            edgecolor="none", label="removed by velocity gate (stage 2)", zorder=3)
     ax.bar(centers, cut1, width=np.diff(V_EDGES), bottom=kept + cut2, color=MUTED,
            edgecolor="none", label="removed by detection+smooth (stage 1)", zorder=3)
-    ax.step(np.append(V_EDGES, V_EDGES[-1]), np.append(total, total[-1]),
+    ax.step(V_EDGES, np.append(total, total[-1]),
             where="post", color="black", lw=1.0, label="no removal (raw)", zorder=4)
     ax.axvline(template[key], color=BASELINE, lw=0.8, ls=(0, (2, 2)), zorder=2,
                label="stream-core template (gate center)")
