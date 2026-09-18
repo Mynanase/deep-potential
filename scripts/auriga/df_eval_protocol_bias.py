@@ -255,7 +255,7 @@ def selftest():
     eta = np.zeros((n, 6))
     eta[:, 0], eta[:, 3] = r_code, v_r
     s = sph_coords(eta)
-    assert np.allclose(s[:, 1], v_r, rtol=0, atol=1e-6), "vr must recover radial velocity"
+    assert np.allclose(s[1], v_r, rtol=0, atol=1e-6), "vr must recover radial velocity"
 
     h1 = pid_hash01(pid, 20260918)
     h2 = pid_hash01(pid, 20260918)
