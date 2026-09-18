@@ -14,6 +14,7 @@ echo '=== DEBRIS CASCADE PREFLIGHT ==='
 test -x "$PY" || { echo "PREFLIGHT FAIL: missing $PY"; exit 2; }
 for f in "$SRC/data/halo_12_stars.hdf5" \
          "$SRC/data/auriga/halo12_all_mass_clean_outer_clump_smooth.h5" \
+         "$SRC/data/auriga/clump_debris_candidates.npz" \
          "$SRC/data/auriga/clump_debris_candidates_v2.npz"; do
   test -f "$f" || { echo "PREFLIGHT FAIL: missing $f"; exit 2; }
 done
