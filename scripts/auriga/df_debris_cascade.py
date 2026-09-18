@@ -97,10 +97,11 @@ v = sph_vel(pos, vel)
 reg = np.load(REG_NPZ)
 det = np.asarray(reg["detection_pids"]).astype(np.int64)
 mem_det = np.isin(pid_raw, det)
-cth = pos[:, 2] / r
+with np.errstate(invalid="ignore", divide="ignore"):
+    cth = pos[:, 2] / r
 phi = np.mod(np.arctan2(pos[:, 1], pos[:, 0]), 2 * np.pi) - np.pi
 in_cell = mem_det & (cth < -0.6) & (phi >= np.pi / 2) & (phi < np.pi)
-template = {k: float(v[k][in_cell].mean()) for k, _, _ in COMP}
+template = {k: float(v[k][in_cell].mean()) for k, _ in COMP}
 print("recomputed stream-core template (km/s):",
       {k: round(x, 1) for k, x in template.items()}, flush=True)
 
