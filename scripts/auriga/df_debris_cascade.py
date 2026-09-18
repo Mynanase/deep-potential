@@ -58,9 +58,10 @@ def sph_vel(pos, vel):
     x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
     r = np.linalg.norm(pos, axis=1)
     R = np.hypot(x, y)
-    vr = (x * vel[:, 0] + y * vel[:, 1] + z * vel[:, 2]) / r
-    vth = (z * vr - r * vel[:, 2]) / R
-    vT = (-vel[:, 0] * y + vel[:, 1] * x) / R
+    with np.errstate(invalid="ignore", divide="ignore"):
+        vr = (x * vel[:, 0] + y * vel[:, 1] + z * vel[:, 2]) / r
+        vth = (z * vr - r * vel[:, 2]) / R
+        vT = (-vel[:, 0] * y + vel[:, 1] * x) / R
     return dict(vr=vr, vth=vth, vT=vT)
 
 

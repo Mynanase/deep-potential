@@ -19,6 +19,12 @@ for f in "$SRC/data/halo_12_stars.hdf5" \
 done
 "$PY" -c 'import h5py, numpy, scipy, matplotlib' || { echo "PREFLIGHT FAIL: deps"; exit 2; }
 
+# The clump PID registry is not committed (large binary); mirror the symlink
+# layout used by earlier runs (e.g. e94c3979) into the run snapshot.
+mkdir -p data/auriga
+test -e data/auriga/clump_pid_registry.npz \
+  || ln -s "$SRC/data/auriga/clump_pid_registry.npz" data/auriga/clump_pid_registry.npz
+
 echo '=== DEBRIS CASCADE RUN ==='
 "$PY" -u scripts/auriga/df_debris_cascade.py
 echo '=== DEBRIS CASCADE DONE ==='
