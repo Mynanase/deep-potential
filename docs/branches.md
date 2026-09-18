@@ -21,6 +21,18 @@ master (c8bc5f7)
 
 ## 各分支说明
 
+### orx 实验线（2026-09，OpenResearch 树上分支）
+
+| 分支 | 状态 | 说明 |
+|---|---|---|
+| orx/freeze-training-data-clean-smooth-union-default | 冻结（2026-09-19） | 训练数据冻结为 halo12-clean-smooth.h5（union 去除版）；整合验证在其子节点 orx/route-closure-integration-and-verification（幂等复用 + 损失复现）。 |
+| orx/w1024-on-clean-smooth-removed-population | 已冻结 | 冻结数据上的首个 w1024 三阶段训练（run fb85670e）。 |
+| orx/w1024-phase-2-flow-sampling-potential-training | 已冻结 | clean 线势训练（run 6b6e13aa）；w1024-full 对照线见 orx/w1024-on-full-population-substructure-df。 |
+| orx/direction-a-* / debris / velocity-only 系 | 关闭 | 碎片剔除改善有限，路线结项；候选名单与级联图保留为参考。 |
+| orx/eval-protocol-bias-* / independent-reshuffle-s11-* | 阻塞待修 | strict 偏置修复与 seed-11 重洗牌；失败原因已定位（selftest 索引 bug / 校验断言反），见结项报告。 |
+
+结项报告：项目 artifact df-phase1-audit/route-closure-20260919.md。
+
 | 分支 | tip(日期) | 状态 | 主要内容 |
 |---|---|---|---|
 | `master` | — | 上游基线 | 上游 Majakas/deep-potential 主线;`c8bc5f7` 是全部实验分支的共同基底。 |

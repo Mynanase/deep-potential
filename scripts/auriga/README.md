@@ -311,3 +311,14 @@ score 5.39 s、Phi 1.74 s；正式宽度短跑分别 3.26 s、7.64 s、1.91 s。
 绘图脚本可画到指定范围，但超出实际样本支持的部分仍是外推。
 有限差分检查验证的是计算导数的实现，不是这些导数对真实 Halo12 DF 的科学准确性。
 尚未运行全量 GPU 训练、收敛评估或模拟真值比较。
+# 冻结训练数据（2026-09-19 决定）
+
+当前路线的默认训练数据为 data/auriga/halo12-clean-smooth.h5（服务器
+/localdisk/kosmos/my-deep-potential/data/auriga/，n=1,619,615）：由旧格式
+halo12_all_mass_clean_outer_clump_smooth.h5（去除 detection+smooth65+smooth84
+union 共 33,354 颗）经 prepare_data.py --seed 0 --weighting mass 转换，lineage
+attrs（shuffle_seed=0、weighting=mass、registry cleaning 记录）齐全。
+scripts/auriga/run_w1024_csmooth.sh 幂等：目标文件存在时先验证 lineage
+（n、seed、weighting、与 registry union 的 pid 重叠=0）再复用，否则现场转换。
+碎片剔除（velocity-gate 等多轮）改善有限，残余约 1,140 颗未注册逆行碎片为
+已知边界；详见项目 artifact df-phase1-audit/route-closure-20260919.md。
