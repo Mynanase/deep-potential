@@ -9,7 +9,7 @@
     "spatial_flow_opts": {
       "vector_field_opts": {
         "type": "MLP",
-        "width": 128,
+        "width": 1024,
         "depth": 3
       },
       "n_epochs": 256,
@@ -30,7 +30,7 @@
     "conditional_velocity_flow_opts": {
       "vector_field_opts": {
         "type": "MLP",
-        "width": 128,
+        "width": 1024,
         "depth": 3
       },
       "n_epochs": 256,
@@ -52,14 +52,14 @@
   "flow_sampling": {
     "seed": 1,
     "n_samples": 262144,
-    "grad_batch_size": 64,
+    "grad_batch_size": 256,
     "sample_batch_size": 1024
   },
   "Phi": {
     "seed": 2,
     "potential_nn_opts": {
       "type": "MLP",
-      "width": 128,
+      "width": 1024,
       "depth": 3
     },
     "frameshift_opts": {
