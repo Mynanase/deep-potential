@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Debris cascade comparison (55-65 kpc): no removal vs two removals.
-# Data-level diagnostic, no training: raw halo12 -> union-removed ->
-# union + v2 velocity-gate debris removed (frozen candidate snapshot).
-# CPU-only; runs on the gpu host like every orx run for this project.
+# Velocity-only debris removal exploration on raw halo12 (this branch:
+# dfc069a0). No spatial clustering, no registry-based selection; compares
+# template gate / iterative gate / per-bin GMM / 1D vT tail cuts against the
+# frozen v1+v2 candidate sets and the cascade reference (ba7750a4).
+# Data-level diagnostic, no training; CPU-only on the gpu host.
 set -eo pipefail
 
 PY=/home/qiutao/miniforge3/envs/dp-jax/bin/python
@@ -10,10 +11,11 @@ SRC=/localdisk/kosmos/my-deep-potential
 export MPLCONFIGDIR=/tmp/orx-mpl
 mkdir -p "$MPLCONFIGDIR"
 
-echo '=== DEBRIS CASCADE PREFLIGHT ==='
+echo '=== VELOCITY REMOVAL PREFLIGHT ==='
 test -x "$PY" || { echo "PREFLIGHT FAIL: missing $PY"; exit 2; }
 for f in "$SRC/data/halo_12_stars.hdf5" \
          "$SRC/data/auriga/halo12_all_mass_clean_outer_clump_smooth.h5" \
+         "$SRC/data/auriga/clump_debris_candidates.npz" \
          "$SRC/data/auriga/clump_debris_candidates_v2.npz"; do
   test -f "$f" || { echo "PREFLIGHT FAIL: missing $f"; exit 2; }
 done
@@ -25,6 +27,6 @@ mkdir -p data/auriga
 test -e data/auriga/clump_pid_registry.npz \
   || ln -s "$SRC/data/auriga/clump_pid_registry.npz" data/auriga/clump_pid_registry.npz
 
-echo '=== DEBRIS CASCADE RUN ==='
-"$PY" -u scripts/auriga/df_debris_cascade.py
-echo '=== DEBRIS CASCADE DONE ==='
+echo '=== VELOCITY REMOVAL RUN ==='
+"$PY" -u scripts/auriga/df_velocity_removal_explore.py
+echo '=== VELOCITY REMOVAL DONE ==='
