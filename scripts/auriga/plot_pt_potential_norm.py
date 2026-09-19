@@ -129,12 +129,12 @@ def main():
     cmap_seq = mpl.colormaps[ofs.SEQUENTIAL].with_extremes(bad=ofs.MUTED)
     cmap_div = mpl.colormaps[ofs.DIVERGING].with_extremes(bad=ofs.MUTED)
 
-    fig = plt.figure(figsize=(ofs.WIDE, 5.6))
+    fig = plt.figure(figsize=(ofs.WIDE, 5.9))
     gs = fig.add_gridspec(3, 12, height_ratios=(1.0, 1.0, 0.78),
-                          hspace=0.42, wspace=0.25)
+                          hspace=0.55, wspace=0.45)
     ax_maps = [fig.add_subplot(gs[0, 3 * j:3 * j + 3]) for j in range(4)]
-    ax_res = [fig.add_subplot(gs[1, 3 * j:3 * j + 3]) for j in range(3)]
-    ax_hist = fig.add_subplot(gs[1, 9:12])
+    ax_hist = fig.add_subplot(gs[1, 0:3])
+    ax_res = [fig.add_subplot(gs[1, 3 * (j + 1):3 * (j + 1) + 3]) for j in range(3)]
     ax_prof = fig.add_subplot(gs[2, 0:4])
     ax_sig = fig.add_subplot(gs[2, 4:8])
     ax_dprof = fig.add_subplot(gs[2, 8:12])
@@ -189,12 +189,13 @@ def main():
         ax.set_aspect("equal")
         ax.set_xlabel("x [kpc]", fontsize=6)
         ax.set_ylabel("z [kpc]", fontsize=6)
-        ax.tick_params(labelsize=5.5)
-    ofs.panel_labels(list(ax_maps) + list(ax_res) + [ax_hist, ax_prof, ax_sig, ax_dprof])
+        ax.tick_params(labelsize=6)
+    ofs.panel_labels(list(ax_maps) + [ax_hist] + list(ax_res)
+                     + [ax_prof, ax_sig, ax_dprof])
     cb1 = fig.colorbar(im0, ax=ax_maps, fraction=0.02, pad=0.02)
     cb1.set_label(r"$\Phi-c$ [$(\mathrm{km/s})^2$]")
     cb1.ax.tick_params(labelsize=5.5)
-    cb2 = fig.colorbar(im_res, ax=ax_res + [ax_hist], fraction=0.02, pad=0.02)
+    cb2 = fig.colorbar(im_res, ax=[ax_hist] + ax_res, fraction=0.02, pad=0.02)
     cb2.set_label(r"$\Delta\Phi/v_c^2(r)$")
     cb2.ax.tick_params(labelsize=5.5)
 
