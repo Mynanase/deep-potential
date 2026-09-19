@@ -11,6 +11,7 @@ fractions at r=2 and 5 kpc; (d-f) Mollweide maps of rho/<rho>-1 at r=5 kpc.
 import argparse
 import sys
 import time
+from math import factorial
 from pathlib import Path
 
 import numpy as np
@@ -53,15 +54,29 @@ def truth_density(truth, r_fine):
 
 
 def sph_design(dirs):
-    """Complex design matrix of Y_lm, columns ordered l=0..LMAX, m=-l..l."""
-    from scipy.special import sph_harm
-    z = dirs[:, 2]
-    theta_pol = np.arccos(np.clip(z, -1.0, 1.0))
+    """Real orthonormal Y_lm design matrix, columns l=0..LMAX, m=-l..l.
+
+    Built from scipy.special.lpmv (stable across scipy versions; sph_harm was
+    removed in scipy>=1.15). Power per l is invariant under rotations within
+    each l subspace, so the real basis yields the same multipole spectrum.
+    """
+    from scipy.special import lpmv
+    ct = np.clip(dirs[:, 2], -1.0, 1.0)
     phi_azi = np.arctan2(dirs[:, 1], dirs[:, 0])
     cols, meta = [], []
     for l in range(LMAX + 1):
         for m in range(-l, l + 1):
-            cols.append(sph_harm(m, l, phi_azi, theta_pol))
+            am = abs(m)
+            norm = np.sqrt((2 * l + 1) / (4 * np.pi)
+                           * factorial(l - am) / factorial(l + am))
+            pm = lpmv(am, l, ct)
+            if m > 0:
+                col = np.sqrt(2.0) * norm * pm * np.cos(am * phi_azi)
+            elif m < 0:
+                col = np.sqrt(2.0) * norm * pm * np.sin(am * phi_azi)
+            else:
+                col = norm * pm
+            cols.append(col)
             meta.append((l, m))
     return np.stack(cols, axis=1), meta
 
@@ -69,7 +84,7 @@ def sph_design(dirs):
 def multipole_power(f, A, meta):
     """Power per l (fraction of total l>=1 fluctuation power, percent)."""
     c, *_ = np.linalg.lstsq(A, f, rcond=None)
-    p = np.abs(c) ** 2
+    p = c ** 2
     ls = np.array([l for l, _ in meta])
     per_l = np.array([p[ls == l].sum() for l in range(LMAX + 1)])
     tot = per_l[1:].sum()
@@ -106,6 +121,7 @@ def main():
 
     dirs = sobol_directions(args.n_dirs, args.sobol_seed)
     A, meta = sph_design(dirs)
+    print(f"design: {A.shape}, cond={np.linalg.cond(A):.1f}")
     prof = {}
     for spec in args.model:
         label, run_dir = spec.split("=", 1)
@@ -117,7 +133,7 @@ def main():
         prof[label] = vals
         print(f"[{label}] {r_nodes.size} nodes x {dirs.shape[0]} dirs in "
               f"{time.time() - t0:.0f}s")
-        for rr in args.spec_radii + [10.0]:
+        for rr in sorted(set(args.spec_radii + [10.0])):
             j = int(np.argmin(np.abs(r_nodes - rr)))
             rho = vals[j]
             mu = float(rho.mean())
@@ -188,8 +204,7 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     np.savez(args.output_dir / "s1_density_angular.npz",
              r_nodes=r_nodes, rho_true_nodes=rho_true, lmax=LMAX,
-             **{f"{l}_{k}": v for l in MODELS
-                for k, v in (("rho_dirs", prof[l]),)})
+             **{f"{l}_rho_dirs": prof[l] for l in MODELS})
     for p in ofs.save(fig, str(args.output_dir / "s1-density-angular")):
         print("saved", p)
     print("DENSITY_ANGULAR_DONE")
