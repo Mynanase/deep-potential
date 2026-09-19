@@ -124,8 +124,7 @@ def main():
         ax.set_xscale("log")
         ax.set_xlim(args.r_inner, args.r_outer)
         ax.set_xlabel("r [kpc]")
-    axa.set_ylabel(r"inward accel. $\langle g_r\rangle_\Omega$ "
-                   r"[$\mathrm{km^2\,s^{-2}\,kpc^{-1}}$]")
+    axa.set_ylabel(r"$g_r$ [(km/s)$^2$/kpc]")
     axb.set_ylabel("enclosed-mass error [%]")
     axc.set_ylabel(r"$\langle\rho\rangle_\Omega$ "
                    r"[$M_\odot\,\mathrm{kpc^{-3}}$]")
