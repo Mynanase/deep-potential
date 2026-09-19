@@ -25,12 +25,90 @@ def value_and_grad_lnp_fn(model, eta_batch):
     return jax.vmap(eqx.filter_value_and_grad(model.log_prob_velocity_given_position))(eta_batch)
 
 
+def _sample_with_radial_quotas(
+    key,
+    flow_list,
+    attrs_list,
+    nflow_samples,
+    sample_batch_size,
+    radial_alloc,
+    return_pool_counts=False,
+):
+    """Stratified radial sampling: fill per-bin quotas from flow draws.
+
+    Candidates outside the validity volume are rejected as usual. Candidates
+    falling into an already-full bin are discarded but still counted in the
+    pool composition, which gives an unbiased estimate of the per-bin mass
+    fractions m_k later used for the importance weights.
+    """
+    edges = np.asarray(radial_alloc["bin_edges"], dtype=float)
+    fracs = np.asarray(radial_alloc["fractions"], dtype=float)
+    if len(edges) < 2 or len(fracs) != len(edges) - 1:
+        raise ValueError("radial_alloc requires bin_edges (n+1 values) and fractions (n values)")
+    if not np.isclose(fracs.sum(), 1.0):
+        raise ValueError("radial_alloc fractions must sum to 1")
+    max_draw_batches = int(radial_alloc.get("max_draw_batches", 6000))
+
+    quotas = [np.maximum(1, np.round(fracs * nf).astype(int)) for nf in nflow_samples]
+    pool_counts = np.zeros(len(fracs), dtype=np.int64)
+
+    eta = []
+    print("Sampling eta with radial quotas ...")
+    with tqdm(desc="Sampling flows (quota fill)") as pbar:
+        for i, flow in enumerate(flow_list):
+            attrs = attrs_list[i]
+            remaining = quotas[i].copy()
+            kept_i = []
+            n_batches = 0
+            while remaining.sum() > 0:
+                key, sample_key = jax.random.split(key)
+                eta_sample = np.array(flow.sample(sample_key, sample_batch_size))
+                if attrs["has_spatial_cut"]:
+                    idx = utils.get_index_of_points_inside_attrs(eta_sample, attrs)
+                    cand = eta_sample[idx]
+                else:
+                    cand = eta_sample
+                if len(cand):
+                    r = np.linalg.norm(cand[:, :3], axis=1)
+                    in_bins = (r >= edges[0]) & (r <= edges[-1])
+                    cand = cand[in_bins]
+                    r = r[in_bins]
+                    b = np.clip(np.digitize(r, edges) - 1, 0, len(fracs) - 1)
+                    pool_counts += np.bincount(b, minlength=len(fracs))
+                    take = np.zeros(len(cand), dtype=bool)
+                    for k in range(len(fracs)):
+                        rem = int(remaining[k])
+                        if rem <= 0:
+                            continue
+                        sel = np.flatnonzero(b == k)[:rem]
+                        take[sel] = True
+                        remaining[k] -= len(sel)
+                    kept_i.append(cand[take])
+                n_batches += 1
+                if n_batches > max_draw_batches:
+                    raise RuntimeError(
+                        f"Radial quota sampling failed to fill (flow {i}): remaining={remaining.tolist()}; "
+                        "increase fractions of sparse bins, lower others, or raise max_draw_batches."
+                    )
+                pbar.update(1)
+            eta.append(np.concatenate(kept_i, axis=0))
+            jax.clear_caches()
+
+    eta = np.concatenate(eta, axis=0)
+    print(f"Shape of sampled eta: {eta.shape} (radial quotas)")
+    if return_pool_counts:
+        return eta, pool_counts
+    return eta
+
+
 def sample_from_different_flows(
     key,
     flow_list,
     attrs_list,
     n_samples,
     sample_batch_size=5000,
+    radial_alloc=None,
+    return_pool_counts=False,
 ):
     """
     Returns a combined sample from different flows, while respecting their own
@@ -40,6 +118,12 @@ def sample_from_different_flows(
     tot_n = sum([attrs["n"] for attrs in attrs_list])
     nflow_samples = [(attrs["n"] * n_samples) // tot_n for attrs in attrs_list]
     nflow_samples[0] += n_samples - sum(nflow_samples)  # Fix off by one due to rounding
+
+    if radial_alloc is not None:
+        return _sample_with_radial_quotas(
+            key, flow_list, attrs_list, nflow_samples, sample_batch_size,
+            radial_alloc, return_pool_counts=return_pool_counts,
+        )
 
     # Do ceiling divide
     # https://stackoverflow.com/questions/14822184/is-there-a-ceiling-equivalent-of-operator-in-python
@@ -258,19 +342,43 @@ def sample_and_calculate_log_prob_derivatives(
     n_samples,
     grad_batch_size=500,
     sample_batch_size=5000,
+    radial_alloc=None,
 ):
     """
     Samples from different flows, calculates log probabilities and their derivatives,
     and combines them.
     """
     key = jax.random.key(seed)
-    eta = sample_from_different_flows(key, flow_list, attrs_list, n_samples, sample_batch_size)
+    if radial_alloc is not None:
+        eta, pool_counts = sample_from_different_flows(
+            key, flow_list, attrs_list, n_samples, sample_batch_size,
+            radial_alloc=radial_alloc, return_pool_counts=True,
+        )
+    else:
+        eta = sample_from_different_flows(key, flow_list, attrs_list, n_samples, sample_batch_size)
 
     lnf_list, dlnf_deta_list, lnp_list, dlnp_deta_list = calculate_log_prob_and_derivatives(eta, flow_list, attrs_list, grad_batch_size)
 
     lnf, dlnf_deta, lnp, dlnp_deta = combine_log_prob_and_derivatives(np.array(lnf_list), np.array(dlnf_deta_list), np.array(lnp_list), np.array(dlnp_deta_list))
 
     ret = {"eta": eta, "dlnf_deta": dlnf_deta, "lnf": lnf, "lnp": lnp, "dlnp_deta": dlnp_deta}
+    if radial_alloc is not None:
+        edges = np.asarray(radial_alloc["bin_edges"], dtype=float)
+        fracs = np.asarray(radial_alloc["fractions"], dtype=float)
+        r = np.linalg.norm(eta[:, :3], axis=1)
+        b = np.clip(np.digitize(r, edges) - 1, 0, len(fracs) - 1)
+        n_actual = np.bincount(b, minlength=len(fracs)).astype(float)
+        m_pool = pool_counts.astype(float) / float(pool_counts.sum())
+        w = (m_pool[b] * len(eta)) / n_actual[b]
+        w = w / w.mean()  # mean-normalize; weighted averages are invariant to scale
+        ret.update({
+            "importance_weights": w,
+            "radial_bin_edges": edges,
+            "radial_bin_masses": m_pool,
+            "radial_bin_counts": n_actual,
+        })
+        print("Radial quotas: counts={} pool_masses={} weight_range=[{:.3f},{:.3f}]".format(
+            n_actual.astype(int).tolist(), np.round(m_pool, 4).tolist(), w.min(), w.max()))
     return ret
 
 

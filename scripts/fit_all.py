@@ -722,6 +722,8 @@ def main():
         df_data["df_deta"] = df_data["df_deta"][mask]
         if "f" in df_data:
             df_data["f"] = df_data["f"][mask]
+        if "importance_weights" in df_data:
+            df_data["importance_weights"] = df_data["importance_weights"][mask]
 
     # ================= Training the potential =================
     if args.potential_training:
