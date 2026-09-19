@@ -3,6 +3,7 @@
 set -eo pipefail
 PY=/home/qiutao/miniforge3/envs/dp-jax/bin/python
 DROOT=/localdisk/kosmos/my-deep-potential/data/auriga
+DUP=/localdisk/kosmos/my-deep-potential/data
 export MPLCONFIGDIR=/tmp/orx-mpl
 mkdir -p "$MPLCONFIGDIR"
 echo '=== TOTAL-MATTER INVENTORY PREFLIGHT ==='
@@ -10,12 +11,18 @@ test -x "$PY" || { echo "PREFLIGHT FAIL: missing $PY"; exit 2; }
 test -d "$DROOT" || { echo "PREFLIGHT FAIL: missing $DROOT"; exit 2; }
 echo '=== DIRECTORY LISTING ==='
 ls -la "$DROOT"
+echo '=== PARENT DATA DIRECTORY ==='
+ls -la "$DUP" | head -40
 echo '=== H5 INSPECTION ==='
-"$PY" - "$DROOT" <<'PYEOF'
+"$PY" - "$DROOT" "$DUP" <<'PYEOF'
 import sys, os, glob
 import h5py, numpy as np
-root = sys.argv[1]
-files = sorted(glob.glob(os.path.join(root, "*")))
+roots = sys.argv[1:3]
+files = []
+for root in roots:
+    files += sorted(glob.glob(os.path.join(root, "*")))
+seen = set()
+files = [f for f in files if not (f in seen or seen.add(f))]
 for path in files:
     if not os.path.isfile(path) or os.path.getsize(path) < 1e3:
         continue
