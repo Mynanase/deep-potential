@@ -70,7 +70,7 @@ def main():
 
     print("=== truth potential: sphere means then slice ===")
     t0 = time.time()
-    q_sph = (dirs[None, :, :] * (r_nodes[:, None] / L_KPC)).reshape(-1, 3)
+    q_sph = (dirs[None, :, :] * (r_nodes[:, None, None] / L_KPC)).reshape(-1, 3)
     phi_true_nodes = phi_direct(xyz_p, m_p, q_sph).reshape(r_nodes.size, -1)
     phi_true_70 = phi_direct(xyz_p, m_p, dirs * (args.r_outer / L_KPC)).mean()
     phi_true_nodes = phi_true_nodes - phi_true_70
@@ -180,4 +180,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
