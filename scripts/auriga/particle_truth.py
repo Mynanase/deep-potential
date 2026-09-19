@@ -44,12 +44,12 @@ def phi_direct(xyz, m, query, eps_kpc=1e-3, chunk_q=1024, chunk_p=2_000_000):
     out = np.empty(query.shape[0], dtype=np.float64)
 
     def block(qb):
-        acc = jnp.zeros((), dtype=jnp.float64)
+        acc = jnp.zeros(qb.shape[0], dtype=jnp.float64)
         for i in range(0, P.shape[0], chunk_p):
             pb = P[i:i + chunk_p]
             mb = M[i:i + chunk_p]
             d2 = jnp.sum((qb[:, None, :] - pb[None, :, :]) ** 2, axis=2) + eps_kpc ** 2
-            acc += jnp.sum((mb / jnp.sqrt(d2)).astype(jnp.float64))
+            acc += jnp.sum((mb / jnp.sqrt(d2)).astype(jnp.float64), axis=1)
         return -G_KPC_KMS2_MSUN * acc
 
     block_jit = jax.jit(block)
