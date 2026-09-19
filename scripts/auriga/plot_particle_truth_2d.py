@@ -249,7 +249,7 @@ def main():
         print("saved", p)
 
     # ===================== figure S: slab surface density ==================
-    figS, axS = ofs.figure(width=4.6, ratio=1.02)
+    figS, axS = ofs.figure(width=ofs.COLUMN, ratio=1.06)
     logS = np.where(sigma_slab.T > 0, np.log10(sigma_slab.T), np.nan)
     imS = axS.pcolormesh(esx, esz, logS, cmap=cmap_seq, rasterized=True,
                          shading="auto")
