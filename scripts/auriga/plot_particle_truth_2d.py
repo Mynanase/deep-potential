@@ -113,7 +113,7 @@ def main():
         phi_prof = f["potential/phi_sphere_mean"][:]
         phi_dirs = f["potential/phi_dirs"][:].astype(np.float64)
         rho3d = f["density/rho3d"][:]
-        edges3 = f["density/rho3d_edges_kpc"][:]
+        edges3d = np.asarray(f["density/rho3d_edges_kpc"][:])
         rho_r = f["density/rho_r"][:]
         re_r = f["density/rho_r_edges_kpc"][:]
         sigma_slab = f["density/sigma_slab"][:]
@@ -157,7 +157,8 @@ def main():
     print(f"pointwise residual +-p98 = {rabs:.1f} (km/s)^2 (handoff 7374.6)")
 
     # --- density: truth midplane from the histogram product ----------------
-    c3 = 0.5 * (edges3[:-1] + edges3[1:])
+    ex3 = edges3d[0]  # identical symmetric edges for x/y/z
+    c3 = 0.5 * (ex3[:-1] + ex3[1:])
     jy = int(np.argmin(np.abs(c3)))
     y_c = float(c3[jy])
     rho_true_mid = rho3d[:, jy, :].T.astype(np.float64)  # rows z, cols x
