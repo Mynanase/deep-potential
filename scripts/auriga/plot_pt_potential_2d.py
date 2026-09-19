@@ -74,8 +74,9 @@ def main():
     phi_true_nodes = phi_direct(xyz_p, m_p, q_sph).reshape(r_nodes.size, -1)
     phi_true_70 = phi_direct(xyz_p, m_p, dirs * (args.r_outer / L_KPC)).mean()
     phi_true_nodes = phi_true_nodes - phi_true_70
+    phi_true_prof = phi_true_nodes.mean(axis=1)
     print(f"sphere means on {r_nodes.size}x{args.n_dirs} dirs in {time.time()-t0:.0f}s; "
-          f"Phi_true(1.09)={phi_true_nodes[0].mean():.1f}, sigma/|Phi| at r=5/20/70 kpc = "
+          f"Phi_true(1.09)={phi_true_prof[0]:.1f}, sigma/|Phi| at r=5/20/70 kpc = "
           + "/".join("%.2e" % v for v in
                      (phi_true_nodes[np.argmin(np.abs(r_nodes-r))].std()
                       / abs(phi_true_nodes[np.argmin(np.abs(r_nodes-r))].mean())
@@ -106,12 +107,12 @@ def main():
         for j, r in enumerate(r_nodes):
             nodes[j] = float(np.mean(np.asarray(val(
                 jnp.asarray(dirs * (r / L_KPC)))))) * V_KMS ** 2
-        c = float(np.mean(nodes - phi_true_nodes))
+        c = float(np.mean(nodes - phi_true_prof))
         slices[label] = grid - c
         consts[label] = c
         profs[label] = nodes - c
         print(f"[{label}] slice+profile in {time.time()-t0:.0f}s; c={c:.1f}; "
-              f"sphere-mean RMS vs truth={float(np.sqrt(np.mean((nodes - c - phi_true_nodes) ** 2))):.1f} (km/s)^2")
+              f"sphere-mean RMS vs truth={float(np.sqrt(np.mean((nodes - c - phi_true_prof) ** 2))):.1f} (km/s)^2")
 
     valid = (rr >= r_anchor) & (rr <= args.r_outer)
     phi_true_map = np.where(valid, phi_true_grid, np.nan)
@@ -136,7 +137,7 @@ def main():
                                              vmin=vmin, vmax=vmax,
                                              rasterized=True, shading="auto"))
     axp = axes[1, 0]
-    axp.plot(r_nodes, phi_true_nodes, color="0.2", lw=1.6, label="truth (particles)")
+    axp.plot(r_nodes, phi_true_prof, color="0.2", lw=1.6, label="truth (particles)")
     for l in MODELS:
         axp.plot(r_nodes, profs[l], color=ofs.PALETTE[COLOR[l]], lw=1.2)
     axp.set_xlabel("r [kpc]")
@@ -169,7 +170,7 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     np.savez(args.output_dir / "pt_potential_2d.npz",
              x_kpc=xs, r_grid=rr, valid=valid, r_nodes=r_nodes,
-             phi_true_nodes=phi_true_nodes, phi_true_grid=phi_true_grid,
+             phi_true_prof=phi_true_prof, phi_true_dirs=phi_true_nodes, phi_true_grid=phi_true_grid,
              **{f"{l}_{k}": v for l in MODELS
                 for k, v in (("phi", slices[l]), ("c", consts[l]),
                              ("prof", profs[l]))})
