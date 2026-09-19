@@ -49,7 +49,7 @@ def phi_direct(xyz, m, query, eps_kpc=1e-3, chunk_q=1024, chunk_p=2_000_000):
             pb = P[i:i + chunk_p]
             mb = M[i:i + chunk_p]
             d2 = jnp.sum((qb[:, None, :] - pb[None, :, :]) ** 2, axis=2) + eps_kpc ** 2
-            acc += jnp.sum((mb / jnp.sqrt(d2)).astype(jnp.float64), axis=1)
+            acc += jnp.sum(mb / jnp.sqrt(d2), axis=1).astype(jnp.float64)
         return -G_KPC_KMS2_MSUN * acc
 
     block_jit = jax.jit(block)
