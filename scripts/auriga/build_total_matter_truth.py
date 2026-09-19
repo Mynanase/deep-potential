@@ -107,8 +107,14 @@ def main():
              np.unique(pid_snap).size, pid_snap.size))
     rng = np.random.default_rng(0)
     sel = rng.choice(common.size, size=min(args.n_match, common.size), replace=False)
-    R, mu_s, mu_a, scale = umeyama(xyz_snap[ib[sel]], xyz_al[ia[sel]])
-    resid = np.linalg.norm(((xyz_snap[ib] - mu_s) * scale) @ R + mu_a - xyz_al[ia], axis=1)
+    from scipy.linalg import orthogonal_procrustes
+    s_fix = 1000.0 / float(attrs["HubbleParam"])
+    mu_a = xyz_al[ia].mean(axis=0)
+    A = (xyz_snap[ib[sel]] - gpos) * s_fix
+    R, _ = orthogonal_procrustes(A, xyz_al[ia[sel]] - mu_a)
+    scale = s_fix
+    mu_s = gpos.copy()
+    resid = np.linalg.norm(((xyz_snap[ib] - gpos) * scale) @ R + mu_a - xyz_al[ia], axis=1)
     r_snap = np.linalg.norm(xyz_snap[ib] - gpos, axis=1)
     r_al = np.linalg.norm(xyz_al[ia], axis=1)
     ratio = r_al / np.maximum(r_snap, 1e-12)
@@ -125,7 +131,7 @@ def main():
         print("pair %d pid=%d |v_sim|=%.6g |v_al|=%.4g cos=%.4f"
               % (j, common[j], np.linalg.norm(v_sim), np.linalg.norm(v_al), cosang))
     print("matched IDs: %d; fit on %d" % (common.size, sel.size))
-    print("similarity: scale=%.6f det(R)=%.6f" % (scale, np.linalg.det(R)))
+    print("fixed-units fit: scale=%.6f det(R)=%.6f mu_al=%s" % (scale, np.linalg.det(R), np.round(mu_a, 4).tolist()))
     print("resid median/p99/max = %.3e / %.3e / %.3e kpc"
           % (np.median(resid), np.percentile(resid, 99), resid.max()))
     if np.median(resid) > 1e-4 or np.percentile(resid, 99) > 1e-2:
@@ -134,8 +140,7 @@ def main():
     with h5py.File(args.stars, "r") as f:
         tiv = np.asarray(f.attrs.get("header_Tiv_star", np.full((3, 3), np.nan)))
     if np.isfinite(tiv).all():
-        print("max|scale*R - Tiv| = %.4f  max|scale*R - Tiv.T| = %.4f"
-              % (np.max(np.abs(scale * R - tiv)), np.max(np.abs(scale * R - tiv.T))))
+        print("max|R - Tiv| = %.4f  max|R - Tiv.T| = %.4f" % (np.max(np.abs(R - tiv)), np.max(np.abs(R - tiv.T))))
 
     print("=== STEP 2: load types, transform, cut r<75 kpc ===")
     out = Path(args.output)
@@ -147,7 +152,7 @@ def main():
             for ptype in TYPES:
                 pid, xyz, mm = load_snapshot_particles(args.snapdir, ptype)
                 xyz = wrap_min_image(xyz - gpos, box) + gpos
-                xyz_t = ((xyz - mu_s) * scale) @ R + mu_a
+                xyz_t = ((xyz - gpos) * scale) @ R + mu_a
                 keep = np.linalg.norm(xyz_t, axis=1) <= args.r_max
                 xyz_keep = xyz_t[keep]
                 m = mm[keep]
