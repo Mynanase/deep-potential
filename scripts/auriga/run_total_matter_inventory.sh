@@ -13,6 +13,8 @@ echo '=== DIRECTORY LISTING ==='
 ls -la "$DROOT"
 echo '=== PARENT DATA DIRECTORY ==='
 ls -la "$DUP" | head -40
+echo '=== RAW SNAPSHOT DIRECTORY (recursive) ==='
+find "$DUP/halo12_raw" -maxdepth 3 \( -type f -o -type d \) -printf "%y %10s  %p\n" 2>/dev/null | head -60
 echo '=== H5 INSPECTION ==='
 "$PY" - "$DROOT" "$DUP" <<'PYEOF'
 import sys, os, glob
@@ -46,4 +48,19 @@ for path in files:
     except Exception as e:
         print("  (not h5py-readable:", repr(e)[:120], ")")
 PYEOF
+echo '=== FRAME CHECK: halo12.h5 eta vs halo_12_stars.hdf5 positions ==='
+"$PY" - <<'PYEOF2'
+import h5py, numpy as np
+with h5py.File("/localdisk/kosmos/my-deep-potential/data/auriga/halo12.h5", "r") as f:
+    eta = f["eta"][:3, :3]
+    sid = f["source_index"][:3]
+    pid = f["particle_id"][:3]
+with h5py.File("/localdisk/kosmos/my-deep-potential/data/halo_12_stars.hdf5", "r") as f:
+    g = f["PartType4"]
+    xyz = np.stack([g["x"][:3], g["y"][:3], g["z"][:3]], axis=1)
+    pid_s = g["ParticleIDs"][:3]
+print("halo12.h5 eta*10 kpc:", np.round(eta * 10.0, 4).tolist())
+print("halo_12_stars xyz[0:3] kpc:", np.round(xyz, 4).tolist())
+print("source_index:", sid.tolist(), " pid match:", bool(np.array_equal(pid, pid_s)))
+PYEOF2
 echo '=== TOTAL-MATTER INVENTORY DONE ==='
