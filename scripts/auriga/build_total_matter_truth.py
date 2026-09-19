@@ -109,9 +109,9 @@ def main():
     sel = rng.choice(common.size, size=min(args.n_match, common.size), replace=False)
     from scipy.linalg import orthogonal_procrustes
     s_fix = 1000.0 / float(attrs["HubbleParam"])
-    mu_a = xyz_al[ia].mean(axis=0)
     A = (xyz_snap[ib[sel]] - gpos) * s_fix
-    R, _ = orthogonal_procrustes(A, xyz_al[ia[sel]] - mu_a)
+    mu_a = np.zeros(3)
+    R, _ = orthogonal_procrustes(A, xyz_al[ia[sel]])
     scale = s_fix
     mu_s = gpos.copy()
     resid = np.linalg.norm(((xyz_snap[ib] - gpos) * scale) @ R + mu_a - xyz_al[ia], axis=1)
