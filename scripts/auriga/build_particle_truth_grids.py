@@ -151,9 +151,9 @@ def main():
 
     hw = args.slab_half_width
     sel = np.abs(xyz[:, 1]) <= hw
-    Hs, es = np.histogram2d(xyz[sel, 0], xyz[sel, 2], bins=args.slab_n,
-                            range=[(-ext, ext)] * 2, weights=m[sel])
-    sigma_slab = (Hs / (es[0][1] - es[0][0]) ** 2).astype(np.float32)
+    Hs, esx, esz = np.histogram2d(xyz[sel, 0], xyz[sel, 2], bins=args.slab_n,
+                                  range=[(-ext, ext)] * 2, weights=m[sel])
+    sigma_slab = (Hs / (esx[1] - esx[0]) / (esz[1] - esz[0])).astype(np.float32)
     print(f"sigma_slab {args.slab_n}^2 over [-{ext},{ext}]^2, |y|<={hw} kpc: "
           f"{int(sel.sum())} particles; nonzero cells "
           f"{np.mean(Hs>0)*100:.1f}%; Sigma range "
@@ -214,7 +214,8 @@ def main():
         g["rho_r"] = rho_r
         g["rho_r_edges_kpc"] = re
         g["sigma_slab"] = sigma_slab
-        g["sigma_slab_edges_kpc"] = es
+        g["sigma_slab_edges_x_kpc"] = esx
+        g["sigma_slab_edges_z_kpc"] = esz
     size = args.output.stat().st_size
     print(f"wrote {args.output} ({size/1e6:.2f} MB)")
 
