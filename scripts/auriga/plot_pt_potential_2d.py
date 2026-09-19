@@ -70,17 +70,17 @@ def main():
 
     print("=== truth potential: sphere means then slice ===")
     t0 = time.time()
-    q_sph = (dirs[None, :, :] * (r_nodes[:, None, None] / L_KPC)).reshape(-1, 3)
+    q_sph = (dirs[None, :, :] * r_nodes[:, None, None]).reshape(-1, 3)
     phi_true_nodes = phi_direct(xyz_p, m_p, q_sph).reshape(r_nodes.size, -1)
-    phi_true_70 = phi_direct(xyz_p, m_p, dirs * (args.r_outer / L_KPC)).mean()
+    phi_true_70 = phi_direct(xyz_p, m_p, dirs * args.r_outer).mean()
     phi_true_nodes = phi_true_nodes - phi_true_70
     phi_true_prof = phi_true_nodes.mean(axis=1)
     print(f"sphere means on {r_nodes.size}x{args.n_dirs} dirs in {time.time()-t0:.0f}s; "
-          f"Phi_true(1.09)={phi_true_prof[0]:.1f}, sigma/|Phi| at r=5/20/70 kpc = "
+          f"Phi_true(1.09)={phi_true_prof[0]:.1f} (expect ~ -1.77e5); sigma_Omega at r=5/20 kpc = "
           + "/".join("%.2e" % v for v in
                      (phi_true_nodes[np.argmin(np.abs(r_nodes-r))].std()
                       / abs(phi_true_nodes[np.argmin(np.abs(r_nodes-r))].mean())
-                      for r in (5.0, 20.0, 70.0))))
+                      for r in (5.0, 20.0))))
 
     xs = np.linspace(-args.r_outer, args.r_outer, args.n_grid)
     xx, zz = np.meshgrid(xs, xs, indexing="xy")
