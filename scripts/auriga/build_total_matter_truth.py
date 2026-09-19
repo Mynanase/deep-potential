@@ -102,10 +102,28 @@ def main():
         pid_al = np.asarray(g["ParticleIDs"][:])
         xyz_al = np.stack([g["x"][:], g["y"][:], g["z"][:]], axis=1).astype(np.float64)
     common, ia, ib = np.intersect1d(pid_al, pid_snap, return_indices=True)
+    print("unique pid: aligned %d/%d, snapshot %d/%d"
+          % (np.unique(pid_al).size, pid_al.size,
+             np.unique(pid_snap).size, pid_snap.size))
     rng = np.random.default_rng(0)
     sel = rng.choice(common.size, size=min(args.n_match, common.size), replace=False)
     R, mu_s, mu_a, scale = umeyama(xyz_snap[ib[sel]], xyz_al[ia[sel]])
     resid = np.linalg.norm(((xyz_snap[ib] - mu_s) * scale) @ R + mu_a - xyz_al[ia], axis=1)
+    r_snap = np.linalg.norm(xyz_snap[ib] - gpos, axis=1)
+    r_al = np.linalg.norm(xyz_al[ia], axis=1)
+    ratio = r_al / np.maximum(r_snap, 1e-12)
+    print("radius ratio |x_al| / |x_sim-gpos|: median/p05/p95/max = "
+          "%.4f / %.4f / %.4f / %.4f" % (np.median(ratio),
+          np.percentile(ratio, 5), np.percentile(ratio, 95), ratio.max()))
+    print("|x_sim - gpos| median = %.6g (snap units); |x_al| median = %.4g kpc"
+          % (np.median(r_snap), np.median(r_al)))
+    for k in range(4):
+        j = int(rng.integers(common.size))
+        v_sim = xyz_snap[ib[j]] - gpos
+        v_al = xyz_al[ia[j]]
+        cosang = float(np.dot(v_sim, v_al) / (np.linalg.norm(v_sim) * np.linalg.norm(v_al)))
+        print("pair %d pid=%d |v_sim|=%.6g |v_al|=%.4g cos=%.4f"
+              % (j, common[j], np.linalg.norm(v_sim), np.linalg.norm(v_al), cosang))
     print("matched IDs: %d; fit on %d" % (common.size, sel.size))
     print("similarity: scale=%.6f det(R)=%.6f" % (scale, np.linalg.det(R)))
     print("resid median/p99/max = %.3e / %.3e / %.3e kpc"
@@ -194,4 +212,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
