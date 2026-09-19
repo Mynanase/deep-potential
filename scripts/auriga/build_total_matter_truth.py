@@ -66,11 +66,16 @@ def load_snapshot_particles(snapdir, ptype):
 
 
 def kabsch(x_sim, x_al):
-    """R, mu_s, mu_a with x_al ~= (x_sim - mu_s) R + mu_a (reflections allowed)."""
-    from scipy.linalg import orthogonal_procrustes
+    """Umeyama similarity: x_al ~= (x_sim - mu_s) * s * R + mu_a, reflections allowed."""
     mu_s, mu_a = x_sim.mean(axis=0), x_al.mean(axis=0)
-    R, _ = orthogonal_procrustes(x_sim - mu_s, x_al - mu_a)
-    return R, mu_s, mu_a
+    xs, xa = x_sim - mu_s, x_al - mu_a
+    cov = xs.T @ xa / xs.shape[0]
+    U, D, Vt = np.linalg.svd(cov)
+    S = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))])
+    R = U @ S @ Vt
+    var_x = float((xs ** 2).sum() / xs.shape[0])
+    scale = float(np.trace(np.diag(D) @ S)) / var_x
+    return R, mu_s, mu_a, scale
 
 
 def main():
@@ -99,14 +104,20 @@ def main():
     common, ia, ib = np.intersect1d(pid_al, pid_snap, return_indices=True)
     rng = np.random.default_rng(0)
     sel = rng.choice(common.size, size=min(args.n_match, common.size), replace=False)
-    R, mu_s, mu_a = kabsch(xyz_snap[ib[sel]], xyz_al[ia[sel]])
-    resid = np.linalg.norm((xyz_snap[ib] - mu_s) @ R + mu_a - xyz_al[ia], axis=1)
+    R, mu_s, mu_a, scale = kabsch(xyz_snap[ib[sel]], xyz_al[ia[sel]])
+    resid = np.linalg.norm(((xyz_snap[ib] - mu_s) * scale) @ R + mu_a - xyz_al[ia], axis=1)
+    with h5py.File(args.snapdir + "/snapshot_127.0.hdf5", "r") as fh:
+        attrs = {k: fh["Header"].attrs[k] for k in
+                 ("UnitLength_in_cm", "Time", "HubbleParam", "BoxSize")
+                 if k in fh["Header"].attrs}
+    print("snapshot Header:", attrs)
     print(f"matched IDs: {common.size}; Kabsch on {sel.size}; "
           f"max|resid| = {resid.max():.3e} kpc (gate {args.residual_gate:.0e})")
     if resid.max() > args.residual_gate:
         print("TRANSFORM GATE FAILED")
         return 4
     print("R =", np.round(R, 6).tolist(), " det(R) =", round(float(np.linalg.det(R)), 6),
+          " scale =", round(scale, 6),
           " mu_sim =", np.round(mu_s, 4).tolist(), " mu_al =", np.round(mu_a, 4).tolist())
     with h5py.File(args.stars, "r") as f:
         tiv = np.asarray(f.attrs.get("header_Tiv_star",
@@ -124,7 +135,7 @@ def main():
         with h5py.File(out, "w") as fo:
             for ptype in TYPES:
                 pid, xyz, mm = load_snapshot_particles(args.snapdir, ptype)
-                xyz_t = (xyz - mu_s) @ R + mu_a
+                xyz_t = ((xyz - mu_s) * scale) @ R + mu_a
                 keep = np.linalg.norm(xyz_t, axis=1) <= args.r_max
                 xyz_keep = xyz_t[keep]
                 m = mm[keep]
@@ -141,7 +152,8 @@ def main():
             fo.attrs.update(dict(
                 schema="dpjax.total-matter-particles.starframe.v1",
                 snapdir=args.snapdir, r_max_kpc=args.r_max,
-                transform_R=R.tolist(), mu_sim_kpc=mu_s.tolist(), mu_al_kpc=mu_a.tolist(),
+                transform_R=R.tolist(), transform_scale=float(scale),
+                mu_sim_kpc=mu_s.tolist(), mu_al_kpc=mu_a.tolist(),
                 counts=json.dumps(counts),
                 total_mass=sum(masses.values())))
         print(f"asset written: {out}")
