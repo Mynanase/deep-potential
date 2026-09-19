@@ -235,6 +235,8 @@ def reweight_table(v, w, r, v_pop, w_pop, r_pop, tag):
 
 def halfsplit_w1_floor(v, w, reps, rng, subsample=None):
     """Truth-vs-truth W1 on random half splits: the finite-sample W1 scale."""
+    ok = np.isfinite(v).all(axis=1) & np.isfinite(w)
+    v, w = v[ok], w[ok]
     n = len(w)
     if subsample and n > subsample:
         idx = rng.choice(n, size=subsample, replace=False)
@@ -517,7 +519,7 @@ def main(argv=None):
                    eval_seeds=EVAL_SEEDS, val_frac=VAL_FRAC, b_split=B_SPLIT,
                    protocol_noise_max_kms=max_noise,
                    reweight_max_err_raw_kms=max_raw_err,
-                   reweight_max_err_rew_kms=max_rew,
+                   reweight_max_err_rew_kms=max_rew_err,
                    elapsed_s=round(time.time() - t0, 1))
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"=== EVAL-PROTOCOL BIAS DONE in {summary['elapsed_s']}s; outputs in {OUT} ===",
