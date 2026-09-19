@@ -84,7 +84,9 @@ def truth_potential(truth, r_fine):
     g_int = G_KPC_KMS2_MSUN * m_of_s / s ** 2
     cum = np.concatenate([[0.0],
                           np.cumsum((g_int[:-1] + g_int[1:]) * np.diff(s) / 2.0)])[::-1]
-    return np.interp(r_fine, s, cum), r_zero
+    # Standard sign convention: Phi(70 kpc) = 0 and negative interior, so the
+    # truth profile increases outward like the model potentials (n.grad Phi > 0).
+    return np.interp(r_fine, s, -cum), r_zero
 
 
 def main():
