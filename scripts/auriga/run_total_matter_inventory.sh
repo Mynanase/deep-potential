@@ -57,10 +57,12 @@ with h5py.File("/localdisk/kosmos/my-deep-potential/data/auriga/halo12.h5", "r")
     pid = f["particle_id"][:3]
 with h5py.File("/localdisk/kosmos/my-deep-potential/data/halo_12_stars.hdf5", "r") as f:
     g = f["PartType4"]
-    xyz = np.stack([g["x"][:3], g["y"][:3], g["z"][:3]], axis=1)
-    pid_s = g["ParticleIDs"][:3]
+    sid0 = np.asarray([1182480, 848783, 360647], dtype=np.int64)
+    xyz = np.stack([g["x"][sid0], g["y"][sid0], g["z"][sid0]], axis=1)
+    pid_s = g["ParticleIDs"][sid0]
 print("halo12.h5 eta*10 kpc:", np.round(eta * 10.0, 4).tolist())
-print("halo_12_stars xyz[0:3] kpc:", np.round(xyz, 4).tolist())
-print("source_index:", sid.tolist(), " pid match:", bool(np.array_equal(pid, pid_s)))
+print("halo_12_stars xyz[source_index] kpc:", np.round(xyz, 4).tolist())
+print("pid match at source_index:", bool(np.array_equal(pid, pid_s)))
+print("R = xyz_aligned = eta*10 vs xyz[sid]: max|dR| =", float(np.max(np.abs(eta * 10.0 - xyz))))
 PYEOF2
 echo '=== TOTAL-MATTER INVENTORY DONE ==='
