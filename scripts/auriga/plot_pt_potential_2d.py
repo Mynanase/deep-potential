@@ -75,7 +75,7 @@ def main():
     phi_true_70 = phi_direct(xyz_p, m_p, dirs * (args.r_outer / L_KPC)).mean()
     phi_true_nodes = phi_true_nodes - phi_true_70
     print(f"sphere means on {r_nodes.size}x{args.n_dirs} dirs in {time.time()-t0:.0f}s; "
-          f"Phi_true(1.09)={phi_true_nodes[0]:.1f}, sigma/|Phi| at r=5/20/70 kpc = "
+          f"Phi_true(1.09)={phi_true_nodes[0].mean():.1f}, sigma/|Phi| at r=5/20/70 kpc = "
           + "/".join("%.2e" % v for v in
                      (phi_true_nodes[np.argmin(np.abs(r_nodes-r))].std()
                       / abs(phi_true_nodes[np.argmin(np.abs(r_nodes-r))].mean())
