@@ -133,13 +133,17 @@ def in_sorted(pid_query, pid_sorted_ref):
 
 def order_correlation_table(data):
     rows = []
-    pid_sorted = {k: np.sort(d["pid"]) for k, d in data.items()}
+    pid_order = {k: np.argsort(d["pid"], kind="stable") for k, d in data.items()}
+    pid_sorted = {k: d["pid"][pid_order[k]] for k, d in data.items()}
     for a, b in [("full", "clean"), ("clean", "csmooth"), ("full", "csmooth")]:
         da, db = data[a], data[b]
         shared = np.isin(da["pid"], db["pid"])
         i_sh = np.flatnonzero(shared)
         pos_a = i_sh.astype(np.float64)
-        pos_b = np.searchsorted(pid_sorted[b], da["pid"][i_sh]).astype(np.float64)
+        # row index of each shared particle in file b (its actual row, not its
+        # rank in the pid-sorted array: the files are shuffled, not pid-sorted)
+        j_sh = pid_order[b][np.searchsorted(pid_sorted[b], da["pid"][i_sh])]
+        pos_b = j_sh.astype(np.float64)
         band = bin_of(da["r_kpc"][i_sh])
         bands = [("all", np.ones(i_sh.size, dtype=bool))]
         bands += [(f"bin{k}", band == k) for k in range(N_BINS)]
@@ -215,7 +219,7 @@ def reweight_table(v, w, r, v_pop, w_pop, r_pop, tag):
             rows.append(dict(
                 tag=tag, bin=b, r_lo_kpc=lo, r_hi_kpc=hi, comp=name,
                 n=int(ib.sum()),
-                n_cells_covered=int(np.unique(cell_p[m_pool > 0]).size),
+                n_cells_covered=int((m_pool > 0).sum()),
                 n_cells_pop=int((m_pop > 0).sum()),
                 pool_mean_raw=wmean(v[ib, c], w[ib]) * KMS,
                 pool_sigma_raw=wstd(v[ib, c], w[ib]) * KMS,
@@ -263,6 +267,24 @@ def selftest():
     assert np.array_equal(h1, h2) and not np.array_equal(h1, h3)
     frac = float(np.mean(h1 < VAL_FRAC))
     assert abs(frac - VAL_FRAC) < 0.05, f"hash frac {frac} not ~{VAL_FRAC}"
+
+    # Order-correlation selftest: an identical pid set stored in reversed row
+    # order must give rho = -1 when pids map to their ROW indices; mapping to
+    # the rank in the pid-sorted array instead would give +1.
+    n_ord = 240
+    pid_ord = np.arange(n_ord, dtype=np.int64) + 5000
+    r_ord = np.full(n_ord, 5.0)
+    data_syn = {
+        "full": dict(pid=pid_ord, r_kpc=r_ord),
+        "clean": dict(pid=pid_ord[::-1].copy(), r_kpc=r_ord.copy()),
+        "csmooth": dict(pid=pid_ord.copy(), r_kpc=r_ord.copy()),
+    }
+    oc = order_correlation_table(data_syn)
+    def get_rho(pair):
+        return float(oc[(oc["pair"] == pair) & (oc["band"] == "all")]
+                     ["spearman"].iloc[0])
+    assert abs(get_rho("full-clean") + 1.0) < 1e-9, get_rho("full-clean")
+    assert abs(get_rho("full-csmooth") - 1.0) < 1e-9, get_rho("full-csmooth")
 
     w = np.full(n, 1.0)
     v3 = np.stack([v_r, v_r, v_r], axis=1)
