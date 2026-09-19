@@ -62,6 +62,22 @@ def main():
     xyz_p, m_p = load_particles(args.asset)
     print(f"particles: n={m_p.size}, M={m_p.sum():.3e} Msun")
 
+    print('--- unit calibration ---')
+    from particle_truth import G_KPC_KMS2_MSUN as GCAL
+    one_xyz = np.array([[10.0, 0.0, 0.0]])
+    one_m = np.array([1.0e5])
+    v = float(phi_direct(one_xyz, one_m, np.array([[0.0, 0.0, 0.0]]))[0])
+    print('single particle m=1e5 at 10 kpc, query origin:', v,
+          'expected', -GCAL * 1e5 / 10.0)
+    rng = np.random.default_rng(1)
+    sel = rng.choice(m_p.size, size=200000, replace=False)
+    q0 = np.array([[5.0, 0.0, 0.0]])
+    d = np.linalg.norm(xyz_p[sel] - q0, axis=1)
+    s_numpy = float(np.sum(m_p[sel] / d) * 4.30091e-6)
+    print('numpy subsample 2e5 particles, sum m/d * G (partial, not full):', s_numpy)
+    print('full phi_direct at (5,0,0):', float(phi_direct(xyz_p, m_p, q0)[0]))
+    print('--- end calibration ---')
+
     edges = np.asarray([1.0, 1.0906, 70.0])
     r_anchor = 1.0906
     r_nodes = np.asarray(make_radial_nodes(r_anchor, args.r_outer,
