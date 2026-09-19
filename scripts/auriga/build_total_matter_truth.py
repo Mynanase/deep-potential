@@ -144,9 +144,16 @@ def main():
 
     print("=== STEP 2: load types, transform, cut r<75 kpc ===")
     out = Path(args.output)
+    reuse = False
     if out.exists():
-        print("asset exists - reuse (delete to rebuild):", out)
-    else:
+        with h5py.File(out, "r") as fchk:
+            reuse = fchk.attrs.get("mass_units") == "Msun"
+        if reuse:
+            print("asset exists with Msun masses - reuse:", out)
+        else:
+            print("asset exists but lacks Msun masses - rebuilding")
+            out.unlink()
+    if not reuse:
         counts, masses = {}, {}
         with h5py.File(out, "w") as fo:
             for ptype in TYPES:
@@ -155,7 +162,7 @@ def main():
                 xyz_t = ((xyz - gpos) * scale) @ R + mu_a
                 keep = np.linalg.norm(xyz_t, axis=1) <= args.r_max
                 xyz_keep = xyz_t[keep]
-                m = mm[keep]
+                m = mm[keep] * (1.0e10 / float(attrs["HubbleParam"]))
                 g5 = fo.create_group(ptype)
                 g5.create_dataset("ParticleIDs", data=pid[keep], compression="lzf")
                 g5.create_dataset("x", data=xyz_keep[:, 0].astype(np.float32), compression="lzf")
@@ -171,7 +178,7 @@ def main():
                 snapdir=args.snapdir, r_max_kpc=args.r_max,
                 transform_R=R.tolist(), transform_scale=float(scale),
                 mu_sim_kpc=mu_s.tolist(), mu_al_kpc=mu_a.tolist(),
-                counts=json.dumps(counts),
+                counts=json.dumps(counts), mass_units="Msun",
                 total_mass=sum(masses.values())))
         print("asset written:", out)
 
