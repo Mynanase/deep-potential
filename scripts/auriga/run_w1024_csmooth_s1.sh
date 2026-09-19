@@ -84,7 +84,10 @@ done
 
 echo '=== S1 STRATIFICATION EVIDENCE ==='
 "$PY" - <<'PYEOF'
-import h5py, numpy as np, sys
+import h5py, numpy as np, sys, json
+fs_opts = json.load(open("runs/orx/options.json"))["flow_sampling"]
+n_req = int(fs_opts["n_samples"])
+expected_n = int(sum(max(1, round(float(f) * n_req)) for f in fs_opts["radial_alloc"]["fractions"]))
 with h5py.File("runs/orx/data/df_gradients.h5", "r") as f:
     keys = sorted(f.keys())
     w = f["importance_weights"][:]
@@ -95,7 +98,8 @@ print("df_gradients keys:", keys)
 print("radial bin edges (q):", edges.tolist())
 print("radial quotas: counts={} pool_masses={}".format(counts.astype(int).tolist(), np.round(masses, 4).tolist()))
 print("weights: n={} mean={:.6f} range=[{:.4f},{:.4f}]".format(len(w), w.mean(), w.min(), w.max()))
-ok = ("importance_weights" in keys and len(w) == 262144 and abs(w.mean() - 1.0) < 1e-3)
+print("expected quota total (rounded per-bin):", expected_n)
+ok = ("importance_weights" in keys and len(w) == expected_n and int(counts.sum()) == expected_n and abs(w.mean() - 1.0) < 1e-3)
 print("S1 WEIGHTS CHECK:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 4)
 PYEOF
