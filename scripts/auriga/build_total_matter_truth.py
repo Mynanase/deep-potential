@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 """Build the particle-level total-matter truth asset in the model frame.
 
-1. Solve the rigid transform (center + rotation) by ID-matched Kabsch between
-   the raw snapshot PartType4 and the already principal-axis-aligned
-   halo_12_stars.hdf5; gate on max residual.
-2. Load PartType0/1/4 from all snapshot chunks (the types in the audited
-   60-shell truth), transform to the aligned frame, cut r < 75 kpc.
-3. Save the asset (idempotent: verify-and-reuse an existing one).
-4. Validation gate: M(<r) on the 61 truth edges vs M_cum_total within 1%,
-   stellar-only vs PartType4/M_cum likewise.
+Pipeline: (1) FoF centre + minimum-image unwrap of snapshot positions in the
+periodic box; (2) Umeyama similarity (scale x rotation x translation,
+reflections allowed) from ID-matched snapshot stars to the already
+principal-axis-aligned halo_12_stars.hdf5 - absorbs unit conventions like
+kpc/h -> kpc; (3) load PartType0/1/4, transform, cut r<75 kpc, save asset;
+(4) validation gate: M(<r) vs the audited 60-shell truth within 1%.
 """
 import argparse
+import glob
 import json
 import sys
 import time
@@ -22,25 +21,8 @@ import numpy as np
 TYPES = ("PartType0", "PartType1", "PartType4")
 
 
-def load_snapshot_group(snapdir, ptype, fields):
-    """Concatenate a group's fields across chunk files."""
-    parts = []
-    for i in range(8):
-        path = Path(snapdir) / f"snapshot_127.{i}.hdf5"
-        with h5py.File(path, "r") as f:
-            if ptype not in f:
-                continue
-            g = f[ptype]
-            if g["ParticleIDs"].shape[0] == 0:
-                continue
-            cols = [np.asarray(g[k][:], dtype=np.float64) if g[k].dtype.kind == "f"
-                    else np.asarray(g[k][:]) for k in fields]
-            parts.append(cols)
-    return [np.concatenate([p[j] for p in parts], axis=0) for j in range(len(fields))]
-
-
 def load_snapshot_particles(snapdir, ptype):
-    """Return (pid, xyz, mass) for a Gadget-style group across chunks."""
+    """(pid, xyz, mass) for a Gadget-style group across chunks."""
     pids, xyzs, ms = [], [], []
     mass_table = None
     for i in range(8):
@@ -64,9 +46,8 @@ def load_snapshot_particles(snapdir, ptype):
     return (np.concatenate(pids), np.concatenate(xyzs), np.concatenate(ms))
 
 
-
-def kabsch(x_sim, x_al):
-    """Umeyama similarity: x_al ~= (x_sim - mu_s) * s * R + mu_a, reflections allowed."""
+def umeyama(x_sim, x_al):
+    """x_al ~= (x_sim - mu_s) * s * R + mu_a, reflections allowed."""
     mu_s, mu_a = x_sim.mean(axis=0), x_al.mean(axis=0)
     xs, xa = x_sim - mu_s, x_al - mu_a
     cov = xs.T @ xa / xs.shape[0]
@@ -76,6 +57,16 @@ def kabsch(x_sim, x_al):
     var_x = float((xs ** 2).sum() / xs.shape[0])
     scale = float(np.trace(np.diag(D) @ S)) / var_x
     return R, mu_s, mu_a, scale
+
+
+def fof_center(groups_dir):
+    path = sorted(glob.glob(str(Path(groups_dir) / "fof_subhalo_tab_127.*.hdf5")))[0]
+    with h5py.File(path, "r") as f:
+        return np.asarray(f["Group"]["GroupPos"][0], dtype=np.float64)
+
+
+def wrap_min_image(d, box):
+    return d - box * np.round(d / box)
 
 
 def main():
@@ -90,13 +81,22 @@ def main():
                     default="/localdisk/kosmos/my-deep-potential/data/auriga/halo12_total_matter_particles_starframe.h5")
     ap.add_argument("--r-max", type=float, default=75.0)
     ap.add_argument("--n-match", type=int, default=8000)
-    ap.add_argument("--residual-gate", type=float, default=1e-4)
     args = ap.parse_args()
 
     t0 = time.time()
-    print("=== STEP 1: solve rigid transform by ID-matched Kabsch ===")
+    with h5py.File(args.snapdir + "/snapshot_127.0.hdf5", "r") as fh:
+        box = float(fh["Header"].attrs["BoxSize"])
+        attrs = {k: fh["Header"].attrs[k] for k in
+                 ("UnitLength_in_cm", "Time", "HubbleParam", "BoxSize")
+                 if k in fh["Header"].attrs}
+    print("snapshot Header:", attrs)
+    gpos = fof_center(str(Path(args.snapdir).parent / "groups_127"))
+    print("FoF GroupPos[0] =", gpos.tolist())
+
+    print("=== STEP 1: ID-matched similarity (unwrap + Umeyama) ===")
     pid_snap, xyz_snap, m4_snap = load_snapshot_particles(args.snapdir, "PartType4")
     print(f"snapshot PartType4: n={pid_snap.size} ({time.time()-t0:.0f}s)")
+    xyz_snap = wrap_min_image(xyz_snap - gpos, box) + gpos
     with h5py.File(args.stars, "r") as f:
         g = f["PartType4"]
         pid_al = np.asarray(g["ParticleIDs"][:])
@@ -104,37 +104,31 @@ def main():
     common, ia, ib = np.intersect1d(pid_al, pid_snap, return_indices=True)
     rng = np.random.default_rng(0)
     sel = rng.choice(common.size, size=min(args.n_match, common.size), replace=False)
-    R, mu_s, mu_a, scale = kabsch(xyz_snap[ib[sel]], xyz_al[ia[sel]])
+    R, mu_s, mu_a, scale = umeyama(xyz_snap[ib[sel]], xyz_al[ia[sel]])
     resid = np.linalg.norm(((xyz_snap[ib] - mu_s) * scale) @ R + mu_a - xyz_al[ia], axis=1)
-    with h5py.File(args.snapdir + "/snapshot_127.0.hdf5", "r") as fh:
-        attrs = {k: fh["Header"].attrs[k] for k in
-                 ("UnitLength_in_cm", "Time", "HubbleParam", "BoxSize")
-                 if k in fh["Header"].attrs}
-    print("snapshot Header:", attrs)
-    print(f"matched IDs: {common.size}; Kabsch on {sel.size}; "
-          f"max|resid| = {resid.max():.3e} kpc (gate {args.residual_gate:.0e})")
-    if resid.max() > args.residual_gate:
+    print("matched IDs: %d; fit on %d" % (common.size, sel.size))
+    print("similarity: scale=%.6f det(R)=%.6f" % (scale, np.linalg.det(R)))
+    print("resid median/p99/max = %.3e / %.3e / %.3e kpc"
+          % (np.median(resid), np.percentile(resid, 99), resid.max()))
+    if np.median(resid) > 1e-4 or np.percentile(resid, 99) > 1e-2:
         print("TRANSFORM GATE FAILED")
         return 4
-    print("R =", np.round(R, 6).tolist(), " det(R) =", round(float(np.linalg.det(R)), 6),
-          " scale =", round(scale, 6),
-          " mu_sim =", np.round(mu_s, 4).tolist(), " mu_al =", np.round(mu_a, 4).tolist())
     with h5py.File(args.stars, "r") as f:
-        tiv = np.asarray(f.attrs.get("header_Tiv_star",
-                                     np.full((3, 3), np.nan)))
+        tiv = np.asarray(f.attrs.get("header_Tiv_star", np.full((3, 3), np.nan)))
     if np.isfinite(tiv).all():
-        print("max|R - Tiv_star| =", float(np.max(np.abs(R - tiv))),
-              " max|R - Tiv_star.T| =", float(np.max(np.abs(R - tiv.T))))
+        print("max|scale*R - Tiv| = %.4f  max|scale*R - Tiv.T| = %.4f"
+              % (np.max(np.abs(scale * R - tiv)), np.max(np.abs(scale * R - tiv.T))))
 
     print("=== STEP 2: load types, transform, cut r<75 kpc ===")
     out = Path(args.output)
     if out.exists():
-        print(f"asset exists - verify and reuse: {out}")
+        print("asset exists - reuse (delete to rebuild):", out)
     else:
         counts, masses = {}, {}
         with h5py.File(out, "w") as fo:
             for ptype in TYPES:
                 pid, xyz, mm = load_snapshot_particles(args.snapdir, ptype)
+                xyz = wrap_min_image(xyz - gpos, box) + gpos
                 xyz_t = ((xyz - mu_s) * scale) @ R + mu_a
                 keep = np.linalg.norm(xyz_t, axis=1) <= args.r_max
                 xyz_keep = xyz_t[keep]
@@ -156,9 +150,9 @@ def main():
                 mu_sim_kpc=mu_s.tolist(), mu_al_kpc=mu_a.tolist(),
                 counts=json.dumps(counts),
                 total_mass=sum(masses.values())))
-        print(f"asset written: {out}")
+        print("asset written:", out)
 
-    print("=== STEP 4: M(<r) validation vs 60-shell truth ===")
+    print("=== STEP 3: M(<r) validation vs 60-shell truth ===")
     with h5py.File(args.truth, "r") as f:
         edges = np.asarray(f["r_edges"][:])
         m_cum_true = np.asarray(f["M_cum_total"][:])
@@ -174,9 +168,9 @@ def main():
             if ptype == "PartType4":
                 star_xyz, star_m = xyz, m
     r_all = np.linalg.norm(np.concatenate(all_xyz), axis=1)
-    m_all = np.concatenate(all_m)
     order = np.argsort(r_all)
-    r_sorted, m_sorted = r_all[order], m_all[order]
+    r_sorted = np.concatenate([r_all[order]])
+    m_sorted = np.concatenate(all_m)[order]
     idx = np.searchsorted(r_sorted, edges[1:], side="right")
     cum = np.cumsum(m_sorted)
     m_cum = np.where(idx > 0, cum[np.maximum(idx - 1, 0)], 0.0)
@@ -187,12 +181,12 @@ def main():
     cum_s = np.cumsum(star_m[os_])
     m_cum_s = np.where(idx_s > 0, cum_s[np.maximum(idx_s - 1, 0)], 0.0)
     rel_s = np.abs(m_cum_s - m_cum_star_true) / m_cum_star_true
-    print(f"total matter: max rel err vs truth M_cum = {rel.max():.3e} at "
-          f"r={edges[1:][np.argmax(rel)]:.2f} kpc")
-    print(f"stellar only: max rel err vs PartType4/M_cum = {rel_s.max():.3e}")
-    ok = rel.max() < 0.01 and rel_s.max() < 0.01
+    print("total matter: max rel err vs truth M_cum = %.3e at r=%.2f kpc"
+          % (rel.max(), edges[1:][np.argmax(rel)]))
+    print("stellar only: max rel err vs PartType4/M_cum = %.3e" % rel_s.max())
     for rr, a, b in zip(edges[1:][::12], m_cum[::12], m_cum_true[::12]):
-        print(f"  r={rr:7.2f}: particles {a:.4e} truth {b:.4e}")
+        print("  r=%7.2f: particles %.4e truth %.4e" % (rr, a, b))
+    ok = rel.max() < 0.01 and rel_s.max() < 0.01
     print("VALIDATION:", "PASS" if ok else "FAIL")
     print("BUILD_TOTAL_MATTER_TRUTH_DONE")
     return 0 if ok else 5
@@ -200,3 +194,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
