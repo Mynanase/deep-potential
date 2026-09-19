@@ -92,6 +92,21 @@ def multipole_power(f, A, meta):
     return frac, per_l
 
 
+def quad_axes(rho, dirs):
+    """Axis ratios of the density-weighted second-moment tensor."""
+    w = rho / rho.mean()
+    M = np.einsum("n,ni,nj->ij", w, dirs, dirs) / dirs.shape[0]
+    ev = np.sort(np.linalg.eigvalsh(M))
+    return float(np.sqrt(ev[0] / ev[2])), float(np.sqrt(ev[1] / ev[2]))
+
+
+def l2_vector(f, A, meta):
+    """Normalized l=2 coefficient block of the least-squares fit."""
+    c, *_ = np.linalg.lstsq(A, f, rcond=None)
+    idx = np.array([i for i, (l, _) in enumerate(meta) if l == 2])
+    v = c[idx]
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", action="append", required=True)
@@ -191,8 +206,9 @@ def main():
         ax.set_xlabel("lon [rad]")
         ax.set_ylabel("lat [rad]")
         ax.annotate(MODEL_TEXT[label] + f"  r={r_nodes[jm]:.1f} kpc",
-                    xy=(0, 1), xycoords="axes fraction", xytext=(0, 10),
-                    textcoords="offset points", fontsize=7, color="#333333")
+                    xy=(0.02, 0.97), xycoords="axes fraction", ha="left",
+                    va="top", fontsize=7, color="#333333",
+                    backgroundcolor="white")
     cb = fig.colorbar(sc, ax=axes[1, :].tolist(), fraction=0.025, pad=0.02)
     cb.set_label(r"$\rho/\langle\rho\rangle_\Omega - 1$")
     handles = [axa.plot([], [], color=ofs.PALETTE[COLOR[l]], lw=1.6)[0]
@@ -207,9 +223,18 @@ def main():
              **{f"{l}_rho_dirs": prof[l] for l in MODELS})
     for p in ofs.save(fig, str(args.output_dir / "s1-density-angular")):
         print("saved", p)
+    jm2 = int(np.argmin(np.abs(r_nodes - args.map_radius)))
+    vecs = {l: l2_vector(prof[l][jm2] / prof[l][jm2].mean() - 1.0, A, meta)
+            for l in MODELS}
+    for a, b in (("base", "s11"), ("base", "S1"), ("s11", "S1")):
+        print(f"l=2 alignment at r={r_nodes[jm2]:.1f} kpc: {a} vs {b} "
+              f"|cos|={abs(float(np.dot(vecs[a], vecs[b]))):.3f}")
+    for l in MODELS:
+        ba, ca = quad_axes(prof[l][jm2], dirs)
+        print(f"  [{l}] density-weighted axes at r={r_nodes[jm2]:.1f} kpc: "
+              f"b/a={ba:.3f}, c/a={ca:.3f}")
     print("DENSITY_ANGULAR_DONE")
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
