@@ -79,9 +79,10 @@ def main():
         r_true, dm_60 = truth_delta_mass(truth, r_in)
         ours = np.interp(r_true, r_nodes, dm_true)
         rel = np.abs(ours / dm_60 - 1.0)
+        i_max = int(np.argmax(rel))
         print(f"monopole dM vs 60-shell dM (annuli from {r_in:.3f} kpc): "
               f"median {np.median(rel)*100:.2f}%, max {rel.max()*100:.2f}% "
-              f"over {r_true.size} shell edges")
+              f"(at r={r_true[i_max]:.2f} kpc) over {r_true.size} shell edges")
 
     dirs = sobol_directions(args.n_dirs, args.sobol_seed)
     m_flux, rel_node, frac_neg = {}, {}, {}
@@ -114,10 +115,20 @@ def main():
         m = (r_nodes > lo) & (r_nodes <= hi)
         row = f"  {lo:4.0f}-{hi:4.0f} kpc ({int(m.sum())} nodes): "
         for l in MODELS:
-            med = float(np.median(np.abs(rel_node[l][m])))
+            med = 100.0 * float(np.median(np.abs(rel_node[l][m])))
             band_med.setdefault(l, []).append(med)
             row += f"{l} {med:5.2f}/{REF_60SHELL[l][bi]:5.2f}   "
         print(row)
+    print("  signed per-node rel err at r >= 45 kpc [%] "
+          "(band medians above use only the nodes listed):")
+    for j in range(r_nodes.size):
+        if r_nodes[j] >= 45.0:
+            print(f"    {r_nodes[j]:6.2f} kpc: "
+                  + "  ".join(f"{l} {100*rel_node[l][j]:+6.2f}" for l in MODELS))
+    print("  note: the published 60-shell run used 37 shell edges (last 67.28 "
+          "kpc); its outermost edge had base +13.90 / s11 +11.16 / S1 -2.44% - "
+          "the same outer-edge pattern seen here; band-median ordering is "
+          "node-set sensitive at 2-3 nodes per outer band.")
 
     outer = r_nodes >= 30.0
     print("=== outer angular negative density (30-70 kpc nodes) ===")
