@@ -78,14 +78,13 @@ def truth_potential(truth, r_fine):
     if r_bind.size != m_cum.size:
         raise ValueError("truth convention mismatch: M_cum does not bind to r_edges[1:]")
 
-    s = np.geomspace(edges[1], edges[-1], 4000)
+    r_zero = float(truth["_r_zero"])
+    s = np.geomspace(edges[1], r_zero, 4000)
     m_of_s = np.exp(np.interp(np.log(s), np.log(r_bind), np.log(m_cum)))
     g_int = G_KPC_KMS2_MSUN * m_of_s / s ** 2
-    phi_outer = 0.0
-    cum = np.concatenate([[phi_outer],
+    cum = np.concatenate([[0.0],
                           np.cumsum((g_int[:-1] + g_int[1:]) * np.diff(s) / 2.0)])[::-1]
-    phi_true_s = phi_outer + cum
-    return np.interp(r_fine, s, phi_true_s), float(edges[-1])
+    return np.interp(r_fine, s, cum), r_zero
 
 
 def main():
@@ -113,8 +112,9 @@ def main():
         raise ValueError(f"truth outer edge {edges[-1]} < r-outer {args.r_outer}")
     r_nodes = np.asarray(make_radial_nodes(r_anchor, args.r_outer,
                                            args.n_sphere_nodes - 1), dtype=float)
-    phi_true_nodes, r_out_edge = truth_potential(truth, r_nodes)
-    print(f"truth: anchor {r_anchor:.4f} kpc, outer edge {r_out_edge:.2f} kpc, "
+    truth["_r_zero"] = args.r_outer
+    phi_true_nodes, r_zero = truth_potential(truth, r_nodes)
+    print(f"truth: anchor {r_anchor:.4f} kpc, zero point at {r_zero:.2f} kpc, "
           f"Phi_true({r_anchor:.2f}) = {phi_true_nodes[0]:.1f} (km/s)^2")
 
     dirs = sobol_directions(args.n_dirs, args.sobol_seed)
@@ -167,9 +167,8 @@ def main():
         for col in range(len(MODELS)):
             ax = axes[row, col]
             ax.set_aspect("equal")
-            ax.set_xlabel("x [kpc]" if row == 1 else "")
-            if col == 0:
-                ax.set_ylabel("z [kpc]")
+            ax.set_xlabel("x [kpc]")
+            ax.set_ylabel("z [kpc]")
     for col, label in enumerate(MODELS):
         axes[0, col].annotate(MODEL_TEXT[label], xy=(0, 1),
                               xycoords="axes fraction", xytext=(0, 14),
