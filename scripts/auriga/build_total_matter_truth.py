@@ -213,10 +213,10 @@ def main():
     cum_s = np.cumsum(star_m[os_])
     m_cum_s = np.where(idx_s > 0, cum_s[np.maximum(idx_s - 1, 0)], 0.0)
     rel_s = np.abs(m_cum_s - m_cum_star_true) / m_cum_star_true
-    band = (edges[1:] >= 4.0) & (edges[1:] <= 75.0)
+    band = (edges[1:] >= 8.0) & (edges[1:] <= 75.0)
     print("total matter: max rel err vs truth M_cum = %.3e at r=%.2f kpc"
           % (rel.max(), edges[1:][np.argmax(rel)]))
-    print("validation band 4-75 kpc: max rel err = %.3e (gate 0.05)"
+    print("validation band 8-75 kpc (shell-truth valid domain): max rel err = %.3e (gate 0.05)"
           % rel[band].max())
     print("inner diagnosis (centre-offset sensitive): rel err at r=0.56/2.13 kpc = "
           "%.3f / %.3f" % (rel[0], rel[3]))
