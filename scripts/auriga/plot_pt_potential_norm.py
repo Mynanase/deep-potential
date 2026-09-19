@@ -70,11 +70,12 @@ def main():
     print("=== vc2 from the truth monopole profile ===")
     u = np.log(r_nodes)
     vc2 = np.abs(np.gradient(phi_prof, u))  # r|dPhi/dr| = G M(<r)/r
+    centers = 0.5 * (re_r[1:] + re_r[:-1])
+    m_cum_r = np.cumsum(rho_r * 4.0 / 3.0 * np.pi * (re_r[1:] ** 3 - re_r[:-1] ** 3))
     for r in (2.0, 8.0, 20.0, 50.0):
         i = int(np.argmin(np.abs(r_nodes - r)))
         m_mono = vc2[i] * r_nodes[i] / G_KPC_KMS2_MSUN
-        centers = 0.5 * (re_r[1:] + re_r[:-1])
-        m_cum = float(np.interp(r_nodes[i], centers, np.cumsum(rho_r)))
+        m_cum = float(np.interp(r_nodes[i], centers, m_cum_r))
         print(f"vc2({r_nodes[i]:.2f})={vc2[i]:.4e} (km/s)^2, vc={np.sqrt(vc2[i]):.1f} km/s; "
               f"M_mono={m_mono:.3e} Msun vs rho_r cum (misses r<0.5) {m_cum:.3e}, "
               f"ratio {m_mono/m_cum:.4f}")
@@ -156,7 +157,7 @@ def main():
         im_res = ax_res[j].pcolormesh(xs, xs, np.where(valid, resid_n[l], np.nan),
                                       cmap=cmap_div, vmin=-nabs, vmax=nabs,
                                       rasterized=True, shading="auto")
-        annotate_name(ax_res[j], f"{MODEL_TEXT[l]}  RMS {100*rms_n[l]:.1f}%")
+        annotate_name(ax_res[j], f"RMS {100*rms_n[l]:.1f}%")
     bins = np.linspace(-2 * nabs, 2 * nabs, 81)
     for l in MODELS:
         vals = np.where(valid, resid_n[l], np.nan).ravel()
@@ -173,7 +174,7 @@ def main():
         ax_prof.plot(r_nodes, profs[l], color=ofs.PALETTE[COLOR[l]], lw=1.2)
     ax_prof.set_xlabel("r [kpc]")
     ax_prof.set_ylabel(r"$\langle\Phi\rangle_\Omega$ [$(\mathrm{km/s})^2$]")
-    ax_prof.legend(frameon=False, fontsize=6.5, loc="lower right")
+    ax_prof.legend(frameon=False, fontsize=6.5, loc="upper left")
     sig_r = phi_dirs.std(axis=1) / np.abs(phi_dirs.mean(axis=1))
     ax_sig.plot(r_nodes, 100 * sig_r, color="0.2", lw=1.4)
     ax_sig.set_xlabel("r [kpc]")
