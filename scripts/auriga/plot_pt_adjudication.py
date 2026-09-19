@@ -77,6 +77,8 @@ def main():
         edges = np.asarray(truth["r_edges"], dtype=float)
         r_in = float(edges[np.argmin(np.abs(edges - r_nodes[0]))])
         r_true, dm_60 = truth_delta_mass(truth, r_in)
+        keep = r_true <= float(r_nodes[-1])
+        r_true, dm_60 = r_true[keep], dm_60[keep]
         ours = np.interp(r_true, r_nodes, dm_true)
         rel = np.abs(ours / dm_60 - 1.0)
         i_max = int(np.argmax(rel))
