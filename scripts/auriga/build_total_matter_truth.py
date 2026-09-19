@@ -39,6 +39,32 @@ def load_snapshot_group(snapdir, ptype, fields):
     return [np.concatenate([p[j] for p in parts], axis=0) for j in range(len(fields))]
 
 
+def load_snapshot_particles(snapdir, ptype):
+    """Return (pid, xyz, mass) for a Gadget-style group across chunks."""
+    pids, xyzs, ms = [], [], []
+    mass_table = None
+    for i in range(8):
+        path = Path(snapdir) / ("snapshot_127.%d.hdf5" % i)
+        with h5py.File(path, "r") as f:
+            if mass_table is None and "Header" in f:
+                mt = f["Header"].attrs.get("MassTable")
+                mass_table = np.asarray(mt, dtype=np.float64) if mt is not None else None
+            if ptype not in f or f[ptype]["ParticleIDs"].shape[0] == 0:
+                continue
+            g = f[ptype]
+            pids.append(np.asarray(g["ParticleIDs"][:]))
+            xyzs.append(np.asarray(g["Coordinates"][:], dtype=np.float64))
+            if "Masses" in g:
+                ms.append(np.asarray(g["Masses"][:], dtype=np.float64))
+            else:
+                ti = int(ptype[-1])
+                if mass_table is None or mass_table[ti] <= 0:
+                    raise RuntimeError("no Masses and no MassTable for " + ptype)
+                ms.append(np.full(g["ParticleIDs"].shape[0], mass_table[ti]))
+    return (np.concatenate(pids), np.concatenate(xyzs), np.concatenate(ms))
+
+
+
 def kabsch(x_sim, x_al):
     """R, c such that x_al ~= R @ (x_sim - c)."""
     mu_s, mu_a = x_sim.mean(axis=0), x_al.mean(axis=0)
@@ -67,8 +93,7 @@ def main():
 
     t0 = time.time()
     print("=== STEP 1: solve rigid transform by ID-matched Kabsch ===")
-    pid_snap, xyz_snap = load_snapshot_group(
-        args.snapdir, "PartType4", ["ParticleIDs", "x", "y", "z"])
+    pid_snap, xyz_snap, m4_snap = load_snapshot_particles(args.snapdir, "PartType4")
     print(f"snapshot PartType4: n={pid_snap.size} ({time.time()-t0:.0f}s)")
     with h5py.File(args.stars, "r") as f:
         g = f["PartType4"]
@@ -100,14 +125,7 @@ def main():
         counts, masses = {}, {}
         with h5py.File(out, "w") as fo:
             for ptype in TYPES:
-                pid, x, y, z = load_snapshot_group(
-                    args.snapdir, ptype, ["ParticleIDs", "x", "y", "z"])
-                with h5py.File(args.snapdir + "/snapshot_127.0.hdf5", "r") as f0:
-                    mname = "Masses" if "Masses" in f0[ptype] else None
-                if mname is None:
-                    raise RuntimeError(f"no Masses field in {ptype}")
-                mm, = load_snapshot_group(args.snapdir, ptype, ["Masses"])
-                xyz = np.stack([x, y, z], axis=1)
+                pid, xyz, mm = load_snapshot_particles(args.snapdir, ptype)
                 r = np.linalg.norm(xyz - c, axis=1)
                 keep = r <= args.r_max
                 xyz_t = (xyz[keep] - c) @ R.T
