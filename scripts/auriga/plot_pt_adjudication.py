@@ -74,7 +74,8 @@ def main():
 
     if args.truth is not None and Path(args.truth).is_file():
         truth = load_truth(args.truth)
-        r_in = float(r_nodes[0])
+        edges = np.asarray(truth["r_edges"], dtype=float)
+        r_in = float(edges[np.argmin(np.abs(edges - r_nodes[0]))])
         r_true, dm_60 = truth_delta_mass(truth, r_in)
         ours = np.interp(r_true, r_nodes, dm_true)
         rel = np.abs(ours / dm_60 - 1.0)
