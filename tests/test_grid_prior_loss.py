@@ -145,6 +145,68 @@ def test_unweighted_decoupled_loss():
     np.testing.assert_allclose(float(loss), float(expected), rtol=1e-5)
 
 
+def test_inner_weighted_grid_penalty_mean():
+    q, p, dlnf_dq, dlnf_dp, w, _ = _random_inputs()
+    c, beta = -1.0, 1.0
+    # 8 points inside r<3 (30 kpc in code units), 8 outside: the weighted
+    # mean must upweight the near-field Laplacian by the configured factor.
+    near = 2.0 * jnp.ones((8, 3)) / np.sqrt(3)
+    far = 6.0 * jnp.ones((8, 3)) / np.sqrt(3)
+    q_grid = jnp.concatenate([near, far])
+    w_in, r_kpc = 8.0, 30.0
+    loss, _ = pmod.get_phi_loss(
+        QuarticPhi(c), ZeroFrameshift(), None, q, p, dlnf_dq, dlnf_dp,
+        alpha=1.0, beta=beta, lambda_=1.0, l2_potential=0.0, weights=w,
+        q_grid=q_grid, prior_grid_inner_weight=w_in, prior_grid_inner_r_kpc=r_kpc,
+    )
+    dphi = 4.0 * c * q ** 3
+    null = jnp.sum(p * dlnf_dq - dphi * dlnf_dp, axis=1)
+    cbe = jnp.arcsinh(jnp.abs(null))
+    pen = jnp.arcsinh(jnp.maximum(12.0 * (-c) * jnp.sum(q_grid ** 2, axis=1), 0.0))
+    w_grid = jnp.concatenate([jnp.full((8,), w_in), jnp.ones((8,))])
+    expected = (jnp.log(jnp.sum(w * cbe) / jnp.sum(w))
+                + jnp.sum(w_grid * pen) / jnp.sum(w_grid))
+    np.testing.assert_allclose(float(loss), float(expected), rtol=1e-5)
+
+
+def test_inner_weight_disabled_reduces_to_volume_mean():
+    q, p, dlnf_dq, dlnf_dp, w, q_grid = _random_inputs()
+    c = -0.3
+    kw = dict(alpha=1.0, beta=1.0, lambda_=1.0, l2_potential=0.0, weights=w,
+              q_grid=q_grid)
+    plain, _ = pmod.get_phi_loss(QuadPhi(c), ZeroFrameshift(), None,
+                                 q, p, dlnf_dq, dlnf_dp, **kw)
+    disabled, _ = pmod.get_phi_loss(QuadPhi(c), ZeroFrameshift(), None,
+                                    q, p, dlnf_dq, dlnf_dp,
+                                    prior_grid_inner_weight=1.0,
+                                    prior_grid_inner_r_kpc=30.0, **kw)
+    np.testing.assert_allclose(float(plain), float(disabled), rtol=1e-7)
+    assert pmod.grid_prior_weights(q_grid, 1.0, 30.0) is None
+    wg = pmod.grid_prior_weights(q_grid, 8.0, 30.0)
+    r = np.linalg.norm(np.asarray(q_grid), axis=1)
+    np.testing.assert_allclose(np.asarray(wg), np.where(r < 3.0, 8.0, 1.0), rtol=1e-6)
+
+
+def test_grid_prior_penalty_inner_weighted():
+    c = -1.0
+    q_grid = jnp.concatenate([2.0 * jnp.ones((8, 3)) / np.sqrt(3),
+                              6.0 * jnp.ones((8, 3)) / np.sqrt(3)])
+
+    class _Model(eqx.Module):
+        phi_model: object
+
+    model = _Model(QuarticPhi(c))
+    params, static = eqx.partition(model, eqx.is_array)
+    pen = pmod.grid_prior_penalty(params, static, q_grid,
+                                  dict(beta=1.0, prior_grid_inner_weight=8.0,
+                                       prior_grid_inner_r_kpc=30.0))
+    lap = 12.0 * c * jnp.sum(q_grid ** 2, axis=1)
+    pen_vals = jnp.arcsinh(jnp.maximum(-lap, 0.0))
+    w_grid = jnp.concatenate([jnp.full((8,), 8.0), jnp.ones((8,))])
+    np.testing.assert_allclose(float(pen), float(jnp.sum(w_grid * pen_vals) / jnp.sum(w_grid)),
+                               rtol=1e-5)
+
+
 def test_sample_uniform_ball_volume_weighting():
     n, radius = 200_000, 7.0
     pts = np.asarray(pmod.sample_uniform_ball(jax.random.key(3), n, radius))

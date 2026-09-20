@@ -897,7 +897,9 @@ def get_phi_loss(
     l2_potential=0.01,
     l2_selection_function=0.01,
     weights=None,
-    q_grid=None
+    q_grid=None,
+    prior_grid_inner_weight=1.0,
+    prior_grid_inner_r_kpc=30.0
 ):
     """
     Calculates the loss based on the collisionless Boltzmann equation (CBE).
@@ -922,6 +924,10 @@ def get_phi_loss(
             sample positions q; providing it moves the penalty to
             log( sum_i w_i cbe_i / sum_i w_i ) + lambda_ mean_grid(prior_neg),
             volume-weighted over the grid.
+        prior_grid_inner_weight: Inner-region upweighting factor for the
+            decoupled grid penalty (1 keeps the plain volume-weighted mean).
+        prior_grid_inner_r_kpc: Radius (kpc) inside which the upweighting
+            applies (code units: q = x / (10 kpc)).
 
     Returns:
         A tuple (total_loss, loss_without_regularization).
@@ -986,7 +992,13 @@ def get_phi_loss(
         # independent locations (phase-space samples vs. volume grid).
         d2phi_dq2_grid = phi_laplacian_fn(phi_model, q_grid)
         prior_neg_grid = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2_grid, 0.0)) / beta
-        loss = loss + lambda_ * jnp.mean(prior_neg_grid)
+        w_grid = grid_prior_weights(q_grid, prior_grid_inner_weight, prior_grid_inner_r_kpc)
+        if w_grid is None:
+            loss = loss + lambda_ * jnp.mean(prior_neg_grid)
+        else:
+            # Inner-weighted prior: the grid itself stays volume-weighted,
+            # but the penalty mean upweights points inside the inner radius.
+            loss = loss + lambda_ * jnp.sum(w_grid * prior_neg_grid) / jnp.sum(w_grid)
 
     loss_noreg = loss
 
@@ -1080,7 +1092,32 @@ def grid_prior_penalty(params, static, q_grid, loss_params):
     d2phi_dq2 = lap_fn(model.phi_model, q_grid)
     beta = float(loss_params.get("beta", 1.0))
     prior_neg = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2, 0.0)) / beta
-    return jnp.mean(prior_neg)
+    w_grid = grid_prior_weights(
+        q_grid,
+        loss_params.get("prior_grid_inner_weight", 1.0),
+        loss_params.get("prior_grid_inner_r_kpc", 30.0),
+    )
+    if w_grid is None:
+        return jnp.mean(prior_neg)
+    return jnp.sum(w_grid * prior_neg) / jnp.sum(w_grid)
+
+
+def grid_prior_weights(q_grid, prior_grid_inner_weight=1.0, prior_grid_inner_r_kpc=30.0):
+    """Radial weights for the decoupled negative-density prior grid.
+
+    Returns None when inner weighting is disabled (weight <= 1 or r <= 0),
+    which callers treat as the plain volume-weighted mean over the grid.
+    Otherwise grid points inside prior_grid_inner_r_kpc receive
+    prior_grid_inner_weight and outer points keep weight 1, so the penalty
+    estimand becomes sum(w prior_neg)/sum(w) on an unchanged volume grid.
+    Code units: q = x / (10 kpc).
+    """
+    w_in = float(prior_grid_inner_weight)
+    r_in_kpc = float(prior_grid_inner_r_kpc)
+    if w_in <= 1.0 or r_in_kpc <= 0.0:
+        return None
+    r = jnp.linalg.norm(q_grid, axis=1)
+    return jnp.where(r < r_in_kpc / 10.0, w_in, 1.0)
 
 @eqx.filter_jit
 def train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, val_loss):
@@ -1216,6 +1253,13 @@ def train_potential(
     print(f"Number of steps per epoch: {steps_per_epoch}, Batch size: {batch_size}")
     print(f"Number of epochs: {n_epochs}, Total training samples: {n_train}")
     if use_prior_grid:
+        w_in = float(loss_params.get("prior_grid_inner_weight", 1.0))
+        r_in_kpc = float(loss_params.get("prior_grid_inner_r_kpc", 30.0))
+        if w_in > 1.0 and r_in_kpc > 0.0:
+            p_in = (r_in_kpc / (10.0 * prior_grid_q_max)) ** 3
+            share = p_in * w_in / (p_in * w_in + (1.0 - p_in))
+            print(f"Inner-weighted prior: r<{r_in_kpc:g} kpc weight {w_in:g} "
+                  f"(effective inner share of penalty mass ~{100.0 * share:.1f}%)")
         print(f"Negative-density prior decoupled to spatial grid: "
               f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
               f"(uniform ball, volume-weighted), resampled every epoch")
