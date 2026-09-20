@@ -87,7 +87,7 @@ def main():
               f"(at r={r_true[i_max]:.2f} kpc) over {r_true.size} shell edges")
 
     dirs = sobol_directions(args.n_dirs, args.sobol_seed)
-    m_flux, rel_node, frac_neg = {}, {}, {}
+    m_flux, dm_flux, rel_node, frac_neg = {}, {}, {}, {}
     for spec in args.model:
         label, run_dir = spec.split("=", 1)
         t0 = time.time()
@@ -97,6 +97,7 @@ def main():
         dm_flux = mf - mf[0]
         rel = (dm_flux - dm_true) / dm_true
         m_flux[label] = mf
+        dm_flux[label] = dm_flux
         rel_node[label] = rel
         fn = np.empty(r_nodes.size)
         for j, r in enumerate(r_nodes):
@@ -142,18 +143,37 @@ def main():
 
     ofs.use_style()
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    fig, axes = ofs.figure_grid(1, 2, width=ofs.WIDE, ratio=0.38)
+    # Enclosed-mass panels follow artifacts/halo12-potential/figures/
+    # truth-compare.py (truth-compare-baseline-vs-s1.svg, node b08af807):
+    # (a) absolute annulus mass, log-log, truth as a black line, models with
+    #     small circle markers; (b) signed rel err of dM with a zero line and
+    #     a +/-5% band, log x; (c) outer negative-direction fraction.
+    fig, axes = ofs.figure_grid(1, 3, width=ofs.WIDE, ratio=0.36)
     ax = axes[0]
-    ax.axvspan(50.0, 70.0, color="0.92", zorder=0)
+    ax.plot(r_nodes[1:], dm_true[1:], color="k", lw=1.8,
+            label="particle truth", zorder=3)
     for l in MODELS:
-        ax.plot(r_nodes[1:], 100.0 * (m_flux[l][1:] / m_true[1:] - 1.0),
-                color=ofs.PALETTE[COLOR[l]], lw=1.3,
-                label=f"{l} (50-70 med {band_med[l][3]:.1f}%)")
-    ax.axhline(0, color="0.2", lw=0.8)
+        ax.plot(r_nodes[1:], dm_flux[l][1:], color=ofs.PALETTE[COLOR[l]],
+                lw=1.2, marker="o", ms=2.5, label=l + " (flux)", zorder=2)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xticks([5, 10, 20, 50])
     ax.set_xlabel("r [kpc]")
-    ax.set_ylabel(r"$M_{\rm flux}(<r)/M_{\rm true}(<r)-1$ [%]")
-    ax.legend(frameon=False, fontsize=6, loc="upper left")
+    ax.set_ylabel("annulus mass $\\Delta M$(r; 1.09 kpc)  [Msun]")
+    ax.legend(frameon=False, fontsize=7, loc="upper left")
     ax = axes[1]
+    for l in MODELS:
+        ax.plot(r_nodes[1:], 100.0 * rel_node[l][1:],
+                color=ofs.PALETTE[COLOR[l]], lw=1.2, marker="o", ms=2.5,
+                label=l)
+    ax.axhline(0.0, color="0.2", lw=0.8)
+    ax.axhspan(-5, 5, color="0.92", zorder=0)
+    ax.set_xscale("log")
+    ax.set_xticks([5, 10, 20, 50])
+    ax.set_xlabel("r [kpc]")
+    ax.set_ylabel("relative error of $\\Delta M$  [%]")
+    ax.set_xlim(r_nodes[1] * 0.9, r_nodes[-1] * 1.1)
+    ax = axes[2]
     ax.axvspan(30.0, 70.0, color="0.92", zorder=0)
     for l in MODELS:
         ax.plot(r_nodes, 100.0 * frac_neg[l], color=ofs.PALETTE[COLOR[l]], lw=1.3)
@@ -163,10 +183,12 @@ def main():
     ofs.panel_labels(list(axes))
     np.savez(args.output_dir / "pt_adjudication.npz",
              r_nodes=r_nodes, m_true=m_true, vc2=vc2,
+             dm_true=dm_true,
              bands=np.asarray(BANDS),
              **{f"{l}_{k}": v for l in MODELS
                 for k, v in (("m_flux", m_flux[l]), ("rel", rel_node[l]),
-                             ("frac_neg", frac_neg[l]))})
+                             ("frac_neg", frac_neg[l]),
+                             ("dm_flux", dm_flux[l]))})
     for p in ofs.save(fig, str(args.output_dir / "pt-adjudication")):
         print("saved", p)
     print(f"TOTAL WALL {time.time()-t_start:.1f}s")
