@@ -36,6 +36,16 @@ def calc_phi_derivatives(phi_func: callable, q: Array) -> Tuple[Array, Array]:
     return dphi_dq, d2phi_dq2
 
 
+def calc_phi_laplacian(phi_func: callable, q: Array) -> Array:
+    """Laplacian of the potential at a single point q.
+
+    Used for the decoupled negative-density prior grid, where only the
+    Laplacian (not the gradient) is needed.
+    """
+    hessian_phi = jax.hessian(phi_func)(q)
+    return jnp.trace(hessian_phi)
+
+
 class ResBlock(eqx.Module):
     """A standard residual block with layer normalization and two linear layers."""
     ln: eqx.nn.LayerNorm
@@ -886,7 +896,8 @@ def get_phi_loss(
     mu=0.0,
     l2_potential=0.01,
     l2_selection_function=0.01,
-    weights=None
+    weights=None,
+    q_grid=None
 ):
     """
     Calculates the loss based on the collisionless Boltzmann equation (CBE).
@@ -904,11 +915,19 @@ def get_phi_loss(
         gamma: Strength of a linear penalty on positive mass densities.
         mu: Strength of a log-like penalty on positive mass densities.
         l2: Strength of L2 weight regularization on the `phi_model`.
+        weights: Per-sample importance weights (stratified sampling). None
+            uses the plain mean.
+        q_grid: Spatial grid points for the decoupled negative-density
+            prior. None keeps the legacy coupled penalty at the phase-space
+            sample positions q; providing it moves the penalty to
+            log( sum_i w_i cbe_i / sum_i w_i ) + lambda_ mean_grid(prior_neg),
+            volume-weighted over the grid.
 
     Returns:
         A tuple (total_loss, loss_without_regularization).
     """
     phi_grads_fn = jax.vmap(calc_phi_derivatives, in_axes=(None, 0))
+    phi_laplacian_fn = jax.vmap(calc_phi_laplacian, in_axes=(None, 0))
     dphi_dq, d2phi_dq2 = phi_grads_fn(phi_model, q)
 
     if frameshift_model is None:
@@ -925,8 +944,20 @@ def get_phi_loss(
 
     likelihood = jnp.arcsinh(alpha * jnp.abs(null_hyp)) / alpha
 
-    # Punishing negative matter densities
-    if lambda_ != 0:
+    # Punishing negative matter densities.
+    #
+    # Two evaluation modes:
+    # * Coupled (q_grid is None, legacy): the penalty is evaluated at the
+    #   phase-space sample positions q and folded into the weighted
+    #   likelihood inside the log:
+    #       log( sum_i w_i (cbe_i + lambda_ prior_neg(q_i)) / sum_i w_i ).
+    # * Decoupled (q_grid is provided): the CBE term keeps the mass-weighted
+    #   estimator on the phase-space samples while the penalty moves to an
+    #   independent, volume-weighted spatial grid:
+    #       log( sum_i w_i cbe_i / sum_i w_i ) + lambda_ mean_g prior_neg(q_grid).
+    #   gamma/mu (positive-density penalties) stay coupled at q in both modes.
+    decouple_prior = (lambda_ != 0) and (q_grid is not None)
+    if lambda_ != 0 and not decouple_prior:
         prior_neg = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2, 0.0)) / beta
         likelihood = likelihood + lambda_ * prior_neg
 
@@ -948,6 +979,15 @@ def get_phi_loss(
     else:
         # Stratified importance sampling: restore the mass-weighted estimand
         loss = jnp.log(jnp.sum(weights * likelihood) / jnp.sum(weights))
+
+    if decouple_prior:
+        # Volume-weighted penalty on the independent spatial grid, added
+        # outside the CBE log so the two constraints are evaluated at
+        # independent locations (phase-space samples vs. volume grid).
+        d2phi_dq2_grid = phi_laplacian_fn(phi_model, q_grid)
+        prior_neg_grid = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2_grid, 0.0)) / beta
+        loss = loss + lambda_ * jnp.mean(prior_neg_grid)
+
     loss_noreg = loss
 
     def get_l2_loss(net, l2):
@@ -979,35 +1019,68 @@ def get_phi_loss(
     return loss, loss_noreg
 
 
+def sample_uniform_ball(key, n_points, radius):
+    """Uniform (volume-weighted) samples in a 3-ball of given radius.
+
+    Radii follow the volume CDF P(r < r) = (r/R)^3, so the mean over grid
+    points estimates a volume average; directions are isotropic.
+    """
+    key_u, key_dir = jax.random.split(key)
+    u = jax.random.uniform(key_u, (n_points,), minval=0.0, maxval=1.0)
+    r = radius * jnp.cbrt(u)
+    g = jax.random.normal(key_dir, (n_points, 3))
+    g = g / jnp.linalg.norm(g, axis=1, keepdims=True)
+    return r[:, None] * g
+
+
 def _unpack_phi_batch(batch):
-    """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None) from a 4- or 5-tuple batch."""
-    if len(batch) == 5:
+    """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None).
+
+    Accepts 4-tuples (no weights), 5-tuples (with importance weights), and
+    6-tuples (with importance weights and the spatial prior grid q_grid).
+    """
+    if len(batch) == 6:
+        q, p, dlnf_dq, dlnf_dp, weights, q_grid = batch
+    elif len(batch) == 5:
         q, p, dlnf_dq, dlnf_dp, weights = batch
+        q_grid = None
     else:
         q, p, dlnf_dq, dlnf_dp = batch
         weights = None
-    return q, p, dlnf_dq, dlnf_dp, weights
+        q_grid = None
+    return q, p, dlnf_dq, dlnf_dp, weights, q_grid
 
 
 @eqx.filter_value_and_grad(has_aux=True)
 def loss_fn(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp, weights = _unpack_phi_batch(batch)
+    q, p, dlnf_dq, dlnf_dp, weights, q_grid = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, weights=weights, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid, **loss_params
     )
     return loss, loss_noreg
 
 @eqx.filter_jit
 def loss_fn_val(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp, weights = _unpack_phi_batch(batch)
+    q, p, dlnf_dq, dlnf_dp, weights, q_grid = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, weights=weights, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid, **loss_params
     )
     return loss, loss_noreg
+
+
+@eqx.filter_jit
+def grid_prior_penalty(params, static, q_grid, loss_params):
+    """Mean negative-density penalty on a fixed spatial grid (diagnostic)."""
+    model = eqx.combine(params, static)
+    lap_fn = jax.vmap(calc_phi_laplacian, in_axes=(None, 0))
+    d2phi_dq2 = lap_fn(model.phi_model, q_grid)
+    beta = float(loss_params.get("beta", 1.0))
+    prior_neg = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2, 0.0)) / beta
+    return jnp.mean(prior_neg)
 
 @eqx.filter_jit
 def train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, val_loss):
@@ -1079,6 +1152,15 @@ def train_potential(
     """
     Fits a gravitational potential and optionally a frameshift.
     """
+    # Decoupled negative-density prior: prior_grid_n > 0 evaluates the
+    # penalty on an independent volume-weighted spatial grid (resampled
+    # every epoch) instead of at the phase-space sample positions. The two
+    # grid keys are consumed here and never reach get_phi_loss.
+    loss_params = dict(loss_params or {})
+    prior_grid_n = int(loss_params.pop("prior_grid_n", 0))
+    prior_grid_q_max = float(loss_params.pop("prior_grid_q_max", 7.0))
+    use_prior_grid = prior_grid_n > 0 and float(loss_params.get("lambda_", 1.0)) != 0.0
+
     if loss_history is None:
         loss_history = {'train': [], 'val': [], 'train_noreg': [], 'val_noreg': [], 'lr': []}
     n_samples = df_data["eta"].shape[0]
@@ -1108,6 +1190,10 @@ def train_potential(
         print(f"Using stratified importance weights: mean={float(weights.mean()):.4f}, "
               f"range=[{float(weights.min()):.4f}, {float(weights.max()):.4f}]")
         data = data + (weights,)
+    elif use_prior_grid:
+        # The decoupled loss aggregates the CBE term through the weighted
+        # estimator; without stratified sampling the weights are uniform.
+        data = data + (jnp.ones(n_samples),)
 
     n_val = int(validation_frac * n_samples)
     n_train = n_samples - n_val
@@ -1129,6 +1215,10 @@ def train_potential(
     print(f"Number of trainable parameters: {model.count_parameters()}")
     print(f"Number of steps per epoch: {steps_per_epoch}, Batch size: {batch_size}")
     print(f"Number of epochs: {n_epochs}, Total training samples: {n_train}")
+    if use_prior_grid:
+        print(f"Negative-density prior decoupled to spatial grid: "
+              f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
+              f"(uniform ball, volume-weighted), resampled every epoch")
     start_epoch = len(loss_history['lr'])
     step = start_epoch * steps_per_epoch  # Continue from previous step if resuming
     if reset_lr:
@@ -1137,12 +1227,18 @@ def train_potential(
     for epoch in (pbar := trange(n_epochs)):
         key, subkey = jax.random.split(key)
         perms = jax.random.permutation(subkey, n_train)
+        if use_prior_grid:
+            # Fresh volume-weighted grid points for this epoch.
+            key, grid_key = jax.random.split(key)
+            q_grid = sample_uniform_ball(grid_key, prior_grid_n, prior_grid_q_max)
         train_data_shuffled = jax.tree.map(lambda x: x[perms], train_data)
 
         epoch_loss, epoch_loss_noreg, epoch_lr = [], [], []
         epoch_val_loss, epoch_val_loss_noreg = [], []
         for i in range(steps_per_epoch):
             val_batch = jax.tree.map(lambda x: x[i*val_batch_size:(i+1)*val_batch_size], val_data)
+            if use_prior_grid:
+                val_batch = val_batch + (q_grid,)
             val_loss, val_loss_noreg = loss_fn_val(
                 params, static,
                 val_batch,
@@ -1152,6 +1248,8 @@ def train_potential(
             epoch_val_loss_noreg.append(val_loss_noreg.item())
 
             batch = jax.tree.map(lambda x: x[i*batch_size:(i+1)*batch_size], train_data_shuffled)
+            if use_prior_grid:
+                batch = batch + (q_grid,)
             params, opt_state, loss, loss_noreg = train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, jnp.array(val_loss))
             epoch_loss.append(loss.item())
             epoch_loss_noreg.append(loss_noreg.item())
@@ -1170,6 +1268,11 @@ def train_potential(
         loss_history['val'].append(np.mean(epoch_val_loss))
         loss_history['val_noreg'].append(np.mean(epoch_val_loss_noreg))
         loss_history['lr'].append(np.mean(epoch_lr))
+        if use_prior_grid:
+            # Mean decoupled penalty on this epoch's grid: the direct
+            # evidence channel for the constraint's strength over training.
+            loss_history.setdefault('prior_neg_grid', []).append(
+                float(grid_prior_penalty(params, static, q_grid, loss_params)))
         # We also append every scalar trainable parameter's value to the history
         model_snapshot = eqx.combine(params, static)
         # Get the current values of trainable scalar parameters
@@ -1179,12 +1282,13 @@ def train_potential(
                 loss_history[name] = []  # Initialize list if not present
             loss_history[name].append(value)
 
-        pbar.set_description(
-            f"Epoch {epoch+1}/{n_epochs} | "
-            f"Train: {loss_history['train'][-1]:.4f} | "
-            f"Val: {loss_history['val'][-1]:.4f} | "
-            f"lr: {loss_history['lr'][-1]:.4f}"
-        )
+        desc = (f"Epoch {epoch+1}/{n_epochs} | "
+                f"Train: {loss_history['train'][-1]:.4f} | "
+                f"Val: {loss_history['val'][-1]:.4f} | "
+                f"lr: {loss_history['lr'][-1]:.4f}")
+        if use_prior_grid:
+            desc += f" | prior_neg: {loss_history['prior_neg_grid'][-1]:.4f}"
+        pbar.set_description(desc)
 
         if checkpoint_frequency_epochs > 0 and epoch > 0 and epoch % checkpoint_frequency_epochs == 0:
             model = eqx.combine(params, static)
