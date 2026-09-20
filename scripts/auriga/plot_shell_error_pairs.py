@@ -363,21 +363,33 @@ def main():
         wr.writerows(band_rows)
 
     ofs.use_style()
-    # main figure: (a) M_shell, (b) e/M + E/M + floors, (c) kappa
-    fig, axes = ofs.figure_grid(3, 1, width=ofs.WIDE, ratio=1.08,
+    # main figure: (a) cumulative M(<r), (b) per-shell M_shell(r),
+    # (c) e/M + E/M + floors, (d) kappa
+    fig, axes = ofs.figure_grid(4, 1, width=ofs.WIDE, ratio=1.40,
                                 sharex=True)
     ax = axes[0]
-    ax.plot(r_c, m_true, color="k", lw=1.8, marker="o", ms=3.0,
+    ax.plot(r_hi, np.cumsum(m_true), color="k", lw=1.8, marker="o", ms=3.0,
             label="particle truth (exact shell sum)", zorder=3)
     for l in MODELS:
-        ax.plot(r_c, res[l]["m_model"], color=ofs.PALETTE[COLOR[l]], lw=1.1,
-                marker="o", ms=2.2, label=l, zorder=2)
+        ax.plot(r_hi, np.cumsum(res[l]["m_model"]),
+                color=ofs.PALETTE[COLOR[l]], lw=1.1, marker="o", ms=2.2,
+                label=l, zorder=2)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xticks([2, 5, 10, 20, 50])
-    ax.set_ylabel(r"$M_{\rm shell}(r)$  [Msun]")
+    ax.set_ylabel(r"enclosed mass $M(<r)$  [Msun]")
     ax.legend(frameon=False, fontsize=7, loc="upper left", ncol=2)
     ax = axes[1]
+    ax.plot(r_c, m_true, color="k", lw=1.8, marker="o", ms=3.0,
+            zorder=3)
+    for l in MODELS:
+        ax.plot(r_c, res[l]["m_model"], color=ofs.PALETTE[COLOR[l]], lw=1.1,
+                marker="o", ms=2.2, zorder=2)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xticks([2, 5, 10, 20, 50])
+    ax.set_ylabel(r"shell mass $M_{\rm shell}(r)$  [Msun]")
+    ax = axes[2]
     ax.fill_between(r_c, -100 * sigma_e / m_true, 100 * sigma_e / m_true,
                     color="0.88", zorder=0, label=r"Poisson floor of $e$")
     ax.fill_between(r_c, 0, 100 * e_floor / m_true, color="0.72", zorder=0,
@@ -393,8 +405,8 @@ def main():
     ax.set_xticks([2, 5, 10, 20, 50])
     ax.set_ylabel("shell error / $M_{\\rm shell}$  [%]")
     ax.set_xlim(r_c[0] * 0.92, r_c[-1] * 1.08)
-    ax.legend(frameon=False, fontsize=6, loc="lower left", ncol=4)
-    ax = axes[2]
+    ax.legend(frameon=False, fontsize=6, loc="upper left", ncol=4)
+    ax = axes[3]
     ax.axhline(1.0, color="0.3", lw=0.8, ls=":")
     for l in MODELS:
         ax.plot(r_c, res[l]["kappa"], color=ofs.PALETTE[COLOR[l]], lw=1.2,
