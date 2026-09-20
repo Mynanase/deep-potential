@@ -92,6 +92,8 @@ def main():
     ap.add_argument("--n-dirs", type=int, default=2048)
     ap.add_argument("--n-radial", type=int, default=48)
     ap.add_argument("--n-blocks", type=int, default=16)
+    ap.add_argument("--eval-batch", type=int, default=32768,
+                    help="points per model Laplacian call (memory bound)")
     ap.add_argument("--sobol-seed", type=int, default=20260917)
     args = ap.parse_args()
 
@@ -145,10 +147,6 @@ def main():
     print(f"rho3d {rho3d.shape} cell {h_cell:.4f} kpc; per-particle masses "
           + ", ".join(f"{t}={m_part[t]:.3e}" for t in TYPES))
 
-    # exact Poisson floor of e from equal-mass-per-type shell counts
-    sigma_e = np.sqrt(sum(m_true_type[t] * m_part[t] for t in TYPES))
-    n_eff = m_true ** 2 / sigma_e ** 2
-
     # ---- per-cell sigma_rho for the E floor ------------------------------
     edge_list = [edges3d[a] for a in range(3)]
     if args.particles is not None and Path(args.particles).is_file():
@@ -158,23 +156,30 @@ def main():
             ap.error(f"particle asset sha256 mismatch: {got} != {want}")
         var_cell = np.zeros_like(rho3d)
         rho_from_counts = np.zeros_like(rho3d)
+        m2_shell = np.zeros(n_shell)
         with h5py.File(args.particles, "r") as f:
             for t in TYPES:
                 xyz = np.column_stack([
                     np.asarray(f[f"{t}/x"][:], dtype=float),
                     np.asarray(f[f"{t}/y"][:], dtype=float),
                     np.asarray(f[f"{t}/z"][:], dtype=float)])
+                m_i = np.asarray(f[f"{t}/mass"][:], dtype=float)
                 cnt, _ = np.histogramdd(xyz, bins=edge_list)
-                cnt = np.rint(cnt).astype(np.int64)
-                assert int(cnt.sum()) == int(ga[f"{t}_n"]), \
+                assert int(np.rint(cnt.sum())) == int(ga[f"{t}_n"]), \
                     f"particle count mismatch for {t}"
-                mass_cell = cnt.astype(float) * m_part[t]
-                var_cell += mass_cell * m_part[t]
-                rho_from_counts += mass_cell / v_cell
+                m2_cell, _ = np.histogramdd(xyz, bins=edge_list,
+                                            weights=m_i ** 2)
+                m_cell, _ = np.histogramdd(xyz, bins=edge_list, weights=m_i)
+                var_cell += m2_cell
+                rho_from_counts += m_cell / v_cell
+                r_i = np.linalg.norm(xyz, axis=1)
+                m2_shell += np.histogram(r_i, bins=r_edges,
+                                         weights=m_i ** 2)[0]
         rel = np.abs(rho_from_counts - rho3d) / np.maximum(rho3d, 1e-30)
         print(f"particle asset sha256 OK; counts->rho3d max rel diff "
               f"{rel.max():.2e} (median {np.median(rel):.2e})")
         sigma_rho_cell = np.sqrt(var_cell) / v_cell
+        sigma_e = np.sqrt(m2_shell)      # exact: sum of m^2 per shell
         floor_mode = "exact per-cell per-type counts"
     else:
         # approximate: shell-level number mixture spread over cell mass
@@ -194,6 +199,8 @@ def main():
         floor_mode = ("APPROXIMATE shell-level type mixture "
                       "(particle asset not provided)")
         print("WARNING: particle asset missing - approximate E floor")
+        sigma_e = np.sqrt(sum(m_true_type[t] * m_part[t] for t in TYPES))
+    n_eff = m_true ** 2 / sigma_e ** 2
     print(f"E-floor mode: {floor_mode}")
 
     # ---- quadrature points per shell ------------------------------------
@@ -250,9 +257,12 @@ def main():
         e_abs_se = np.empty(n_shell)
         for j in range(n_shell):
             q = (r_g[j][:, None, None] * dirs[None, :, :]) / L_KPC
-            rho_m = np.asarray(rho_from_phi(
-                phi, q.reshape(-1, 3), L_KPC, V_KMS)).reshape(
-                    args.n_radial, args.n_dirs)
+            flat_q = q.reshape(-1, 3)
+            rho_flat = np.empty(flat_q.shape[0])
+            for i in range(0, flat_q.shape[0], args.eval_batch):
+                rho_flat[i:i + args.eval_batch] = np.asarray(rho_from_phi(
+                    phi, flat_q[i:i + args.eval_batch], L_KPC, V_KMS))
+            rho_m = rho_flat.reshape(args.n_radial, args.n_dirs)
             m_model[j] = v_sh[j] * float(
                 np.einsum("g,g->", w_g, rho_m.mean(axis=1)))
             delta = rho_m - rho_t_pts[j]
