@@ -94,7 +94,7 @@
     "loss_opts": {
       "alpha": 1,
       "beta": 1,
-      "lambda_": 1,
+      "lambda_": 0.1,
       "gamma": 0,
       "mu": 0,
       "l2_potential": 0.01,
