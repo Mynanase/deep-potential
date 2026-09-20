@@ -6,16 +6,16 @@ ONLY for the truth: the 96^3 mass histogram midplane slab (genuinely
 non-spherical; no particle asset, no smoothing).  Model densities come from
 the potential Laplacian evaluated at the same cell centres.
 
-Layout (2x5): row 1 - truth log rho plus four model log densities on the
+Layout (2x4): row 1 - truth log rho plus three model log densities on the
 y=0 midplane, shared sequential scale (non-positive model cells masked
 grey, in-domain fraction annotated); row 2 - radial rho profile with the
-60-shell cross-check and model sphere means (b), then log10(rho_m/rho_t)
-residual maps (c-f) on a shared symmetric scale.  Valid domain r in
+60-shell cross-check and model sphere means (e), then log10(rho_m/rho_t)
+residual maps (f-h) on a shared symmetric scale.  Valid domain r in
 [1.0906, 70] kpc.  Truth density is a cell average (histogram); the model
 value is a point evaluation at the cell centre - a second-order
 discretization mismatch at 1.5625 kpc cells, stated rather than hidden.
-Four models: base, innerA (lambda=1), lambda0p1 (lambda=0.1), lambda10
-(lambda=10) - colors follow the lambda pt-adjudication figure.
+Three models: base, innerA (lambda=1), lambda10 (lambda=10) - colors follow
+the lambda pt-adjudication figure.
 """
 import argparse
 import sys
@@ -38,11 +38,10 @@ R_ANCHOR = 1.0906
 MODEL_TEXT = {
     "base": "base (seed-0)",
     "innerA": "innerA (lambda=1)",
-    "lambda0p1": "lambda=0.1",
     "lambda10": "lambda=10",
 }
 COLOR = {"base": "blue", "innerA": "purple",
-         "lambda0p1": "cyan", "lambda10": "orange"}
+         "lambda10": "orange"}
 
 
 def load_phi_f32(run_dir):
@@ -85,7 +84,7 @@ def main():
     ap.add_argument("--grids", type=Path, required=True,
                     help="halo12_particle_truth_grids.h5 (node product)")
     ap.add_argument("--model", action="append", required=True,
-                    help="label=run_dir; pass exactly four")
+                    help="label=run_dir; pass exactly three")
     ap.add_argument("--truth", type=Path, default=None,
                     help="60-shell truth hdf5 (profile cross-check only)")
     ap.add_argument("--output-dir", type=Path, required=True)
@@ -95,8 +94,8 @@ def main():
     args = ap.parse_args()
 
     specs = dict(spec.split("=", 1) for spec in args.model)
-    if len(specs) != 4:
-        raise SystemExit(f"need exactly four models, got {sorted(specs)}")
+    if len(specs) != 3:
+        raise SystemExit(f"need exactly three models, got {sorted(specs)}")
     models = tuple(specs)
 
     import jax
@@ -154,7 +153,7 @@ def main():
           f"log-ratio residual +/-{dres:.2f} dex (98th pct)")
 
     ofs.use_style()
-    fig, axes = ofs.figure_grid(2, 5, width=ofs.WIDE, ratio=0.58)
+    fig, axes = ofs.figure_grid(2, 4, width=ofs.WIDE, ratio=0.58)
     cmap_seq = mpl.colormaps[ofs.SEQUENTIAL].with_extremes(bad=ofs.MUTED)
     cmap_div = mpl.colormaps[ofs.DIVERGING].with_extremes(bad=ofs.MUTED)
     ims = [axes[0, 0].pcolormesh(c3, c3, logtrue, cmap=cmap_seq, vmin=vmin,
@@ -191,7 +190,7 @@ def main():
                                 fontsize=6.5, color="#333333",
                                 backgroundcolor="white")
     for i in range(2):
-        for j in range(5):
+        for j in range(4):
             ax = axes[i, j]
             if ax is axp:
                 continue
