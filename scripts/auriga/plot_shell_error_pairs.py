@@ -432,10 +432,12 @@ def main():
                     fontsize=7, color="#333333")
     for ax in flat[len(MODELS):]:
         ax.set_visible(False)
-    flat[0].set_ylabel("e, E / $M_{\\rm shell}$  [%]")
-    flat[3].set_ylabel("e, E / $M_{\\rm shell}$  [%]")
-    for ax in flat[3:len(MODELS)]:
+    for i, ax in enumerate(flat[:len(MODELS)]):
         ax.set_xlabel("r [kpc]")
+        ax.set_ylabel("e, E / $M_{\\rm shell}$  [%]")
+        if i % 3:
+            ax.tick_params(labelleft=False)
+    flat[0].set_ylabel("e, E / $M_{\\rm shell}$  [%]")
     ofs.panel_labels(flat[:len(MODELS)])
     for p in ofs.save(fig, str(args.output_dir / "shell-error-pairs-permodel")):
         print("saved", p)
