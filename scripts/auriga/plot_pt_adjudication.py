@@ -87,7 +87,7 @@ def main():
               f"(at r={r_true[i_max]:.2f} kpc) over {r_true.size} shell edges")
 
     dirs = sobol_directions(args.n_dirs, args.sobol_seed)
-    m_flux, dm_flux, rel_node, frac_neg = {}, {}, {}, {}
+    m_flux, dm_fluxes, rel_node, frac_neg = {}, {}, {}, {}
     for spec in args.model:
         label, run_dir = spec.split("=", 1)
         t0 = time.time()
@@ -97,7 +97,7 @@ def main():
         dm_flux = mf - mf[0]
         rel = (dm_flux - dm_true) / dm_true
         m_flux[label] = mf
-        dm_flux[label] = dm_flux
+        dm_fluxes[label] = dm_flux
         rel_node[label] = rel
         fn = np.empty(r_nodes.size)
         for j, r in enumerate(r_nodes):
@@ -153,7 +153,7 @@ def main():
     ax.plot(r_nodes[1:], dm_true[1:], color="k", lw=1.8,
             label="particle truth", zorder=3)
     for l in MODELS:
-        ax.plot(r_nodes[1:], dm_flux[l][1:], color=ofs.PALETTE[COLOR[l]],
+        ax.plot(r_nodes[1:], dm_fluxes[l][1:], color=ofs.PALETTE[COLOR[l]],
                 lw=1.2, marker="o", ms=2.5, label=l + " (flux)", zorder=2)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -188,7 +188,7 @@ def main():
              **{f"{l}_{k}": v for l in MODELS
                 for k, v in (("m_flux", m_flux[l]), ("rel", rel_node[l]),
                              ("frac_neg", frac_neg[l]),
-                             ("dm_flux", dm_flux[l]))})
+                             ("dm_flux", dm_fluxes[l]))})
     for p in ofs.save(fig, str(args.output_dir / "pt-adjudication")):
         print("saved", p)
     print(f"TOTAL WALL {time.time()-t_start:.1f}s")
