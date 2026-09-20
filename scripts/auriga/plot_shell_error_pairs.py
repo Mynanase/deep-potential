@@ -283,7 +283,7 @@ def main():
                           kappa=kappa)
         dev = np.abs(e_mc - e_exact) / np.maximum(e_mc_se, 1e-30)
         print(f"[{label}] eval {time.time()-t0:.0f}s; e_mc-e_exact max "
-              f"{np.max(np.abs(e_mc-e_exact))/m_true*100:.2f}% of M_shell "
+              f"{100*np.max(np.abs(e_mc-e_exact)/m_true):.2f}% of M_shell "
               f"({dev.max():.1f} sigma of e_mc SE); E max SE/M "
               f"{np.max(e_abs_se/m_true)*100:.2f}%")
 
