@@ -177,7 +177,7 @@ radii = np.arange(30.0, 71.0, 5.0)
 frac_neg, pen_mean, mean_rho = [], [], []
 for r in radii:
     q = (r / L) * dirs
-    lap = np.asarray(lap_batch(jnp.asarray(q)))
+    lap = np.asarray(lap_batch(phi_model, jnp.asarray(q)))
     assert np.isfinite(lap).all()
     rho = lap * V ** 2 / (4.0 * np.pi * G * L ** 2)
     frac_neg.append(float((lap < 0).mean()))
@@ -198,7 +198,7 @@ r = 7.0 * u ** (1.0 / 3.0)
 g = rng.normal(size=(65536, 3))
 g /= np.linalg.norm(g, axis=1, keepdims=True)
 qg = r[:, None] * g
-lapg = np.asarray(lap_batch(jnp.asarray(qg)))
+lapg = np.asarray(lap_batch(phi_model, jnp.asarray(qg)))
 rg_kpc = r * L
 probe = dict(
     n=65536, radius_kpc=70.0,
