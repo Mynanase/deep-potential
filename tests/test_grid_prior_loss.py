@@ -164,12 +164,30 @@ def test_unpack_phi_batch_tuples():
     assert pmod._unpack_phi_batch((q, p, dq, dp, "w", "g")) == (q, p, dq, dp, "w", "g")
 
 
+class ActPhi(eqx.Module):
+    """phi(q) = c |q|^2 with a jitted callable attribute, mirroring the
+    real network whose net.activation leaf breaks plain jax.jit calls."""
+
+    c: float
+    act: object
+
+    def __call__(self, q):
+        return self.c * jnp.sum(self.act(jnp.sum(q ** 2, keepdims=True)))
+
+
 def test_vmapped_laplacian_call_pattern():
-    """The run-script evidence block calls the vmapped Laplacian as
-    lap_batch(phi_model, q) -- model first, batch second, matching
-    in_axes=(None, 0). Guards against dropping the model argument."""
+    """The run-script evidence block evaluates the Laplacian through a
+    closure around the model + bare vmap. A module holding a jitted
+    callable attribute cannot be passed as a plain jax.jit argument, so
+    this locks in the pattern that works on the real checkpoints."""
     c = -0.4
     q = jax.random.uniform(jax.random.key(11), (50, 3), minval=-2.0, maxval=2.0)
-    lap_batch = jax.jit(jax.vmap(pmod.calc_phi_laplacian, in_axes=(None, 0)))
-    lap = np.asarray(lap_batch(QuadPhi(c), q))
+    model = ActPhi(c=c, act=jax.jit(lambda x: x))
+
+    def lap_batch(qb):
+        def lap_one(x):
+            return pmod.calc_phi_laplacian(model, x)
+        return jax.vmap(lap_one)(qb)
+
+    lap = np.asarray(lap_batch(q))
     np.testing.assert_allclose(lap, 6.0 * c, rtol=1e-5)

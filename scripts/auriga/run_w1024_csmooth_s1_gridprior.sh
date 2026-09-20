@@ -164,7 +164,13 @@ import potential as pmod
 from scipy.stats import qmc
 
 L, V, G = 10.0, 100.0, 4.30091e-6
-lap_batch = jax.jit(jax.vmap(pmod.calc_phi_laplacian, in_axes=(None, 0)))
+def lap_batch(q):
+    # Closure + bare vmap (the pattern proven by validate_enclosed_mass on
+    # these checkpoints): the model is captured as a tracing-time constant,
+    # so non-array leaves such as net.activation never become jit args.
+    def lap_one(x):
+        return pmod.calc_phi_laplacian(phi_model, x)
+    return jax.vmap(lap_one)(jnp.asarray(q))
 
 sob = qmc.Sobol(d=2, scramble=True, seed=0)
 uv = sob.random(2048)
@@ -177,7 +183,7 @@ radii = np.arange(30.0, 71.0, 5.0)
 frac_neg, pen_mean, mean_rho = [], [], []
 for r in radii:
     q = (r / L) * dirs
-    lap = np.asarray(lap_batch(phi_model, jnp.asarray(q)))
+    lap = np.asarray(lap_batch(q))
     assert np.isfinite(lap).all()
     rho = lap * V ** 2 / (4.0 * np.pi * G * L ** 2)
     frac_neg.append(float((lap < 0).mean()))
@@ -198,7 +204,7 @@ r = 7.0 * u ** (1.0 / 3.0)
 g = rng.normal(size=(65536, 3))
 g /= np.linalg.norm(g, axis=1, keepdims=True)
 qg = r[:, None] * g
-lapg = np.asarray(lap_batch(phi_model, jnp.asarray(qg)))
+lapg = np.concatenate([np.asarray(lap_batch(chunk)) for chunk in np.array_split(qg, 4)])
 rg_kpc = r * L
 probe = dict(
     n=65536, radius_kpc=70.0,
