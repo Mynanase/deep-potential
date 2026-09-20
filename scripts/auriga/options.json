@@ -99,7 +99,8 @@
       "mu": 0,
       "l2_potential": 0.01,
       "prior_grid_n": 4096,
-      "prior_grid_q_max": 7.0
+      "prior_grid_q_max": 7.0,
+      "prior_grid_weighting": "radius"
     }
   }
 }

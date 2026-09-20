@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Grid-decoupled negative-density prior on the S1 route (w1024, clean+smooth).
+# Inner-band fix A: radius-balanced grid-decoupled negative-density prior on
+# the S1 route (w1024, clean+smooth). Child of the frozen gridprior winner
+# (863ef6a2 / run 09faad30): identical contract except the prior grid sampler.
 # Identical to the S1 contract except the Phi loss: the CBE term keeps the S1
 # mass-weighted estimator log(sum w*cbe_i / sum w) on phase-space samples, and
 # the negative-density penalty moves OUT of the weighted likelihood onto an
-# independent, volume-weighted spatial grid:
+# independent spatial grid. The frozen parent sampled that grid volume-weighted
+# (r = R*u^(1/3): only ~7.9% of points inside 30 kpc; probe inner negativity
+# 11.5%); this variant samples radius-balanced (r = R*u, linear CDF: ~42.9%
+# of points inside 30 kpc, equal expected points per kpc):
 #     loss = log(sum w*cbe_i/sum w) + lambda * mean_grid(prior_neg)
-# q_grid is a new batch channel in get_phi_loss; train_potential resamples
-# uniform-ball grid points (radius prior_grid_q_max) every epoch. Flow training
+# (the grid mean is now a per-kpc radial average). q_grid is a batch channel in
+# get_phi_loss; train_potential resamples grid points (radius
+# prior_grid_q_max) every epoch. Flow training
 # is unchanged and must reproduce the fb85670e reference; the Phi val loss is a
 # new estimand again and is reported without reference.
 set -eo pipefail
@@ -38,6 +44,8 @@ assert len(ra["fractions"]) == len(ra["bin_edges"]) - 1
 assert abs(sum(ra["fractions"]) - 1.0) < 1e-9
 assert int(lo.get("prior_grid_n", 0)) > 0, "grid-prior options must set prior_grid_n > 0"
 assert float(lo.get("lambda_", 0.0)) != 0.0, "grid-prior run needs lambda_ != 0"
+assert lo.get("prior_grid_weighting", "volume") == "radius", \
+    "inner-band fix A must set prior_grid_weighting=radius"
 print("S1 radial_alloc:", ra)
 print("Phi loss_opts:", lo)
 print("S1 flow_sampling keys:", sorted(fs.keys()))
@@ -148,7 +156,7 @@ sys.exit(0 if ok else 3)
 PYEOF
 test $? -eq 0 || { echo "FLOW REPRODUCTION CHECK FAILED"; exit 3; }
 
-echo '=== GRID-PRIOR NEGATIVE-DENSITY EVIDENCE (fixed Sobol grid, 30-70 kpc) ==='
+echo '=== GRID-PRIOR NEGATIVE-DENSITY EVIDENCE (fixed Sobol grid, 2-70 kpc) ==='
 "$PY" - <<'PYEOF'
 import sys, json
 from pathlib import Path
@@ -179,7 +187,9 @@ az = 2.0 * np.pi * uv[:, 1]
 s = np.sqrt(np.maximum(0.0, 1.0 - mu ** 2))
 dirs = np.column_stack([s * np.cos(az), s * np.sin(az), mu])
 
-radii = np.arange(30.0, 71.0, 5.0)
+radii_inner = np.arange(2.0, 30.0, 3.0)
+radii_outer = np.arange(30.0, 71.0, 5.0)
+radii = np.concatenate([radii_inner, radii_outer])
 frac_neg, pen_mean, mean_rho = [], [], []
 for r in radii:
     q = (r / L) * dirs
@@ -189,12 +199,24 @@ for r in radii:
     frac_neg.append(float((lap < 0).mean()))
     pen_mean.append(float(np.mean(np.arcsinh(np.maximum(-lap, 0.0)))))
     mean_rho.append(float(rho.mean()))
+# band_mean_* keeps the parent-run contract: the 30-70 kpc outer band mean.
+n_in = len(radii_inner)
 band = dict(radii=radii.tolist(), frac_rho_neg=frac_neg, mean_prior_neg=pen_mean,
             mean_rho_msun_kpc3=mean_rho,
-            band_mean_frac_rho_neg=float(np.mean(frac_neg)),
-            band_mean_prior_neg=float(np.mean(pen_mean)))
+            band_mean_frac_rho_neg=float(np.mean(frac_neg[n_in:])),
+            band_mean_prior_neg=float(np.mean(pen_mean[n_in:])),
+            inner_2_30_frac_rho_neg=float(np.mean(frac_neg[:n_in])),
+            inner_2_30_prior_neg=float(np.mean(pen_mean[:n_in])),
+            inner_2_10_frac_rho_neg=float(np.mean([f for r, f in zip(radii, frac_neg) if r <= 10.0])),
+            inner_2_10_prior_neg=float(np.mean([p for r, p in zip(radii, pen_mean) if r <= 10.0])),
+            inner_10_30_frac_rho_neg=float(np.mean([f for r, f in zip(radii, frac_neg) if 10.0 < r < 30.0])),
+            inner_10_30_prior_neg=float(np.mean([p for r, p in zip(radii, pen_mean) if 10.0 < r < 30.0])))
 for r, fn, pm in zip(radii, frac_neg, pen_mean):
     print("r={:5.1f} kpc  frac(rho<0)={:6.1%}  mean prior_neg={:.4f}".format(r, fn, pm))
+print("BAND 2-10 kpc (inner): mean frac(rho<0)={:.1%}  mean prior_neg={:.4f}".format(
+    band["inner_2_10_frac_rho_neg"], band["inner_2_10_prior_neg"]))
+print("BAND 10-30 kpc (inner): mean frac(rho<0)={:.1%}  mean prior_neg={:.4f}".format(
+    band["inner_10_30_frac_rho_neg"], band["inner_10_30_prior_neg"]))
 print("BAND 30-70 kpc: mean frac(rho<0)={:.1%}  mean prior_neg={:.4f}".format(
     band["band_mean_frac_rho_neg"], band["band_mean_prior_neg"]))
 
@@ -210,14 +232,20 @@ probe = dict(
     n=65536, radius_kpc=70.0,
     frac_rho_neg_all=float((lapg < 0).mean()),
     frac_rho_neg_inner=float((lapg[rg_kpc < 30.0] < 0).mean()),
+    frac_rho_neg_lt10=float((lapg[rg_kpc < 10.0] < 0).mean()),
+    frac_rho_neg_10_30=float((lapg[(rg_kpc >= 10.0) & (rg_kpc < 30.0)] < 0).mean()),
     frac_rho_neg_30_70=float((lapg[(rg_kpc >= 30.0) & (rg_kpc <= 70.0)] < 0).mean()),
     mean_prior_neg_all=float(np.mean(np.arcsinh(np.maximum(-lapg, 0.0)))),
 )
-print("uniform-ball probe (n=65536, R=70 kpc): frac(rho<0) all={:.1%} r<30={:.1%} 30-70={:.1%}".format(
-    probe["frac_rho_neg_all"], probe["frac_rho_neg_inner"], probe["frac_rho_neg_30_70"]))
-print("reference (published pt-adjudication, node 11a39162, its own 30-70 kpc Sobol grid):")
-print("  mean frac(rho<=0): base 20.8%  s11 23.1%  S1 15.4%")
-out = dict(band=band, uniform_ball_probe=probe)
+print("uniform-ball probe (n=65536, R=70 kpc, volume-sampled metric): "
+      "frac(rho<0) all={:.1%} r<10={:.1%} 10-30={:.1%} r<30={:.1%} 30-70={:.1%}".format(
+    probe["frac_rho_neg_all"], probe["frac_rho_neg_lt10"], probe["frac_rho_neg_10_30"],
+    probe["frac_rho_neg_inner"], probe["frac_rho_neg_30_70"]))
+print("reference anchors, frozen parent gridprior (863ef6a2, run 09faad30):")
+print("  Sobol 30-70 kpc band mean frac(rho<0)=2.4%; probe all=3.0% r<30=11.5% 30-70=2.2%")
+print("  pt-adjudication inner-band dM |rel err| (node 786603bc): 2-10 kpc 2.63%, 10-30 kpc 6.70%")
+print("  published pt-adjudication negativity (node 11a39162 conventions): base 20.8%  s11 23.1%  S1 15.4%")
+out = dict(mode="radius_balanced_grid", band=band, uniform_ball_probe=probe)
 json.dump(out, open("runs/orx/grid_prior_evidence.json", "w"), indent=2)
 print("wrote runs/orx/grid_prior_evidence.json")
 sys.exit(0)

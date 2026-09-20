@@ -157,6 +157,20 @@ def test_sample_uniform_ball_volume_weighting():
     assert np.abs(pts.mean(axis=0)).max() < 0.05
 
 
+def test_sample_radius_balanced_ball_radius_weighting():
+    n, radius = 200_000, 7.0
+    pts = np.asarray(pmod.sample_radius_balanced_ball(jax.random.key(4), n, radius))
+    r = np.linalg.norm(pts, axis=1)
+    assert r.max() <= radius + 1e-4
+    # Linear CDF: E[r] = R/2, P(r < R/2) = 1/2 -- equal points per kpc.
+    np.testing.assert_allclose(r.mean(), 0.5 * radius, atol=0.05)
+    np.testing.assert_allclose((r < radius / 2).mean(), 0.5, atol=0.005)
+    # Inner share: P(r < 3) = 3/7 ~ 42.9% (volume sampler: (3/7)^3 ~ 7.9%).
+    np.testing.assert_allclose((r < 3.0).mean(), 3.0 / 7.0, atol=0.005)
+    # Isotropy: mean direction ~ 0.
+    assert np.abs(pts.mean(axis=0)).max() < 0.05
+
+
 def test_unpack_phi_batch_tuples():
     q, p, dq, dp = "q", "p", "dq", "dp"
     assert pmod._unpack_phi_batch((q, p, dq, dp)) == (q, p, dq, dp, None, None)

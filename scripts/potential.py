@@ -1033,6 +1033,23 @@ def sample_uniform_ball(key, n_points, radius):
     return r[:, None] * g
 
 
+def sample_radius_balanced_ball(key, n_points, radius):
+    """Radius-balanced samples in a 3-ball of given radius.
+
+    Radii follow the linear CDF P(r < r) = r/R, so every unit of radius
+    receives the same expected number of grid points: a mean over grid
+    points estimates a per-kpc radial average instead of a volume average.
+    This concentrates penalty pressure in the inner region, where the
+    volume-weighted sampler places only ~(r/R)^3 of its points.
+    """
+    key_u, key_dir = jax.random.split(key)
+    u = jax.random.uniform(key_u, (n_points,), minval=0.0, maxval=1.0)
+    r = radius * u
+    g = jax.random.normal(key_dir, (n_points, 3))
+    g = g / jnp.linalg.norm(g, axis=1, keepdims=True)
+    return r[:, None] * g
+
+
 def _unpack_phi_batch(batch):
     """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None).
 
@@ -1159,6 +1176,10 @@ def train_potential(
     loss_params = dict(loss_params or {})
     prior_grid_n = int(loss_params.pop("prior_grid_n", 0))
     prior_grid_q_max = float(loss_params.pop("prior_grid_q_max", 7.0))
+    prior_grid_weighting = str(loss_params.pop("prior_grid_weighting", "volume"))
+    if prior_grid_weighting not in ("volume", "radius"):
+        raise ValueError(
+            f"prior_grid_weighting must be 'volume' or 'radius', got {prior_grid_weighting!r}")
     use_prior_grid = prior_grid_n > 0 and float(loss_params.get("lambda_", 1.0)) != 0.0
 
     if loss_history is None:
@@ -1216,9 +1237,11 @@ def train_potential(
     print(f"Number of steps per epoch: {steps_per_epoch}, Batch size: {batch_size}")
     print(f"Number of epochs: {n_epochs}, Total training samples: {n_train}")
     if use_prior_grid:
+        grid_sampler = (sample_radius_balanced_ball if prior_grid_weighting == "radius"
+                        else sample_uniform_ball)
         print(f"Negative-density prior decoupled to spatial grid: "
               f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
-              f"(uniform ball, volume-weighted), resampled every epoch")
+              f"(uniform ball, {prior_grid_weighting}-weighted), resampled every epoch")
     start_epoch = len(loss_history['lr'])
     step = start_epoch * steps_per_epoch  # Continue from previous step if resuming
     if reset_lr:
@@ -1230,7 +1253,7 @@ def train_potential(
         if use_prior_grid:
             # Fresh volume-weighted grid points for this epoch.
             key, grid_key = jax.random.split(key)
-            q_grid = sample_uniform_ball(grid_key, prior_grid_n, prior_grid_q_max)
+            q_grid = grid_sampler(grid_key, prior_grid_n, prior_grid_q_max)
         train_data_shuffled = jax.tree.map(lambda x: x[perms], train_data)
 
         epoch_loss, epoch_loss_noreg, epoch_lr = [], [], []
