@@ -21,7 +21,8 @@ export JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false
 # CUDA_VISIBLE_DEVICES; mirrors the gpu-server-env queueing policy.
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used \
-    --format=csv,noheader,nounits | awk -F, '$2 < 1000 {print $1; exit}')
+    --format=csv,noheader,nounits \
+    | awk -F, '$2 < 1000 && !found {print $1; found=1}')
   export CUDA_VISIBLE_DEVICES
 fi
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
