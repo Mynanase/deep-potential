@@ -15,8 +15,8 @@ histogram on common probes:
     Fibonacci directions, the angular autocorrelation C(theta) of the
     density residual from random pairs; the patch correlation angle
     theta_half (C = 0.5 crossing) and the transverse patch scale r*theta.
-  * Pair calibration for the osc-pair penalty: mean squared rho difference
-    across point pairs separated by delta in {2,4,6} kpc on the
+  * Pair calibration for the osc-pair penalty: mean squared rho first and
+    second differences across point pairs separated by delta in {2,4,6} kpc on the
     radius-balanced prior grid (r = R*u, n default 8192, R = 70 kpc), with
     the matching arcsinh negative-density penalty for scale.
 
@@ -247,19 +247,46 @@ def main():
             rho_b = eval_batched(phi, q_a + d0 * u)
             msd = float(np.mean((rho_b - rho_a) ** 2))
             calib[label][f"msd_{d0:g}kpc"] = msd
-        row = "".join(f"  d={d:g}: {calib[label][f'msd_{d:g}kpc']:9.3e}"
+        for d0 in args.pair_deltas:
+            u = rng.normal(size=(n_g, 3))
+            u /= np.linalg.norm(u, axis=1, keepdims=True)
+            rho_p = eval_batched(phi, q_a + d0 * u)
+            rho_m = eval_batched(phi, q_a - d0 * u)
+            calib[label][f"msd2_{d0:g}kpc"] = float(
+                np.mean((rho_p - 2.0 * rho_a + rho_m) ** 2))
+        row = "".join(f"  d={d:g}: {calib[label][f'msd_{d:g}kpc']:8.2e}"
+                      f"/{calib[label][f'msd2_{d:g}kpc']:8.2e}"
                       for d in args.pair_deltas)
         print(f"{label:>10}  prior_neg={pen:.4f}{row}")
-    if "innerA" in calib and calib["innerA"].get("msd_4kpc", 0) > 0:
-        print("suggested osc_weight eta (eta*msd(innerA,d=4kpc)=1.0): "
-              f"{1.0 / calib['innerA']['msd_4kpc']:.3e}")
+    # Truth reference on the same probes (cell-average histogram field).
+    rho_a_t = truth_interp(q_a)
+    calib["truth"] = {}
+    for d0 in args.pair_deltas:
+        u = rng.normal(size=(n_g, 3))
+        u /= np.linalg.norm(u, axis=1, keepdims=True)
+        rho_b = truth_interp(q_a + d0 * u)
+        rho_p = truth_interp(q_a + d0 * u)
+        rho_m = truth_interp(q_a - d0 * u)
+        calib["truth"][f"msd_{d0:g}kpc"] = float(np.mean((rho_b - rho_a_t) ** 2))
+        calib["truth"][f"msd2_{d0:g}kpc"] = float(
+            np.mean((rho_p - 2.0 * rho_a_t + rho_m) ** 2))
+    print(f"{'truth':>10}  (histogram field reference)"
+          + "".join(f"  d={d:g}: {calib['truth'][f'msd_{d:g}kpc']:8.2e}"
+                    f"/{calib['truth'][f'msd2_{d:g}kpc']:8.2e}"
+                    for d in args.pair_deltas))
+    print("columns are msd1/msd2 = mean squared first/second difference")
+    if "innerA" in calib and calib["innerA"].get("msd2_4kpc", 0) > 0:
+        print("suggested osc_weight eta, second-difference form "
+              "(eta*msd2_lap(innerA,d=4kpc)=1.0): "
+              f"{RHO_SCALE ** 2 / calib['innerA']['msd2_4kpc']:.3e}")
 
     # ---- figure ------------------------------------------------------------
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    ofs.use_style()
     fig, axes = ofs.figure_grid(1, 2, width=ofs.TEXT)
     for label in ["truth"] + labels:
         axes[0].loglog(freq_ref, spectra[label],
-                       color=COLOR.get(label, None),
+                       color=ofs.PALETTE[COLOR[label]],
                        lw=1.3 if label == "truth" else 0.9,
                        ls="--" if label == "truth" else "-",
                        label="truth (histogram)" if label == "truth" else label)
@@ -271,12 +298,12 @@ def main():
     for label in ["truth"] + labels:
         corr = np.asarray(ang_rows[label][f"{args.shells[0]:g}"]["corr"])
         axes[1].plot(np.degrees(theta_c), corr,
-                     color=COLOR.get(label, None),
+                     color=ofs.PALETTE[COLOR[label]],
                      ls="--" if label == "truth" else "-",
                      lw=1.3 if label == "truth" else 0.9)
     axes[1].axhline(0.5, color="0.5", lw=0.5, alpha=0.5)
     axes[1].set_xlabel(r"Angular separation $\theta$ [deg]")
-    axes[1].set_ylabel(r"Angular autocorrelation $C(\theta)$ of $\delta\rho$")
+    axes[1].set_ylabel(r"$C(\theta)$ of $\delta\rho$")
     axes[1].set_ylim(-0.2, 1.0)
     ofs.panel_labels(axes)
     base = args.output_dir / "density-spectrum"
