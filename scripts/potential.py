@@ -1087,7 +1087,7 @@ def _unpack_phi_batch(batch):
         q, p, dlnf_dq, dlnf_dp = batch
         weights = None
         q_grid = None
-    return q, p, dlnf_dq, dlnf_dp, weights, q_grid
+    return q, p, dlnf_dq, dlnf_dp, weights, q_grid, q_pair
 
 
 @eqx.filter_value_and_grad(has_aux=True)
