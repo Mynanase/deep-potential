@@ -1053,7 +1053,8 @@ def sample_radius_balanced_ball(key, n_points, radius):
 def _linear_layers(net):
     """All eqx.nn.Linear modules inside a network pytree."""
     return [m for m in jax.tree_util.tree_leaves(
-        net, is_leaf=lambda x: isinstance(x, eqx.nn.Linear))]
+        net, is_leaf=lambda x: isinstance(x, eqx.nn.Linear))
+        if isinstance(m, eqx.nn.Linear)]
 
 
 def spectral_norms(net):
