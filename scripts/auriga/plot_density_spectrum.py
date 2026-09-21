@@ -286,7 +286,7 @@ def main():
     fig, axes = ofs.figure_grid(1, 2, width=ofs.TEXT)
     for label in ["truth"] + labels:
         axes[0].loglog(freq_ref, spectra[label],
-                       color=ofs.PALETTE[COLOR[label]],
+                       color=ofs.PALETTE.get(COLOR[label], "0.2"),
                        lw=1.3 if label == "truth" else 0.9,
                        ls="--" if label == "truth" else "-",
                        label="truth (histogram)" if label == "truth" else label)
@@ -298,7 +298,7 @@ def main():
     for label in ["truth"] + labels:
         corr = np.asarray(ang_rows[label][f"{args.shells[0]:g}"]["corr"])
         axes[1].plot(np.degrees(theta_c), corr,
-                     color=ofs.PALETTE[COLOR[label]],
+                     color=ofs.PALETTE.get(COLOR[label], "0.2"),
                      ls="--" if label == "truth" else "-",
                      lw=1.3 if label == "truth" else 0.9)
     axes[1].axhline(0.5, color="0.5", lw=0.5, alpha=0.5)
