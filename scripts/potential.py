@@ -1050,6 +1050,12 @@ def sample_radius_balanced_ball(key, n_points, radius):
     return r[:, None] * g
 
 
+def cosine_anneal_value(step, total, start, end):
+    """Cosine schedule from start (step 0) to end (step total-1)."""
+    frac = step / max(total - 1, 1)
+    return end + (start - end) * 0.5 * (1.0 + np.cos(np.pi * frac))
+
+
 def _unpack_phi_batch(batch):
     """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None).
 
@@ -1181,6 +1187,13 @@ def train_potential(
         raise ValueError(
             f"prior_grid_weighting must be 'volume' or 'radius', got {prior_grid_weighting!r}")
     use_prior_grid = prior_grid_n > 0 and float(loss_params.get("lambda_", 1.0)) != 0.0
+    lambda_start = loss_params.pop("lambda_start", None)
+    lambda_end = loss_params.pop("lambda_end", None)
+    lambda_anneal = lambda_start is not None and lambda_end is not None
+    if lambda_anneal and not (float(lambda_start) > float(lambda_end) > 0.0):
+        raise ValueError(
+            f"lambda anneal needs lambda_start > lambda_end > 0, got "
+            f"{lambda_start} -> {lambda_end}")
 
     if loss_history is None:
         loss_history = {'train': [], 'val': [], 'train_noreg': [], 'val_noreg': [], 'lr': []}
@@ -1242,12 +1255,18 @@ def train_potential(
         print(f"Negative-density prior decoupled to spatial grid: "
               f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
               f"(uniform ball, {prior_grid_weighting}-weighted), resampled every epoch")
+    if lambda_anneal:
+        print(f"Negativity-penalty lambda cosine anneal: {lambda_start:g} -> "
+              f"{lambda_end:g} over {n_epochs} epochs")
     start_epoch = len(loss_history['lr'])
     step = start_epoch * steps_per_epoch  # Continue from previous step if resuming
     if reset_lr:
         step = 0
 
     for epoch in (pbar := trange(n_epochs)):
+        if lambda_anneal:
+            loss_params["lambda_"] = cosine_anneal_value(
+                epoch, n_epochs, float(lambda_start), float(lambda_end))
         key, subkey = jax.random.split(key)
         perms = jax.random.permutation(subkey, n_train)
         if use_prior_grid:
@@ -1291,6 +1310,9 @@ def train_potential(
         loss_history['val'].append(np.mean(epoch_val_loss))
         loss_history['val_noreg'].append(np.mean(epoch_val_loss_noreg))
         loss_history['lr'].append(np.mean(epoch_lr))
+        if lambda_anneal:
+            loss_history.setdefault('lambda_eff', []).append(
+                float(loss_params["lambda_"]))
         if use_prior_grid:
             # Mean decoupled penalty on this epoch's grid: the direct
             # evidence channel for the constraint's strength over training.
@@ -1311,6 +1333,8 @@ def train_potential(
                 f"lr: {loss_history['lr'][-1]:.4f}")
         if use_prior_grid:
             desc += f" | prior_neg: {loss_history['prior_neg_grid'][-1]:.4f}"
+        if lambda_anneal:
+            desc += f" | lam: {loss_history['lambda_eff'][-1]:.2f}"
         pbar.set_description(desc)
 
         if checkpoint_frequency_epochs > 0 and epoch > 0 and epoch % checkpoint_frequency_epochs == 0:
