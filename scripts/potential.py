@@ -924,11 +924,12 @@ def get_phi_loss(
             sample positions q; providing it moves the penalty to
             log( sum_i w_i cbe_i / sum_i w_i ) + lambda_ mean_grid(prior_neg),
             volume-weighted over the grid.
-        q_pair: Points paired 1:1 with q_grid at 2-6 kpc offsets. When
-            provided with osc_weight != 0, adds
-            osc_weight * mean_grid[(Lap(q_pair) - Lap(q_grid))^2],
-            a Dirichlet-energy penalty on density oscillations at the pair
-            separation scale, outside the CBE log like prior_neg.
+        q_pair: Points stacked as [q_grid + d*u; q_grid - d*u] with 2-6 kpc
+            separations d. When provided with osc_weight != 0, adds
+            osc_weight * mean_grid[(Lap(q+) - 2 Lap(q) + Lap(q-))^2],
+            a bending-energy penalty on density curvature at the pair
+            separation scale (trend-insensitive second difference), outside
+            the CBE log like prior_neg.
 
     Returns:
         A tuple (total_loss, loss_without_regularization).
@@ -995,10 +996,13 @@ def get_phi_loss(
         prior_neg_grid = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2_grid, 0.0)) / beta
         loss = loss + lambda_ * jnp.mean(prior_neg_grid)
         if q_pair is not None and osc_weight != 0.0:
-            # High-frequency oscillation constraint: squared density
-            # (dimensionless Laplacian) difference across nearby pairs.
+            # High-frequency oscillation constraint: squared second
+            # difference of the density (dimensionless Laplacian) across
+            # paired +/- offsets - insensitive to smooth radial gradients.
             d2phi_dq2_pair = phi_laplacian_fn(phi_model, q_pair)
-            osc_pen = jnp.mean((d2phi_dq2_pair - d2phi_dq2_grid) ** 2)
+            lap_plus, lap_minus = jnp.split(d2phi_dq2_pair, 2)
+            osc_pen = jnp.mean(
+                (lap_plus - 2.0 * d2phi_dq2_grid + lap_minus) ** 2)
             loss = loss + osc_weight * osc_pen
 
     loss_noreg = loss
@@ -1122,12 +1126,14 @@ def grid_prior_penalty(params, static, q_grid, loss_params):
 
 @eqx.filter_jit
 def osc_pair_penalty(params, static, q_grid, q_pair):
-    """Mean squared Laplacian difference across paired grid points
+    """Mean squared Laplacian second difference across paired +/- offsets
     (diagnostic channel for the oscillation penalty)."""
     model = eqx.combine(params, static)
     lap_fn = jax.vmap(calc_phi_laplacian, in_axes=(None, 0))
-    return jnp.mean((lap_fn(model.phi_model, q_pair)
-                     - lap_fn(model.phi_model, q_grid)) ** 2)
+    lap_pair = lap_fn(model.phi_model, q_pair)
+    lap_plus, lap_minus = jnp.split(lap_pair, 2)
+    return jnp.mean((lap_plus - 2.0 * lap_fn(model.phi_model, q_grid)
+                     + lap_minus) ** 2)
 
 @eqx.filter_jit
 def train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, val_loss):
@@ -1294,8 +1300,8 @@ def train_potential(
             q_grid = grid_sampler(grid_key, prior_grid_n, prior_grid_q_max)
             q_pair = None
             if use_osc_pair:
-                # Paired offsets q_pair = q_grid + delta*u with delta in
-                # kpc converted to dimensionless q units (L = 10 kpc).
+                # Paired offsets q_pair = [q_grid + d*u; q_grid - d*u] with
+                # d in kpc converted to dimensionless q units (L = 10 kpc).
                 key, delta_key, dir_key = jax.random.split(key, 3)
                 deltas = jax.random.uniform(
                     delta_key, (prior_grid_n,),
@@ -1303,7 +1309,9 @@ def train_potential(
                     maxval=osc_delta_max_kpc / 10.0)
                 u = jax.random.normal(dir_key, (prior_grid_n, 3))
                 u = u / jnp.linalg.norm(u, axis=1, keepdims=True)
-                q_pair = q_grid + deltas[:, None] * u
+                offsets = deltas[:, None] * u
+                q_pair = jnp.concatenate([q_grid + offsets, q_grid - offsets],
+                                         axis=0)
         train_data_shuffled = jax.tree.map(lambda x: x[perms], train_data)
 
         epoch_loss, epoch_loss_noreg, epoch_lr = [], [], []

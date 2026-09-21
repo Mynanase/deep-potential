@@ -52,7 +52,7 @@ def _inputs(seed=0, n=64, ng=32):
     dlnf_dp = jax.random.normal(keys[3], (n, 3))
     w = 0.5 + jax.random.uniform(keys[4], (n,))
     q_grid = jax.random.uniform(jax.random.key(7), (ng, 3), minval=-6.0, maxval=6.0)
-    q_pair = q_grid + 0.4
+    q_pair = jnp.concatenate([q_grid + 0.4, q_grid - 0.4], axis=0)
     return q, p, dlnf_dq, dlnf_dp, w, q_grid, q_pair
 
 
@@ -91,7 +91,8 @@ def test_osc_pair_quartic_analytic():
     pen = jnp.arcsinh(beta * jnp.maximum(-lap, 0.0)) / beta
     lap_a = 12.0 * c * jnp.sum(q_grid ** 2, axis=1)
     lap_b = 12.0 * c * jnp.sum(q_pair ** 2, axis=1)
-    osc = jnp.mean((lap_b - lap_a) ** 2)
+    lap_p, lap_m = jnp.split(lap_b, 2)
+    osc = jnp.mean((lap_p - 2.0 * lap_a + lap_m) ** 2)
     expected = (jnp.log(jnp.sum(w * cbe) / jnp.sum(w)) + lambda_ * pen
                 + eta * osc)
     np.testing.assert_allclose(float(loss), float(expected), rtol=1e-5)
