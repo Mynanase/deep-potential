@@ -1265,8 +1265,10 @@ def train_potential(
 
     for epoch in (pbar := trange(n_epochs)):
         if lambda_anneal:
-            loss_params["lambda_"] = cosine_anneal_value(
-                epoch, n_epochs, float(lambda_start), float(lambda_end))
+            # Keep lambda_ a Python float: an np.float64 would be traced by
+            # filter_jit and break the concrete boolean in decouple_prior.
+            loss_params["lambda_"] = float(cosine_anneal_value(
+                epoch, n_epochs, float(lambda_start), float(lambda_end)))
         key, subkey = jax.random.split(key)
         perms = jax.random.permutation(subkey, n_train)
         if use_prior_grid:
