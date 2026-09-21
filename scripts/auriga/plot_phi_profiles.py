@@ -338,21 +338,21 @@ def main():
     def profile_panels(ax_m, ax_r, ks, tag=""):
         ph = np.degrees(phi_c)
         ax_m.axhline(0.0, color="0.2", lw=0.7)
-        ax_m.plot(ph, m_true[ks], color="k", lw=1.6, marker="o", ms=2.4,
+        ax_m.plot(ph, m_true[ks] / 1e8, color="k", lw=1.6, marker="o", ms=2.4,
                   label="truth", zorder=3)
-        mvals = [m_true[ks].min()]
+        mvals = [float((m_true[ks] / 1e8).min())]
         for l in MODELS:
-            mv = res[l]["m"][ks]
+            mv = res[l]["m"][ks] / 1e8
             mvals.append(float(mv.min()))
             ax_m.plot(ph, mv, color=ofs.PALETTE[COLOR[l]],
                       lw=1.0, marker="o", ms=1.6, zorder=2)
             mvals.append(float(mv.max()))
-        mvals.append(float(m_true[ks].max()))
+        mvals.append(float((m_true[ks] / 1e8).max()))
         lo, hi = min(0.0, min(mvals)), max(mvals)
         ax_m.set_ylim(lo - 0.06 * (hi - lo), hi + 0.24 * (hi - lo))
         ax_m.set_xlim(0.0, 360.0)
         ax_m.set_xticks([0, 90, 180, 270, 360])
-        ax_m.set_ylabel(r"$M(\phi\,{\rm bin})$  [Msun]")
+        ax_m.set_ylabel(r"$M(\phi\,{\rm bin})$  [$10^8\,M_\odot$]")
         ax_m.set_xlabel(r"$\phi$ [deg]")
         j_sh = cells[ks[0]]["shell"]
         ax_m.annotate(f"r {r_lo[j_sh]:.2f}-{r_hi[j_sh]:.2f} kpc{tag}",
@@ -394,17 +394,20 @@ def main():
         fig, axes = ofs.figure_grid(nrows, 2, width=ofs.WIDE,
                                     ratio=(0.95 * nrows + 0.5) / ofs.WIDE)
         flat = list(np.ravel(axes))
-        for hide in flat[2 * len(combos):]:
-            hide.set_visible(False)
+        used = []
         for i, (ks, tag) in enumerate(combos):
-            top = flat[2 * (i // 2) + (i % 2)]
-            bot = flat[2 * (i // 2) + 1 + (i % 2)]
+            row, col = divmod(i, 2)          # two combos per mass/resid pair
+            top = flat[4 * row + col]        # mass: row 2*row, column col
+            bot = flat[4 * row + 2 + col]    # residual: row 2*row+1, col col
             profile_panels(top, bot, ks, tag=tag)
+            used += [top, bot]
             top.tick_params(labelbottom=False)
-            if i % 2:
+            if col:
                 top.tick_params(labelleft=False)
                 bot.tick_params(labelleft=False)
-        ofs.panel_labels(flat[:2 * len(combos)], pad=6)
+        for hide in flat[len(used):]:
+            hide.set_visible(False)
+        ofs.panel_labels(used, pad=6)
         for p in ofs.save(fig, str(args.output_dir / stem)):
             print("saved", p)
 
