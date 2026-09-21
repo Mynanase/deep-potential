@@ -118,7 +118,7 @@
       "prior_grid_n": 4096,
       "prior_grid_q_max": 7.0,
       "prior_grid_weighting": "radius",
-      "osc_weight": 1.0,
+      "osc_weight": 7.612e-06,
       "osc_delta_min_kpc": 2.0,
       "osc_delta_max_kpc": 6.0
     }
