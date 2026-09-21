@@ -157,7 +157,7 @@ def main():
     truth_rays = truth_interp(rays).reshape(args.n_dirs, args.n_radial)
 
     labels = [spec.split("=", 1)[0] for spec in args.model]
-    model_dirs = dict(args.model)
+    model_dirs = dict(s.split("=", 1) for s in args.model)
     series = {"truth": truth_rays}
     for spec in args.model:
         label, run_dir = spec.split("=", 1)
