@@ -17,7 +17,14 @@ GRIDPRIOR=$HOME/.orx/runs/09faad30-2d6f-482c-8d05-8194603c84f3/repo/runs/orx
 INNERA=$HOME/.orx/runs/2b32eb04-d8bf-4c03-a3a9-98d0f0db1192/repo/runs/orx
 INNERB=$HOME/.orx/runs/7016399a-4126-4943-8efb-20ec0e9cde44/repo/runs/orx
 export JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+# Auto-pick the first idle card (used < 1000 MiB) unless the caller pinned
+# CUDA_VISIBLE_DEVICES; mirrors the gpu-server-env queueing policy.
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index,memory.used \
+    --format=csv,noheader,nounits | awk -F, '$2 < 1000 {print $1; exit}')
+  export CUDA_VISIBLE_DEVICES
+fi
+echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 export MPLCONFIGDIR=/tmp/orx-mpl
 mkdir -p "$MPLCONFIGDIR"
 
