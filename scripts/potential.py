@@ -1050,6 +1050,38 @@ def sample_radius_balanced_ball(key, n_points, radius):
     return r[:, None] * g
 
 
+def _linear_layers(net):
+    """All eqx.nn.Linear modules inside a network pytree."""
+    return [m for m in jax.tree_util.tree_leaves(
+        net, is_leaf=lambda x: isinstance(x, eqx.nn.Linear))]
+
+
+def spectral_norms(net):
+    """Largest singular value of every Linear weight (exact SVD)."""
+    return [float(jnp.linalg.svdvals(l.weight)[-1]) for l in _linear_layers(net)]
+
+
+def apply_spectral_ceiling(net, sigma0):
+    """Clip each Linear spectral norm back to its reference value sigma0.
+
+    W <- W * min(1, sigma0 / sigma(W)): a capacity-preserving Lipschitz
+    ceiling (Miyato et al. 2018 bound ||f||_Lip <= prod sigma(W_l)). Layers
+    below the ceiling pass unchanged; layers above are rescaled to it.
+    Returns (net, ratios=sigma/sigma0 per layer, clipped flags).
+    """
+    lins = _linear_layers(net)
+    sigmas = [jnp.linalg.svdvals(l.weight)[-1] for l in lins]
+    factors = [jnp.minimum(1.0, jnp.asarray(s0) / s) if s > 0 else 1.0
+               for s0, s in zip(sigma0, sigmas)]
+    new_weights = [l.weight * f for l, f in zip(lins, factors)]
+    new_net = eqx.tree_at(lambda m: [l.weight for l in _linear_layers(m)],
+                          net, new_weights)
+    ratios = [float(s / s0) if s0 > 0 else float("inf")
+              for s0, s in zip(sigma0, sigmas)]
+    clipped = [bool(f < 1.0) for f in factors]
+    return new_net, ratios, clipped
+
+
 def _unpack_phi_batch(batch):
     """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None).
 
@@ -1181,6 +1213,7 @@ def train_potential(
         raise ValueError(
             f"prior_grid_weighting must be 'volume' or 'radius', got {prior_grid_weighting!r}")
     use_prior_grid = prior_grid_n > 0 and float(loss_params.get("lambda_", 1.0)) != 0.0
+    sn_ceiling = bool(loss_params.pop("sn_ceiling", False))
 
     if loss_history is None:
         loss_history = {'train': [], 'val': [], 'train_noreg': [], 'val_noreg': [], 'lr': []}
@@ -1242,6 +1275,12 @@ def train_potential(
         print(f"Negative-density prior decoupled to spatial grid: "
               f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
               f"(uniform ball, {prior_grid_weighting}-weighted), resampled every epoch")
+    sn_sigma0 = None
+    if sn_ceiling:
+        sn_sigma0 = spectral_norms(model.phi_model.net)
+        print(f"Spectral-norm ceiling on the phi MLP: {len(sn_sigma0)} Linear "
+              f"layers, sigma0 = {['%.3f' % s for s in sn_sigma0]}, "
+              "clipped after every epoch")
     start_epoch = len(loss_history['lr'])
     step = start_epoch * steps_per_epoch  # Continue from previous step if resuming
     if reset_lr:
@@ -1296,6 +1335,18 @@ def train_potential(
             # evidence channel for the constraint's strength over training.
             loss_history.setdefault('prior_neg_grid', []).append(
                 float(grid_prior_penalty(params, static, q_grid, loss_params)))
+        if sn_ceiling:
+            # Project every Linear back under its initialization spectral
+            # norm, then re-partition for the next epoch.
+            model_cur = eqx.combine(params, static)
+            new_net, ratios, clipped = apply_spectral_ceiling(
+                model_cur.phi_model.net, sn_sigma0)
+            model_cur = eqx.tree_at(lambda m: m.phi_model.net, model_cur, new_net)
+            params, static = eqx.partition(model_cur, filter_spec=filter_spec)
+            loss_history.setdefault('sn_sigma_ratio_max', []).append(
+                float(np.max(ratios)))
+            loss_history.setdefault('sn_clipped_frac', []).append(
+                float(np.mean(clipped)))
         # We also append every scalar trainable parameter's value to the history
         model_snapshot = eqx.combine(params, static)
         # Get the current values of trainable scalar parameters
@@ -1311,6 +1362,9 @@ def train_potential(
                 f"lr: {loss_history['lr'][-1]:.4f}")
         if use_prior_grid:
             desc += f" | prior_neg: {loss_history['prior_neg_grid'][-1]:.4f}"
+        if sn_ceiling:
+            desc += (f" | sn_max: {loss_history['sn_sigma_ratio_max'][-1]:.3f}"
+                     f" clip: {loss_history['sn_clipped_frac'][-1]:.0%}")
         pbar.set_description(desc)
 
         if checkpoint_frequency_epochs > 0 and epoch > 0 and epoch % checkpoint_frequency_epochs == 0:
