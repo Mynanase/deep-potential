@@ -332,40 +332,59 @@ def main():
 
     ofs.use_style()
 
+    INIT = {"base": "b", "S1": "S", "gridprior": "g",
+            "innerA": "A", "innerB": "B"}
+
     def profile_panels(ax_m, ax_r, ks, tag=""):
         ph = np.degrees(phi_c)
         ax_m.axhline(0.0, color="0.2", lw=0.7)
         ax_m.plot(ph, m_true[ks], color="k", lw=1.6, marker="o", ms=2.4,
                   label="truth", zorder=3)
+        mvals = [m_true[ks].min()]
         for l in MODELS:
-            ax_m.plot(ph, res[l]["m"][ks], color=ofs.PALETTE[COLOR[l]],
+            mv = res[l]["m"][ks]
+            mvals.append(float(mv.min()))
+            ax_m.plot(ph, mv, color=ofs.PALETTE[COLOR[l]],
                       lw=1.0, marker="o", ms=1.6, zorder=2)
+            mvals.append(float(mv.max()))
+        mvals.append(float(m_true[ks].max()))
+        lo, hi = min(0.0, min(mvals)), max(mvals)
+        ax_m.set_ylim(lo - 0.06 * (hi - lo), hi + 0.24 * (hi - lo))
         ax_m.set_xlim(0.0, 360.0)
         ax_m.set_xticks([0, 90, 180, 270, 360])
         ax_m.set_ylabel(r"$M(\phi\,{\rm bin})$  [Msun]")
         ax_m.set_xlabel(r"$\phi$ [deg]")
         j_sh = cells[ks[0]]["shell"]
         ax_m.annotate(f"r {r_lo[j_sh]:.2f}-{r_hi[j_sh]:.2f} kpc{tag}",
-                      xy=(0.02, 0.05), xycoords="axes fraction",
-                      fontsize=7, color="#333333")
+                      xy=(0.02, 0.97), xycoords="axes fraction",
+                      ha="left", va="top", fontsize=7, color="#333333")
         ax_r.axhline(0.0, color="0.2", lw=0.7)
+        rmax = 0.0
         if np.isfinite(sig_true[ks]).all():
-            ax_r.fill_between(ph, -100 * sig_true[ks] / m_true[ks],
-                              100 * sig_true[ks] / m_true[ks], color="0.88",
-                              zorder=0)
+            band = 100 * sig_true[ks] / m_true[ks]
+            ax_r.fill_between(ph, -band, band, color="0.88", zorder=0)
+            rmax = max(rmax, float(band.max()))
         for l in MODELS:
-            ax_r.plot(ph, 100 * dm[l][ks] / m_true[ks],
-                      color=ofs.PALETTE[COLOR[l]], lw=1.0, marker="o", ms=1.6)
+            rv = 100 * dm[l][ks] / m_true[ks]
+            rmax = max(rmax, float(np.abs(rv).max()))
+            ax_r.plot(ph, rv, color=ofs.PALETTE[COLOR[l]], lw=1.0,
+                      marker="o", ms=1.6)
+        if rmax > 0:
+            ax_r.set_ylim(-1.42 * rmax, 1.48 * rmax)
         ax_r.set_xlim(0.0, 360.0)
         ax_r.set_xticks([0, 90, 180, 270, 360])
         ax_r.set_ylabel(r"$\Delta M/M_{\rm true}$  [%]")
         ax_r.set_xlabel(r"$\phi$ [deg]")
-        txt = "  ".join(
-            f"{l} Σ{100*np.sum(dm[l][ks]/m_true[ks]):+.0f}/"
-            f"Σ|·|{100*np.sum(np.abs(dm[l][ks]/m_true[ks])):.0f}"
-            for l in MODELS)
-        ax_r.annotate(txt, xy=(0.5, 0.99), xycoords="axes fraction",
-                      ha="center", va="top", fontsize=5.0, color="#333333")
+        sums = [(INIT[l], 100 * float(np.sum(dm[l][ks] / m_true[ks])),
+                 100 * float(np.sum(np.abs(dm[l][ks] / m_true[ks]))))
+                for l in MODELS]
+        line1 = "   ".join(f"{i} Σ{a:+.0f}/Σ|·|{b:.0f}"
+                           for i, a, b in sums[:3])
+        line2 = "   ".join(f"{i} Σ{a:+.0f}/Σ|·|{b:.0f}"
+                           for i, a, b in sums[3:])
+        ax_r.annotate(line1 + chr(10) + line2, xy=(0.985, 0.985),
+                      xycoords="axes fraction", ha="right", va="top",
+                      fontsize=5.0, color="#333333", linespacing=1.4)
 
     # paired-stack layout: every (shell, band) combo gets its mass panel
     # directly above its residual panel; combos fill two columns of pairs.
@@ -379,18 +398,19 @@ def main():
             hide.set_visible(False)
         for i, (ks, tag) in enumerate(combos):
             top = flat[2 * (i // 2) + (i % 2)]
-            bot = flat[2 * (i // 2 + 1) + (i % 2)]
+            bot = flat[2 * (i // 2) + 1 + (i % 2)]
             profile_panels(top, bot, ks, tag=tag)
             top.tick_params(labelbottom=False)
             if i % 2:
                 top.tick_params(labelleft=False)
                 bot.tick_params(labelleft=False)
-        ofs.panel_labels(flat[:2 * len(combos)])
+        ofs.panel_labels(flat[:2 * len(combos)], pad=6)
         for p in ofs.save(fig, str(args.output_dir / stem)):
             print("saved", p)
 
     eq_combos = [([j * len(BANDS) * n_phi + p for p in range(n_phi)],
-                  "  (equatorial θ 45–135°)" if j == 0 else "")
+                  ("  (equatorial θ 45–135°)\nb/S/g/A/B = base/S1/"
+                   "gridprior/innerA/innerB" if j == 0 else ""))
                  for j in range(n_sh)]
     paired_figure(eq_combos, "phi-profiles-equator")
 
