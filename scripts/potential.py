@@ -897,7 +897,9 @@ def get_phi_loss(
     l2_potential=0.01,
     l2_selection_function=0.01,
     weights=None,
-    q_grid=None
+    q_grid=None,
+    q_pair=None,
+    osc_weight=0.0
 ):
     """
     Calculates the loss based on the collisionless Boltzmann equation (CBE).
@@ -922,6 +924,11 @@ def get_phi_loss(
             sample positions q; providing it moves the penalty to
             log( sum_i w_i cbe_i / sum_i w_i ) + lambda_ mean_grid(prior_neg),
             volume-weighted over the grid.
+        q_pair: Points paired 1:1 with q_grid at 2-6 kpc offsets. When
+            provided with osc_weight != 0, adds
+            osc_weight * mean_grid[(Lap(q_pair) - Lap(q_grid))^2],
+            a Dirichlet-energy penalty on density oscillations at the pair
+            separation scale, outside the CBE log like prior_neg.
 
     Returns:
         A tuple (total_loss, loss_without_regularization).
@@ -987,6 +994,12 @@ def get_phi_loss(
         d2phi_dq2_grid = phi_laplacian_fn(phi_model, q_grid)
         prior_neg_grid = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2_grid, 0.0)) / beta
         loss = loss + lambda_ * jnp.mean(prior_neg_grid)
+        if q_pair is not None and osc_weight != 0.0:
+            # High-frequency oscillation constraint: squared density
+            # (dimensionless Laplacian) difference across nearby pairs.
+            d2phi_dq2_pair = phi_laplacian_fn(phi_model, q_pair)
+            osc_pen = jnp.mean((d2phi_dq2_pair - d2phi_dq2_grid) ** 2)
+            loss = loss + osc_weight * osc_pen
 
     loss_noreg = loss
 
@@ -1051,13 +1064,18 @@ def sample_radius_balanced_ball(key, n_points, radius):
 
 
 def _unpack_phi_batch(batch):
-    """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None).
+    """Returns (q, p, dlnf_dq, dlnf_dp, weights-or-None, q_grid-or-None,
+    q_pair-or-None).
 
     Accepts 4-tuples (no weights), 5-tuples (with importance weights), and
-    6-tuples (with importance weights and the spatial prior grid q_grid).
+    6-tuples (with importance weights and the spatial prior grid q_grid),
+    and 7-tuples (additionally the paired offset grid q_pair).
     """
-    if len(batch) == 6:
+    if len(batch) == 7:
+        q, p, dlnf_dq, dlnf_dp, weights, q_grid, q_pair = batch
+    elif len(batch) == 6:
         q, p, dlnf_dq, dlnf_dp, weights, q_grid = batch
+        q_pair = None
     elif len(batch) == 5:
         q, p, dlnf_dq, dlnf_dp, weights = batch
         q_grid = None
@@ -1071,20 +1089,22 @@ def _unpack_phi_batch(batch):
 @eqx.filter_value_and_grad(has_aux=True)
 def loss_fn(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp, weights, q_grid = _unpack_phi_batch(batch)
+    q, p, dlnf_dq, dlnf_dp, weights, q_grid, q_pair = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid,
+        q_pair=q_pair, **loss_params
     )
     return loss, loss_noreg
 
 @eqx.filter_jit
 def loss_fn_val(params, static, batch, loss_params):
     model = eqx.combine(params, static)
-    q, p, dlnf_dq, dlnf_dp, weights, q_grid = _unpack_phi_batch(batch)
+    q, p, dlnf_dq, dlnf_dp, weights, q_grid, q_pair = _unpack_phi_batch(batch)
     loss, loss_noreg = get_phi_loss(
         model.phi_model, model.frameshift_model, model.log_selection_function_model,
-        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid, **loss_params
+        q, p, dlnf_dq, dlnf_dp, weights=weights, q_grid=q_grid,
+        q_pair=q_pair, **loss_params
     )
     return loss, loss_noreg
 
@@ -1098,6 +1118,16 @@ def grid_prior_penalty(params, static, q_grid, loss_params):
     beta = float(loss_params.get("beta", 1.0))
     prior_neg = jnp.arcsinh(beta * jnp.maximum(-d2phi_dq2, 0.0)) / beta
     return jnp.mean(prior_neg)
+
+
+@eqx.filter_jit
+def osc_pair_penalty(params, static, q_grid, q_pair):
+    """Mean squared Laplacian difference across paired grid points
+    (diagnostic channel for the oscillation penalty)."""
+    model = eqx.combine(params, static)
+    lap_fn = jax.vmap(calc_phi_laplacian, in_axes=(None, 0))
+    return jnp.mean((lap_fn(model.phi_model, q_pair)
+                     - lap_fn(model.phi_model, q_grid)) ** 2)
 
 @eqx.filter_jit
 def train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, val_loss):
@@ -1181,6 +1211,10 @@ def train_potential(
         raise ValueError(
             f"prior_grid_weighting must be 'volume' or 'radius', got {prior_grid_weighting!r}")
     use_prior_grid = prior_grid_n > 0 and float(loss_params.get("lambda_", 1.0)) != 0.0
+    osc_weight = float(loss_params.pop("osc_weight", 0.0))
+    osc_delta_min_kpc = float(loss_params.pop("osc_delta_min_kpc", 2.0))
+    osc_delta_max_kpc = float(loss_params.pop("osc_delta_max_kpc", 6.0))
+    use_osc_pair = use_prior_grid and osc_weight != 0.0
 
     if loss_history is None:
         loss_history = {'train': [], 'val': [], 'train_noreg': [], 'val_noreg': [], 'lr': []}
@@ -1242,6 +1276,10 @@ def train_potential(
         print(f"Negative-density prior decoupled to spatial grid: "
               f"n_grid={prior_grid_n}, q_max={prior_grid_q_max:g} "
               f"(uniform ball, {prior_grid_weighting}-weighted), resampled every epoch")
+    if use_osc_pair:
+        print(f"Osc-pair penalty on the prior grid: osc_weight={osc_weight:g}, "
+              f"delta ~ U({osc_delta_min_kpc:g}, {osc_delta_max_kpc:g}) kpc, "
+              "resampled every epoch")
     start_epoch = len(loss_history['lr'])
     step = start_epoch * steps_per_epoch  # Continue from previous step if resuming
     if reset_lr:
@@ -1254,6 +1292,18 @@ def train_potential(
             # Fresh volume-weighted grid points for this epoch.
             key, grid_key = jax.random.split(key)
             q_grid = grid_sampler(grid_key, prior_grid_n, prior_grid_q_max)
+            q_pair = None
+            if use_osc_pair:
+                # Paired offsets q_pair = q_grid + delta*u with delta in
+                # kpc converted to dimensionless q units (L = 10 kpc).
+                key, delta_key, dir_key = jax.random.split(key, 3)
+                deltas = jax.random.uniform(
+                    delta_key, (prior_grid_n,),
+                    minval=osc_delta_min_kpc / 10.0,
+                    maxval=osc_delta_max_kpc / 10.0)
+                u = jax.random.normal(dir_key, (prior_grid_n, 3))
+                u = u / jnp.linalg.norm(u, axis=1, keepdims=True)
+                q_pair = q_grid + deltas[:, None] * u
         train_data_shuffled = jax.tree.map(lambda x: x[perms], train_data)
 
         epoch_loss, epoch_loss_noreg, epoch_lr = [], [], []
@@ -1262,6 +1312,8 @@ def train_potential(
             val_batch = jax.tree.map(lambda x: x[i*val_batch_size:(i+1)*val_batch_size], val_data)
             if use_prior_grid:
                 val_batch = val_batch + (q_grid,)
+                if use_osc_pair:
+                    val_batch = val_batch + (q_pair,)
             val_loss, val_loss_noreg = loss_fn_val(
                 params, static,
                 val_batch,
@@ -1273,6 +1325,8 @@ def train_potential(
             batch = jax.tree.map(lambda x: x[i*batch_size:(i+1)*batch_size], train_data_shuffled)
             if use_prior_grid:
                 batch = batch + (q_grid,)
+                if use_osc_pair:
+                    batch = batch + (q_pair,)
             params, opt_state, loss, loss_noreg = train_step(params, static, optimizer, opt_state, batch, loss_params, schedule_type, jnp.array(val_loss))
             epoch_loss.append(loss.item())
             epoch_loss_noreg.append(loss_noreg.item())
@@ -1296,6 +1350,9 @@ def train_potential(
             # evidence channel for the constraint's strength over training.
             loss_history.setdefault('prior_neg_grid', []).append(
                 float(grid_prior_penalty(params, static, q_grid, loss_params)))
+            if use_osc_pair:
+                loss_history.setdefault('osc_pen_grid', []).append(
+                    float(osc_pair_penalty(params, static, q_grid, q_pair)))
         # We also append every scalar trainable parameter's value to the history
         model_snapshot = eqx.combine(params, static)
         # Get the current values of trainable scalar parameters
@@ -1311,6 +1368,8 @@ def train_potential(
                 f"lr: {loss_history['lr'][-1]:.4f}")
         if use_prior_grid:
             desc += f" | prior_neg: {loss_history['prior_neg_grid'][-1]:.4f}"
+            if use_osc_pair:
+                desc += f" | osc_pen: {loss_history['osc_pen_grid'][-1]:.2e}"
         pbar.set_description(desc)
 
         if checkpoint_frequency_epochs > 0 and epoch > 0 and epoch % checkpoint_frequency_epochs == 0:
