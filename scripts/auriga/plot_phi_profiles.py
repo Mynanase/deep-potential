@@ -342,7 +342,7 @@ def main():
                       lw=1.0, marker="o", ms=1.6, zorder=2)
         ax_m.set_xlim(0.0, 360.0)
         ax_m.set_xticks([0, 90, 180, 270, 360])
-        ax_m.set_ylabel(r"$M(\phi\,{\\rm bin})$  [Msun]")
+        ax_m.set_ylabel(r"$M(\phi\,{\rm bin})$  [Msun]")
         ax_m.set_xlabel(r"$\phi$ [deg]")
         j_sh = cells[ks[0]]["shell"]
         ax_m.annotate(f"r {r_lo[j_sh]:.2f}-{r_hi[j_sh]:.2f} kpc{tag}",
@@ -358,7 +358,7 @@ def main():
                       color=ofs.PALETTE[COLOR[l]], lw=1.0, marker="o", ms=1.6)
         ax_r.set_xlim(0.0, 360.0)
         ax_r.set_xticks([0, 90, 180, 270, 360])
-        ax_r.set_ylabel(r"$\\Delta M/M_{\\rm true}$  [%]")
+        ax_r.set_ylabel(r"$\Delta M/M_{\rm true}$  [%]")
         ax_r.set_xlabel(r"$\phi$ [deg]")
         txt = "  ".join(
             f"{l} Σ{100*np.sum(dm[l][ks]/m_true[ks]):+.0f}/"
