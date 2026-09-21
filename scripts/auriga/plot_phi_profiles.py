@@ -242,7 +242,7 @@ def main():
               "rho3d field; Poisson sigma unavailable")
         for k, c in enumerate(cells):
             m_true[k] = c["v_cell"] * float(np.einsum(
-                "g,gd->", w_g, c["rho_t_field"].mean(axis=1)))
+                "g,g->", w_g, c["rho_t_field"].mean(axis=1)))
         truth_mode = "rho3d histogram field"
     print(f"truth mode: {truth_mode}")
 
@@ -256,7 +256,7 @@ def main():
                     k = j * len(BANDS) * n_phi + bi * n_phi + p
                     me += m_true[k]
                     ms += cells[k]["v_cell"] * float(np.einsum(
-                        "g,gd->", w_g, cells[k]["rho_t_field"].mean(axis=1)))
+                        "g,g->", w_g, cells[k]["rho_t_field"].mean(axis=1)))
                 rel_band.append(abs(ms / me - 1.0))
         print(f"field-integral vs exact particle mass per (shell, band): "
               f"median {100*np.median(rel_band):.2f}% max "
