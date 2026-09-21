@@ -4,7 +4,7 @@
 # vs the particle-truth rho3d grid product. No retraining.
 set -eo pipefail
 PY=/home/qiutao/miniforge3/envs/dp-jax/bin/python
-GRIDS=/localdisk/kosmos/my-deep-potential/data/auriga/halo12_particle_truth_grids.h5
+GRIDS=data/auriga/halo12_particle_truth_grids.h5
 RUNS=/home/qiutao/.orx/runs
 export JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-6}
