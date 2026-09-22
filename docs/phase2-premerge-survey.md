@@ -145,6 +145,15 @@ S1 ── 封闭质量裁决 ── particle-truth产品 ── flux ── cap-
 **最终裁决（同日补记）**：#1 质量与速度四件全收；#2 只收两个主力（`plot_pt_potential_2d` + `plot_pt_density_resid_lambda`）；#3 取消。
 已落地：基线分支 `codex/phase2-baseline-2026-09-22`（自 af32ee9），keep 件收入 `scripts/auriga/keep/`（含 README 标注来源），路径层级已修补。
 
+**Phase-2 补记（2026-09-22 绘图层重构）**：keep/ 已整体改为
+`scripts/auriga/archive/`（纯归档，不接流程），并把当批退役件一并收入
+（旧 plot_potential / plot_enclosed_mass 11 面板 / plot_df_constraints /
+df_phase1_figures / plot_particle_truth_2d 等）。活跃继任者：
+`scripts/plot_potential_2d.py`、`scripts/plot_radial_marginals.py`、
+`scripts/plot_enclosed_mass.py`（通用层）与 `scripts/auriga/truth_products.py`
+（真值侧预处理集合，lineage 缓存）。退役→替代映射见 archive/README.md；
+本节历史记录不改写。
+
 **附带效应**：合并集因此从「BASE + 4 尖端」缩小为「BASE + 按需拷贝」——
 - 基线 = `orx/lambda-sweep-10…`（纯主线）或 `af32ee9`（BASE，自带 #4/#6）；
 - 其余 keep 项从各载体分支**拷贝**进 `keep/`（不做 merge，不动冻结分支）。
