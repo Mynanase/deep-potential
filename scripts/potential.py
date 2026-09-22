@@ -1083,10 +1083,12 @@ def _unpack_phi_batch(batch):
     elif len(batch) == 5:
         q, p, dlnf_dq, dlnf_dp, weights = batch
         q_grid = None
+        q_pair = None
     else:
         q, p, dlnf_dq, dlnf_dp = batch
         weights = None
         q_grid = None
+        q_pair = None
     return q, p, dlnf_dq, dlnf_dp, weights, q_grid, q_pair
 
 

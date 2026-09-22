@@ -86,7 +86,10 @@ def test_osc_pair_quartic_analytic():
         alpha=alpha, beta=beta, lambda_=lambda_, l2_potential=0.0,
         weights=w, q_grid=q_grid, q_pair=q_pair, osc_weight=eta,
     )
-    cbe = _cbe(c, q, p, dlnf_dq, dlnf_dp, alpha)
+    # Quartic gradient is 4c q^3 per component (not the quadratic 2cq).
+    dphi_dq = 4.0 * c * q ** 3
+    null_hyp = jnp.sum(p * dlnf_dq - dphi_dq * dlnf_dp, axis=1)
+    cbe = jnp.arcsinh(alpha * jnp.abs(null_hyp)) / alpha
     lap = 6.0 * c  # positive everywhere -> prior_neg inactive
     pen = jnp.arcsinh(beta * jnp.maximum(-lap, 0.0)) / beta
     lap_a = 12.0 * c * jnp.sum(q_grid ** 2, axis=1)
