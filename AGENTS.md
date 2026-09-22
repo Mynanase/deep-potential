@@ -1,63 +1,50 @@
 # AGENTS.md — dpjax / Auriga Halo12 deep-potential (Phase-2 baseline)
 
-Applies to all coding and run agents working in this repository (Codex, Claude
-Code, etc.). This file continues the AGENTS.md of the
-`codex/upstream-sync-2026-09-12` branch (0a23194, 2026-09-17), revised for the
-phase-2 baseline. For scientific background, unit derivations, and the full
-operating manual see `scripts/auriga/README.md`. This file only fixes the
-non-negotiable conventions; on conflict, the user's current instruction wins.
+This file contains repository-wide non-negotiable rules.
+Scientific background and the operating manual live in
+`scripts/auriga/README.md`.
 
-## Background and document index
+## Baseline and references
 
-The main line is adjudicated (phase-1, six rounds, 2026-09-17 → 09-22):
-**frozen clean+smooth data (n=1,619,615) + S1 stratified sampling +
-grid-decoupled negative-density prior + innerA radius-balanced grid +
-λ=10**. Decision/evidence/branch mapping: `docs/phase-1-summary.md`; fix and
-figure ledgers: `docs/phase2-premerge-survey.md`; branch landscape:
-`docs/branches.md`; long-term kept scripts: `scripts/auriga/keep/` (README
-records provenance; not yet wired into the main pipeline).
+The accepted Phase-2 baseline is defined in `docs/phase-1-summary.md`.
+Treat it as the control configuration; test changes in child experiment nodes
+and do not silently alter multiple baseline decisions at once.
+See `docs/branches.md` for branch, remote, tag, and archived-project provenance.
 
 ## Compute environment
 
-- Experimental compute runs on the ssh host `gpu` (8×A100-40GB, driver 570 /
-  CUDA 12.8), single GPU `CUDA_VISIBLE_DEVICES=0` (session convention: one run
-  per GPU; runners allow external override).
+- Production experiments run on host `gpu`, one GPU per run unless the runner
+  explicitly supports another allocation.
 - On the server always use the existing conda environment
   `/home/qiutao/miniforge3/envs/dp-jax/bin/python`. Do not create new venvs
   and do not install or upgrade packages into that environment; report
   dependency gaps before acting.
-- For local CPU verification use
-  `/Users/qttao/Documents/Research/flow-diff/myanase-deep-potential/.venv-halo/bin/python`;
-  ⚠️ the local conda `dp-jax` env lacks `e3nn_jax` and cannot run this repo.
-- `scripts/auriga/requirements.txt` is the pinned version snapshot, used only
-  when an environment rebuild has been explicitly decided.
 - JAX processes always set `JAX_PLATFORMS=cuda` (`JAX_PLATFORMS=cpu` for local
   tests) and `XLA_PYTHON_CLIENT_PREALLOCATE=false`.
 
 ## Run contract
 
-- Fixed smoke-baseline entry point: from the repo root,
-  `bash scripts/auriga/run_smoke_baseline.sh` (three independent processes
-  `--flow-training` → `--flow-sampling` → `--potential-training`, then
-  `plot_potential.py` + `smoke_summary.py`).
-- Production training uses the `scripts/auriga/run_w1024_*.sh` family.
-  Template: `set -eo pipefail` + PREFLIGHT (interpreter / data / dependency /
-  options assertions) + run the relevant unit tests before training; idempotent
-  — if the target dataset exists, verify lineage first, then reuse.
+- Use the committed runners rather than reconstructing production commands:
+  `bash scripts/auriga/run_smoke_baseline.sh` for smoke validation and the
+  `scripts/auriga/run_w1024_*.sh` family for production. Runners must preflight
+  their inputs, run relevant tests, and verify lineage before reusing data.
 - Check the exit code of each of the three training stages before continuing;
   mid-run resumption is not supported. Retraining always uses a fresh run
   directory; never mix in old checkpoints or old gradient files.
-- `fit_all.py` reads parameters from `<run-dir>/options.json`: copy the
-  options into the run directory before starting (smoke uses
-  `scripts/auriga/options-smoke.json`, production starting point `options.json`).
 - **Strict compute/plot layering**: compute scripts persist arrays/JSON; plot
-  scripts only read persisted arrays and never reload models. Axis ranges use
-  hand-tuned `set_ylim` constants with the data range noted in a comment
-  (2026-09-15 convention).
+  scripts only read persisted arrays and never reload models. Generic figure
+  scripts live at `scripts/` (`plot_potential_2d.py`, `plot_radial_marginals.py`,
+  `plot_enclosed_mass.py`): units from `--input` attrs, figures to `--fig-dir`
+  (png), styling on `auriga/orx_figstyle.py`. Retired scripts live in
+  `scripts/auriga/archive/` and are wired into nothing (README maps each to
+  its replacement).
 - Standard acceptance after every experiment round = the particle-truth
   adjudication suite: `validate_enclosed_mass.py` (compute) →
   `plot_pt_adjudication.py` / `plot_shell_error_pairs.py` /
-  `plot_pt_generations.py` (figures).
+  `plot_pt_generations.py` (figures). Truth-side preprocessing goes through
+  `auriga/truth_products.py` (build-grids / build-shell-mass /
+  build-radial-hists): lineage-cached and idempotent — a lineage mismatch is
+  an error, never an overwrite.
 - Never add `--potential-ignore-nobs` to Halo12 runs (it drops the spatial
   density gradient and breaks the full steady-state equation) or
   `--basic-potential-benchmarking-gaia-units` (wrong unit system).
@@ -82,9 +69,8 @@ records provenance; not yet wired into the main pipeline).
   overwrite an existing output; new data gets a new file name; never feed an
   already dimensionless-ized h5 back to the converter; inputs must carry
   kpc / km/s metadata.
-- Only two data files are committed: `data/auriga/halo12-smoke.h5` (512-particle
-  smoke) and `data/auriga/halo12_particle_truth_grids.h5` (particle-truth
-  grids); the rest of `data/` is ignored.
+- Do not commit generated datasets or run artifacts except explicitly
+  designated small fixtures and truth products.
 - Default is mass weighting `m/mean(m)`; `--weighting number` is a different
   scientific target — never mix or compare results across the two.
 
@@ -108,27 +94,18 @@ records provenance; not yet wired into the main pipeline).
 - Experiment branches are prefixed `orx/*`: once a node has a run producing
   results it is frozen — no rewriting; later changes open child nodes. Never
   delete branches; "deletable" markers require manual confirmation.
-- Do not push to upstream; `origin` is for visibility only. Retrospection:
-  the `phase1-archive` remote (local old repo `/Research/dpjax`, all frozen
-  phase-1 branches), the five `phase1/*` tags, and run logs via
-  `orx logs <runId>` (old project `07d8ee01`, permanently queryable).
+- Do not push to upstream; `origin` is for visibility only. Use
+  `docs/branches.md` for remotes, tags, and archived-project lookup.
 - Commit message style: `feat(phi)` / `fix(runner)` / `eval(lambda)` /
   `fig(...)` / `docs:` / `bench:` / `test(phi)` / `chore:`, body states
   motivation and the evidence run.
-- Lightweight pre-commit checks: `bash -n` (shell), `python -m py_compile`,
-  `env JAX_PLATFORMS=cpu <python> -m pytest tests/ -q` (expect 46 passed,
-  3 skipped; the skips are due to the truth HDF5 not being local). Tests
-  validate the machinery (algebra / quadrature / units on analytic examples),
-  not checkpoints; new loss/sampling/audit logic must come with tests in the
-  same style, honoring the `_unpack_phi_batch` 4/5/6/7-tuple batch contract.
+- Before committing, run applicable lightweight checks: `bash -n` for shell,
+  `python -m py_compile` for Python, and
+  `env JAX_PLATFORMS=cpu <python> -m pytest tests/ -q` for the CPU test suite.
+- The full CPU test suite must pass. Skips are acceptable only for tests that
+  explicitly require the uncommitted particle-truth HDF5.
+- New loss, sampling, and audit behavior must include analytic tests. Tests
+  validate machinery such as algebra, quadrature, and units, not checkpoints.
 - Artifacts go to `runs/` (ignored): code is committed, artifacts are not.
   `.note/` holds private research notes — never commit it, never disclose its
   contents.
-
-## Phase-2 round-1 handover (in progress)
-
-Oscillation-suppression fixes are ready and await cherry-pick (sources on
-`phase1-archive`): osc-pair `7de9703` + `aa7b695` + `3d07384`, spectral-norm
-`002dcdd`, cosine-anneal `51fd27e`; ⚠️ the osc-pair weight was calibrated in
-the λ=1 context and must be recalibrated for the λ=10 baseline. Update this
-section once landed.

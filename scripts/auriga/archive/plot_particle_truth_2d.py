@@ -30,6 +30,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE.parent.parent))
 
 from validate_enclosed_mass import (  # noqa: E402
     sobol_directions, make_radial_nodes, load_truth, rho_from_phi)

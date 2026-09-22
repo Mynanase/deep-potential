@@ -30,7 +30,8 @@ run_fit --flow-sampling
 run_fit --potential-training
 
 env CUDA_VISIBLE_DEVICES=0 JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false \
-    "$PYTHON" scripts/auriga/plot_potential.py \
-    --input "$INPUT" --potential-dir "$RUN_DIR/models/Phi" --output-dir "$RUN_DIR/plots"
+    "$PYTHON" scripts/plot_potential_2d.py \
+    --input "$INPUT" --model smoke="$RUN_DIR" \
+    --quantity phi --plane xz --fig-dir "$RUN_DIR/plots"
 
 "$PYTHON" scripts/auriga/smoke_summary.py --input "$INPUT" --run-dir "$RUN_DIR"

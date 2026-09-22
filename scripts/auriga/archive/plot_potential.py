@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from astropy.constants import G
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import potential
 
 

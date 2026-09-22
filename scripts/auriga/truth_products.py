@@ -4,8 +4,8 @@
 Subcommands
   build-grids        particle asset (star frame, h5) -> grid product h5
                      (potential slices/sphere means + density histograms).
-                     Absorbs keep/build_particle_truth_grids.py and
-                     keep/particle_truth.py verbatim; parameters reproduce
+                     Absorbs archive/build_particle_truth_grids.py and
+                     archive/particle_truth.py verbatim; parameters reproduce
                      the handoff figure (run e1801a91).
   build-shell-mass   grid product h5 -> shell mass table h5: per-shell
                      masses with Poisson confidence intervals and M(<r)
@@ -54,7 +54,7 @@ DEFAULT_BAND_EDGES = (2.0, 10.0, 30.0, 50.0, 70.0)  # adjudication bands
 
 
 # --------------------------------------------------------------------------
-# shared helpers (absorbed from keep/particle_truth.py)
+# shared helpers (absorbed from archive/particle_truth.py)
 # --------------------------------------------------------------------------
 
 def sha256_file(path, chunk=1 << 20):
@@ -169,7 +169,7 @@ def _cache_guard(path, kind, lineage, force):
 
 
 # --------------------------------------------------------------------------
-# build-grids (verbatim port of keep/build_particle_truth_grids.py)
+# build-grids (verbatim port of archive/build_particle_truth_grids.py)
 # --------------------------------------------------------------------------
 
 def cmd_build_grids(args):

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Radial r-bin marginal distributions: normalizing-flow model vs truth.
 
-Generic counterpart of the radial-marginals family (keep/df_radial_rbin*,
-keep/df_radial_velocity_marginals), reduced to the two data kinds that
+Generic counterpart of the radial-marginals family
+(archive/df_radial_rbin*, archive/df_radial_velocity_marginals), reduced to the two data kinds that
 matter routinely: the trained phase-space flow and the particle data it
 models.
 

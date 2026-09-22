@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 OUT = REPO / "runs" / "halo12-phase1-df-audit-20260916"
 FIG = OUT / "figs"
 FIG.mkdir(exist_ok=True)

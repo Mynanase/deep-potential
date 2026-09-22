@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 RUNS_ORDER = ["baseline", "rin2", "rout65"]
 RUN_COLORS = {"baseline": "C0", "rin2": "C1", "rout65": "C2"}

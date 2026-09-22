@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 
 def plot_plummer_convergence(analytic_json, out_png):

@@ -22,7 +22,8 @@ Halo12 物理坐标导出文件
       → data/df_gradients.h5：eta、lnf、dlnf_deta、lnp、dlnp_deta
   → fit_all.py --potential-training
       → potential.PotentialModel：Phi(x)
-  → auriga/plot_potential.py：物理单位下的轴向加速度、带符号密度
+  → scripts/plot_potential_2d.py：物理单位下的 2D 势/密度切片（模型单独模式；
+    加 --truth 网格产品后增真值与残差行）
 ```
 
 | 文件 | 职责 |
@@ -31,7 +32,9 @@ Halo12 物理坐标导出文件
 | `options.json` | 全量基线起始参数；由作者 `fit_all.py` 直接读取 |
 | `options-smoke.json` | 极小网络和样本，验证训练及模型保存／加载 |
 | `requirements.txt` | 本次 CPU 验证使用的直接依赖与关键数值依赖版本 |
-| `plot_potential.py` | 复用作者自动微分，恢复物理单位并保存 PNG 和 NPZ |
+| `truth_products.py` | 真值侧预处理集合：build-grids / build-shell-mass / build-radial-hists，
+lineage 缓存幂等（2026-09-22 重构新增） |
+| `plot_potential_2d.py`（在 `scripts/`） | 2D 势/密度切片：模型、真值、残差（上游 plot_2d_slice_pot 的独立版） |
 
 基线选择的是 **Halo12 星系中的全部恒星粒子**，不等于已经筛选出的“恒星晕”成员。
 若课题要求只研究 halo tracer，需要另行定义成员选择；本次不会用模拟真势计算轨道分类
@@ -181,10 +184,10 @@ env JAX_PLATFORMS=cpu .venv-halo/bin/python scripts/fit_all.py \
 env JAX_PLATFORMS=cpu .venv-halo/bin/python scripts/fit_all.py \
   --input data/auriga/halo12-smoke.h5 --run-dir runs/halo12-smoke-repeat --potential-training
 
-.venv-halo/bin/python scripts/auriga/plot_potential.py \
+.venv-halo/bin/python scripts/plot_potential_2d.py \
   --input data/auriga/halo12-smoke.h5 \
-  --potential-dir runs/halo12-smoke-repeat/models/Phi \
-  --output-dir runs/halo12-smoke-repeat/plots
+  --model smoke=runs/halo12-smoke-repeat --quantity phi \
+  --fig-dir runs/halo12-smoke-repeat/plots
 ```
 
 在服务器做同一检查时，把 `JAX_PLATFORMS=cpu` 换成
@@ -251,9 +254,9 @@ env CUDA_VISIBLE_DEVICES=0 JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=fals
   --input data/auriga/halo12.h5 --run-dir runs/halo12-baseline --potential-training \
   > runs/halo12-baseline/potential.log 2>&1
 
-.venv-halo/bin/python scripts/auriga/plot_potential.py \
-  --input data/auriga/halo12.h5 --potential-dir runs/halo12-baseline/models/Phi \
-  --output-dir runs/halo12-baseline/plots
+.venv-halo/bin/python scripts/plot_potential_2d.py \
+  --input data/auriga/halo12.h5 --model base=runs/halo12-baseline \
+  --quantity both --fig-dir runs/halo12-baseline/plots
 ```
 
 可另用作者的 `--basic-flow-benchmarking --basic-flow-benchmarking-n-samples 4096`
