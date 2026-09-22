@@ -153,3 +153,6 @@ notebooks/
 # Local tooling / raw-data snapshots
 .zcode/
 halo12_package.tar.gz
+
+# Research notes (private, moved from flow-diff)
+.note/
