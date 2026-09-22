@@ -64,3 +64,34 @@ master (c8bc5f7)
 - 分支整理只做提交与文档,不删除分支;"可删"标记需人工确认后自行删除。
 - 审计/分析类运行产物一律落在 `runs/`(已忽略),代码入库、产物不入库。
 - 原始数据快照(如 `halo12_package.tar.gz`)与会话工件(`.zcode/`)不入库。
+
+---
+
+## orx 时代（2026-09-17 → 09-22，Phase-1）
+
+维护日期:2026-09-22。OpenResearch(orx) 导入后共 74 个实验节点/78 分支;完整决策表见
+`docs/phase-1-summary.md`,产物清点见 `docs/phase2-premerge-survey.md`。旧项目在 orx
+store 中归档为 `dpjax-phase1 (archived)`,run 日志永久可查。
+
+### 谱系(仅主线与四条工具线;全部分支不删除)
+
+```
+codex/upstream-sync-2026-09-12 (orx root: orx/auriga-halo12-smoke-baseline)
+  └─[主线胜者链,已验证祖先关系]
+     freeze-training-data → route-closure → s1-stratified-sampling
+       → grid-decoupled-negative-density-prior → inner-band-fix-A
+       → lambda-sweep-10 ── 六模型裁决 ── shell-error/pt-generations 图版线(af32ee9)
+  └─[工具线,未整体合并,精选件收入 scripts/auriga/keep/]
+     particle-truth 产品线(→ cap-w512, tag phase1/truth-line)
+     phi 图版线(→ phi-profiles, tag phase1/phi-line)
+     谱诊断线(→ osc-spectra, tag phase1/osc-spectra)
+  └─[第 7 轮未决,移交 Phase-2 round-1]
+     osc-pair / spectral-norm / lambda-cosine-anneal(各自带修复 commit)
+
+Phase-2 基线:codex/phase2-baseline-2026-09-22 = af32ee9 + keep/ + 本批文档
+```
+
+### 约定延续
+
+- 分支只加不删;实验分支由 orx 冻结,永不 rebase/merge 改写。
+- 运行产物落 runs/(忽略),代码入库、产物不入库;渲染图在服务器 run 目录。
