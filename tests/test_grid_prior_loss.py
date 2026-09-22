@@ -173,9 +173,15 @@ def test_sample_radius_balanced_ball_radius_weighting():
 
 def test_unpack_phi_batch_tuples():
     q, p, dq, dp = "q", "p", "dq", "dp"
-    assert pmod._unpack_phi_batch((q, p, dq, dp)) == (q, p, dq, dp, None, None)
-    assert pmod._unpack_phi_batch((q, p, dq, dp, "w")) == (q, p, dq, dp, "w", None)
-    assert pmod._unpack_phi_batch((q, p, dq, dp, "w", "g")) == (q, p, dq, dp, "w", "g")
+    # This branch extends the tuple contract with a 7th channel q_pair.
+    assert pmod._unpack_phi_batch((q, p, dq, dp)) == (
+        q, p, dq, dp, None, None, None)
+    assert pmod._unpack_phi_batch((q, p, dq, dp, "w")) == (
+        q, p, dq, dp, "w", None, None)
+    assert pmod._unpack_phi_batch((q, p, dq, dp, "w", "g")) == (
+        q, p, dq, dp, "w", "g", None)
+    assert pmod._unpack_phi_batch((q, p, dq, dp, "w", "g", "p")) == (
+        q, p, dq, dp, "w", "g", "p")
 
 
 class ActPhi(eqx.Module):
