@@ -50,7 +50,7 @@ from validate_enclosed_mass import (  # noqa: E402
     G_KPC_KMS2_MSUN, sobol_directions, m_flux_at_radius, make_radial_nodes)
 import orx_figstyle as ofs  # noqa: E402
 from truth_products import shell_mass_from_grids, _cache_guard, \
-    _write_with_lineage, SHELL_SCHEMA, sha256_file  # noqa: E402
+    _open_with_lineage, SHELL_SCHEMA, sha256_file  # noqa: E402
 
 
 def load_units(input_fname):
@@ -158,8 +158,7 @@ def main():
             tab = shell_mass_from_grids(args.truth_grids, r_edges, r_edges)
             m_cum, m_err = tab["M_cum"], tab["M_cum_err"]
             r_q = r_edges
-
-            def writer(f):
+            with _open_with_lineage(args.cache, SHELL_SCHEMA, lineage) as f:
                 f.attrs.update({
                     "source_grids": str(args.truth_grids),
                     "M_total_msun": tab["M_total"],
@@ -174,7 +173,7 @@ def main():
                 f["r_nodes"] = tab["r_nodes"]
                 f["M_cum"] = tab["M_cum"]
                 f["M_cum_err"] = tab["M_cum_err"]
-            _write_with_lineage(args.cache, SHELL_SCHEMA, lineage, writer)
+            print(f"wrote {args.cache} ({args.cache.stat().st_size/1e6:.2f} MB)")
         m_true = m_cum - m_cum[0]           # Delta M(r; r_inner)
         m_true_err = np.sqrt(np.maximum(m_err ** 2 - m_err[0] ** 2, 0.0))
         truth_label = "truth (grid product)"

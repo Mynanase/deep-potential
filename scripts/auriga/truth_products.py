@@ -138,17 +138,21 @@ def _lineage_match(path, kind, lineage):
     return old == lineage
 
 
-def _write_with_lineage(path, kind, lineage, writer):
+def _open_with_lineage(path, kind, lineage):
+    """Create the product h5 and stamp schema + lineage attrs.
+
+    Returns an open h5py.File; the caller writes datasets in sequence
+    inside a `with` block (research-script style, no writer callbacks).
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(path, "w") as f:
-        f.attrs.update({
-            "schema": kind,
-            "created_utc": datetime.now(timezone.utc).isoformat(),
-            "lineage_json": json.dumps(lineage, sort_keys=True),
-        })
-        writer(f)
-    print(f"wrote {path} ({path.stat().st_size/1e6:.2f} MB)")
+    f = h5py.File(path, "w")
+    f.attrs.update({
+        "schema": kind,
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "lineage_json": json.dumps(lineage, sort_keys=True),
+    })
+    return f
 
 
 def _cache_guard(path, kind, lineage, force):
@@ -273,8 +277,7 @@ def cmd_build_grids(args):
               "(asset validation was 3.2%)")
 
     print("=== write product ===")
-
-    def writer(f):
+    with _open_with_lineage(args.output, GRIDS_SCHEMA, lineage) as f:
         f.attrs.update({
             "source_asset": str(args.asset),
             "source_sha256": asset_sha,
@@ -326,7 +329,7 @@ def cmd_build_grids(args):
     }
     if _cache_guard(args.output, GRIDS_SCHEMA, lineage, args.force):
         return 0
-    _write_with_lineage(args.output, GRIDS_SCHEMA, lineage, writer)
+    print(f"wrote {args.output} ({args.output.stat().st_size/1e6:.2f} MB)")
 
     print("=== read-back verification ===")
     with h5py.File(args.output, "r") as f:
@@ -427,7 +430,7 @@ def cmd_build_shell_mass(args):
     print(f"sum(M_shell)/M_total = {closure:.4f} "
           "(<1 expected: cells outside the edge range are excluded)")
 
-    def writer(f):
+    with _open_with_lineage(args.output, SHELL_SCHEMA, lineage) as f:
         f.attrs.update({
             "source_grids": str(args.grids),
             "M_total_msun": tab["M_total"],
@@ -442,7 +445,7 @@ def cmd_build_shell_mass(args):
         f["M_cum"] = tab["M_cum"]
         f["M_cum_err"] = tab["M_cum_err"]
 
-    _write_with_lineage(args.output, SHELL_SCHEMA, lineage, writer)
+    print(f"wrote {args.output} ({args.output.stat().st_size/1e6:.2f} MB)")
     print("SHELL_MASS_DONE")
     return 0
 
@@ -532,7 +535,7 @@ def cmd_build_radial_hists(args):
         print(f"  {r_edges[b]:6.2f}-{r_edges[b+1]:6.2f} kpc: "
               f"n={spec['count']:8d}  mass={spec['mass']:.4e}")
 
-    def writer(f):
+    with _open_with_lineage(args.output, RHIST_SCHEMA, lineage) as f:
         f.attrs.update({
             "source_input": str(args.input),
             "length_scale_kpc": tab["L_kpc"],
@@ -550,7 +553,7 @@ def cmd_build_radial_hists(args):
             g["r_sub_edges"] = spec["r_sub_edges"]
             g["v_hists"] = spec["v_hists"]
 
-    _write_with_lineage(args.output, RHIST_SCHEMA, lineage, writer)
+    print(f"wrote {args.output} ({args.output.stat().st_size/1e6:.2f} MB)")
     print("RADIAL_HISTS_DONE")
     return 0
 

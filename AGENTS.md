@@ -52,6 +52,30 @@ See `docs/branches.md` for branch, remote, tag, and archived-project provenance.
   orchestration; do not start long tasks on the server by hand. Run snapshots
   contain committed content only — commit changes first.
 
+## Code style
+
+Follow the upstream (Green/Kalda) style first; the preferences below are
+compatible with it and settle the remaining choices.
+
+- Active Python code is linear, imperative research-script style. A stage
+  entry is one main function plus its CLI, top to bottom: config, data,
+  compute, output. Stage dispatch is plain `if args.x:` blocks, never a
+  framework. Full argparse with per-argument help is fine for stage entries
+  (`fit_all.py` is the reference); auxiliary scripts keep the CLI short.
+- Keep simple calls, variable lists, array selections, merges, renames and
+  file reads on one line; break only when clearly too long, multi-layered,
+  or hard to read. Long lines are acceptable (upstream routinely exceeds
+  88 chars); do not wrap just to satisfy a column limit.
+- Prefer direct statements and intermediate variables with physical
+  meaning (`benchmarking_r0`, `cylindrical_origin`). Small intuitive
+  duplication is allowed (nested `moving_average` in `utils.plot_loss`).
+  Do NOT introduce registries, factories, thin wrappers, or new abstraction
+  layers to save a few lines.
+- DO keep: JAX derivatives/jit, model definitions, batching machinery, and
+  numerical/helper functions with genuine reuse (`load_flow`,
+  `phi_direct`, `sample_conditional`, `bootstrap_ci`). Large explicit
+  parameter lists are fine (upstream passes 14-17).
+
 ## Random seeds
 
 - Four seed layers are fixed: data shuffle `--seed 0` (`prepare_data.py`,
