@@ -39,9 +39,25 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
-from plot_particle_truth_2d import load_phi_f32  # noqa: E402
 from validate_enclosed_mass import G_KPC_KMS2_MSUN, rho_from_phi  # noqa: E402
 import orx_figstyle as ofs  # noqa: E402
+
+
+def load_phi_f32(run_dir):
+    # Ported inline from the phase-1 plot_particle_truth_2d helper: load the
+    # latest Phi checkpoint in float32 (the evaluation convention that kept
+    # non-array leaves such as net.activation out of jit args on these
+    # checkpoints).
+    import jax
+    import fit_all
+    prev = bool(jax.config.jax_enable_x64)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        model = fit_all.load_potential(Path(run_dir) / "models" / "Phi",
+                                       checkpoint_index=-1)
+        return model.phi_model
+    finally:
+        jax.config.update("jax_enable_x64", prev)
 
 L_KPC, V_KMS = 10.0, 100.0
 RHO_SCALE = V_KMS ** 2 / (4.0 * np.pi * G_KPC_KMS2_MSUN * L_KPC ** 2)
