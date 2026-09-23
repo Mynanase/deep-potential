@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Lambda sweep 10 on the radius-balanced grid-decoupled negative-density
-# prior (w1024, clean+smooth). Child of the adjudicated innerA winner
-# (9788e6de / run 2b32eb04): identical radius-balanced grid contract with
-# lambda_=10 instead of 1 (three-point sweep 0.1/1/10; lambda=1 is the
-# frozen innerA run itself).
+# Phase-2 control contract (2026-09-24 decision, docs/phase2-baseline.md):
+# innerA = radius-balanced grid-decoupled negative-density prior on the S1
+# route (w1024, clean+smooth, lambda_=1). Child of the frozen gridprior
+# winner (863ef6a2 / run 09faad30): identical contract except the prior grid
+# sampler. The innerA training under this contract is frozen as run 2b32eb04
+# (node 9788e6de); phase-2 children inherit this command and keep lambda_=1
+# unless the node's hypothesis is exactly that knob.
 # Identical to the S1 contract except the Phi loss: the CBE term keeps the S1
 # mass-weighted estimator log(sum w*cbe_i / sum w) on phase-space samples, and
 # the negative-density penalty moves OUT of the weighted likelihood onto an
@@ -25,7 +27,6 @@ OLD=$SRC/data/auriga/halo12_all_mass_clean_outer_clump_smooth.h5
 NEW=$SRC/data/auriga/halo12-clean-smooth.h5
 REG=$SRC/data/auriga/clump_pid_registry.npz
 export JAX_PLATFORMS=cuda XLA_PYTHON_CLIENT_PREALLOCATE=false
-# One run per GPU (session convention): this branch pins GPU 6.
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-6}
 export MPLCONFIGDIR=/tmp/orx-mpl
 mkdir -p "$MPLCONFIGDIR"
@@ -47,7 +48,7 @@ assert len(ra["fractions"]) == len(ra["bin_edges"]) - 1
 assert abs(sum(ra["fractions"]) - 1.0) < 1e-9
 assert int(lo.get("prior_grid_n", 0)) > 0, "grid-prior options must set prior_grid_n > 0"
 assert float(lo.get("lambda_", 0.0)) != 0.0, "grid-prior run needs lambda_ != 0"
-assert float(lo.get("lambda_")) == 10.0, "lambda-sweep-10 must set lambda_=10"
+assert float(lo.get("lambda_")) == 1.0, "phase-2 control keeps lambda_=1 (innerA contract)"
 assert lo.get("prior_grid_weighting", "volume") == "radius", \
     "inner-band fix A must set prior_grid_weighting=radius"
 print("S1 radial_alloc:", ra)
@@ -245,11 +246,11 @@ print("uniform-ball probe (n=65536, R=70 kpc, volume-sampled metric): "
       "frac(rho<0) all={:.1%} r<10={:.1%} 10-30={:.1%} r<30={:.1%} 30-70={:.1%}".format(
     probe["frac_rho_neg_all"], probe["frac_rho_neg_lt10"], probe["frac_rho_neg_10_30"],
     probe["frac_rho_neg_inner"], probe["frac_rho_neg_30_70"]))
-print("reference anchors, innerA lambda=1 (9788e6de, run 2b32eb04):")
+print("phase-2 control anchors, innerA lambda=1 (9788e6de, run 2b32eb04):")
 print("  Sobol 2-10/10-30/30-70 kpc band mean frac(rho<0)=1.9%/2.4%/2.3%; probe all=2.3% r<30=2.5% 30-70=2.3%")
 print("  pt-adjudication dM |rel err| (node 4b21457d, run 313e0cc7): 2-10 1.25%, 10-30 5.95%, 30-50 8.76%, 50-70 8.14%")
 print("  volume-grid parent (863ef6a2, run 09faad30): Sobol 30-70 2.4%; probe r<30 11.5%; dM 2-10 2.63%")
-out = dict(mode="radius_balanced_grid_lambda_10", band=band, uniform_ball_probe=probe)
+out = dict(mode="radius_balanced_grid_lambda_1", band=band, uniform_ball_probe=probe)
 json.dump(out, open("runs/orx/grid_prior_evidence.json", "w"), indent=2)
 print("wrote runs/orx/grid_prior_evidence.json")
 sys.exit(0)
