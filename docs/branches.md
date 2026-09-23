@@ -89,6 +89,8 @@ codex/upstream-sync-2026-09-12 (orx root: orx/auriga-halo12-smoke-baseline)
      osc-pair / spectral-norm / lambda-cosine-anneal(各自带修复 commit)
 
 Phase-2 基线:codex/phase2-baseline-2026-09-22 = af32ee9 + keep/ + 本批文档
+2026-09-24 裁决(docs/phase2-baseline.md):控制线 = innerA λ=1、生产 truth 固定 96³;
+  承载分支 orx/phase-2-baseline-w1024-production(根节点 5d108a36)
 ```
 
 ### 约定延续

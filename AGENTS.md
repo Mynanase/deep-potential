@@ -6,10 +6,12 @@ Scientific background and the operating manual live in
 
 ## Baseline and references
 
-The accepted Phase-2 baseline is defined in `docs/phase-1-summary.md`.
+The accepted Phase-2 baseline is defined in `docs/phase2-baseline.md`
+(2026-09-24 decision: innerA lambda=1 control, 96^3 production truth).
 Treat it as the control configuration; test changes in child experiment nodes
 and do not silently alter multiple baseline decisions at once.
-See `docs/branches.md` for branch, remote, tag, and archived-project provenance.
+`docs/phase-1-summary.md` records the phase-1 adjudication history;
+see `docs/branches.md` for branch, remote, tag, and archived-project provenance.
 
 ## Compute environment
 
@@ -45,6 +47,9 @@ See `docs/branches.md` for branch, remote, tag, and archived-project provenance.
   `auriga/truth_products.py` (build-grids / build-shell-mass /
   build-radial-hists): lineage-cached and idempotent — a lineage mismatch is
   an error, never an overwrite.
+  Spectrum statements against the particle-truth grid use the 96^3 production
+  grid only: wavelengths >= ~10 kpc are quantitative, <5 kpc is
+  model-diagnostic (shot-noise fraction >37%; see `docs/phase2-baseline.md`).
 - Never add `--potential-ignore-nobs` to Halo12 runs (it drops the spatial
   density gradient and breaks the full steady-state equation) or
   `--basic-potential-benchmarking-gaia-units` (wrong unit system).
