@@ -62,7 +62,8 @@ def load_phi_f32(run_dir):
 L_KPC, V_KMS = 10.0, 100.0
 RHO_SCALE = V_KMS ** 2 / (4.0 * np.pi * G_KPC_KMS2_MSUN * L_KPC ** 2)
 COLOR = {"base": "blue", "S1": "red", "gridprior": "green",
-         "innerA": "purple", "lambda10": "orange", "truth": "k"}
+         "innerA": "purple", "lambda10": "orange", "truth": "black",
+         "oscpair": "red", "snceiling": "cyan", "anneal": "green"}
 
 
 def sobol_dirs(n, seed):
