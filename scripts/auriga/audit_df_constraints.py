@@ -166,6 +166,17 @@ def acceleration_from_grad_phi(dphi_dq):
     return -np.asarray(dphi_dq)
 
 
+def combine_split_grads(dln_nu_dq, dlnp_deta):
+    """Full-eta score from the split evaluation: the q-block is
+    d ln n / dq + d ln P / dq (the conditional term carries the
+    condition-normalization Jacobian), the p-block is d ln P / dp alone
+    because ln n does not depend on p."""
+    dln_nu_dq = np.asarray(dln_nu_dq)
+    dlnp_deta = np.asarray(dlnp_deta)
+    return np.concatenate([dln_nu_dq + dlnp_deta[:, :3], dlnp_deta[:, 3:]],
+                          axis=-1)
+
+
 def cbe_residual_alpha(p, dlnf_dq, dlnf_dp, alpha, eps=1.0):
     """Steady-state CBE residual in acceleration convention:
 
@@ -587,7 +598,8 @@ def score_chain_audit(control_repo, control_run_dir, manifest_path, out_dir,
         lnp, dlnp_full = eval_batched(vg_vel, eta_s64)
     ident_val = np.abs((ln_nu + lnp) - lnf_strict)
     ident_scale = max(float(np.median(np.abs(lnf_strict))), 1e-30)
-    ident_grad = rel_with_floor((dln_nu_dq + dlnp_full) - dlnf_strict,
+    ident_grad = rel_with_floor(combine_split_grads(dln_nu_dq, dlnp_full)
+                                - dlnf_strict,
                                 dlnf_strict, component_floors(dlnf_strict))
     pscore_recompute = rel_with_floor(dlnf_strict[:, 3:] - dlnp_full[:, 3:],
                                       dlnp_full[:, 3:], component_floors(dlnp_full[:, 3:]))

@@ -337,7 +337,7 @@ def test_tiny_cnf_split_identities_and_fd():
     np.testing.assert_allclose(ln_nu + lnp, lnf, rtol=1e-12, atol=1e-12)
     # full gradient = position gradient + conditional gradient (Jacobian
     # of the condition normalization carried by autodiff)
-    combined = np.concatenate([dnu + dlp[:, :3], dlp[:, 3:]], axis=1)
+    combined = adc.combine_split_grads(dnu, dlp)
     np.testing.assert_allclose(combined, grad, rtol=1e-10, atol=1e-10)
     # FD agrees with autodiff at adjacent steps on a small ladder
     with adc._x64(True):
