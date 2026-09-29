@@ -25,9 +25,9 @@
 ## 卡 T3 / Agent C：Plummer oracle 与局部力反演
 
 - **目标**：O0（真势＋解析 score）与 O1（解析 score＋局部解）合格；加权 SVD、δα 投影与可吸收/正交分解在解析例上成立。
-- **输入**：t0-manifest（无 mock NF、无 3D 真加速度的结论；mock 参数 a=5 kpc 候选由本卡冻结）；共享速度点定义（与 T1 卡协调）。
-- **允许执行**：仅本地 CPU；不训练。
+- **输入**：t0-manifest（无 mock NF；**逐点真势存在**（`true_potential_assets`：clean-smooth 源 `potential` 列、snapdir_127 Potential 块）、**无逐点加速度块**；mock 参数 a=5 kpc 候选由本卡冻结）；共享速度点定义（与 T1 卡协调）。
+- **允许执行**：仅本地 CPU；不训练；Auriga 逐点真势的只读核验（经批准的只读 ssh 或服务器导出的少量数组）。
 - **文件归属**：`scripts/plummer/plummer_sphere.py`（修复 draw_from_sphere 的 rng 违规并加测试）、新 `scripts/plummer/plummer_oracle.py`（解析 score/真加速度/质量＋oracle 输入接口）＋ 解析测试；局部力求解放 `scripts/auriga/local_force_inversion.py`（α 约定）。
-- **必做**：采样器离散精度检查；g=∇φ 到 α=−∇φ 转换测试；秩亏不给稳定力认证；mean(E)=0 但投影偏差的反例；能量依赖反例；单位与符号。
-- **交付**：O0/O1 测试证据 ＋ 局部四组合框架（NF 接口留给 T1 缓存）＋ 支持图数据。
-- **停止条件**：oracle 公式/单位失败即阻断 T4 前置；不扩大为 Auriga 真力声明。
+- **必做**：采样器离散精度检查；g=∇φ 到 α=−∇φ 转换测试；秩亏不给稳定力认证；mean(E)=0 但投影偏差的反例；能量依赖反例；单位与符号；**A5 前置小项**＝逐点真势单位标定（对单极模型/已知 M_total，消 `acceleration_unit=unknown`）＋主轴系局部梯度估计的误差定量（点样本→α* 的读出误差必须先传播，外区稀疏重点检查）。
+- **交付**：O0/O1 测试证据 ＋ 局部四组合框架（NF 接口留给 T1 缓存）＋ 支持图数据；A5 可行性结论（条件可行/阻断）。
+- **停止条件**：oracle 公式/单位失败即阻断 T4 前置；α* 梯度估计误差未定量前不得用于 A5 或任何真力对照；不扩大为 Auriga 真力声明。

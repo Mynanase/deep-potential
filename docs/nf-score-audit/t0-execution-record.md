@@ -3,6 +3,7 @@
 冻结日期 2026-09-30。方案：`docs/nf-score-audit-plan.md`（v1，commit e0edb21，节点 45b0446d）。
 机读 manifest：`t0-manifest.json`；任务卡：`t0-task-cards.md`（均在本目录）。
 本轮为只读盘点：未训练、未启动任何服务器诊断、未改动任何冻结分支与用户脏文件（各 worktree 状态已核对）。
+**更正（2026-09-30 同日，经用户指正）**：结论 2 初版把『truth 产品现状』误写成『数据上限』——逐点真势存在于源数据（见 manifest `true_potential_assets`），结论 2 与 T3 卡已按核验事实改写。
 
 ## 任务 / 状态
 
@@ -15,7 +16,7 @@ innerA λ=1：旧项目 dpjax-phase1（07d8ee01，已归档）训练 run `2b32eb
 ## 三个明确结论
 
 1. **合格确认集：无。** clean-smooth 前 25% 行（404,903 粒子）未进梯度更新、未用于 checkpoint 选择（固定 256 epoch 末点部署），但 w1024/FlowMatching 架构、S1 配额、innerA 设计经 phase-1/2 在重叠总体上的比较选定，清洗规则（union registry）也在全总体上设计；s11 文件是同成员重洗牌，去除团块与 all-mass 是不同总体。本轮 Auriga Stein 检验只能作探索性；独立确认需要新设计（如其他 snapshot），不能用现有任何划分回溯恢复。
-2. **完整真加速度：无。** 粒子真值产品（sha256 e02379fa…，两处 run 快照副本一致）只含密度 rho3d 96³/rho_r 240/sigma_slab 480² 与势的球单极 phi_sphere_mean(24)、方向散布 phi_dirs(24,2048)、切片 phi_slice(240²)——无非球 3D 势场。分辨率口径：不小于 10 kpc 定量、小于 5 kpc 诊断。附录 A5 弱动力学分解不可做；Auriga 力侧只做可辨识性/敏感性/与 Φ 的一致性。
+2. **逐点真势存在；逐点真加速度无；现成 3D 场产品无。** clean-smooth 的直接源文件 `halo12_all_mass_clean_outer_clump_smooth.h5` 带逐粒子 `potential`（n=1,619,615，按 `particle_id` join；`prepare_data.py` 生成训练文件时丢弃该列）；raw 快照 `snapdir_127`（8 文件）PartType0/1/4 均有 `Potential` 块、**无 `Acceleration` 块**；96³ truth 产品（sha256 e02379fa…）只用 positions+masses 构建，势侧只有密度网格＋球单极 phi_sphere_mean(24)＋方向散布 phi_dirs(24,2048)＋切片。含义：非球真势信息在真实粒子位置上可得（全物质贡献、模拟软化），但 α*(q) 读出需局部梯度估计且误差必须先传播（外区稀疏恰是最难区）；单位未标定（adapter 自标 `acceleration_unit=unknown`）。附录 A5 由『不可做』升级为**条件可行**（先单位标定＋梯度误差定量）；Auriga 力侧主结论仍是可辨识性/敏感性/与 Φ 的一致性，网格真值口径不变（不小于 10 kpc 定量、小于 5 kpc 诊断）。
 3. **兼容 mock NF：无。** 全树无任何 Plummer mock 上训练的 NF；`mock_dust.py` 是无关的 HEALPix 尘埃 mock。归档分支 `codex/standalone-run-architecture`（0c7e23f）有历史 Plummer oracle 代码可参考。T4 需新建 mock DF 训练节点并单独申请预算。
 
 ## 契约冻结摘要（全文见 manifest）
@@ -31,6 +32,7 @@ innerA λ=1：旧项目 dpjax-phase1（07d8ee01，已归档）训练 run `2b32eb
 ## 发现与限制
 
 - **control 模型从未做过数值 score 链审计**：audit_df_constraints 只审过 2026-09-15 旧 baseline；T1 是全新证据，不是复算。
+- （更正记录）初版结论 2 的『无非球 3D 势场』混淆了产品现状与数据上限：核验后确认逐点真势在 clean-smooth 源文件与 raw 快照中都存在（manifest `true_potential_assets`）。遗漏原因：初版只核验了 truth 产品与训练文件，未下到源数据逐字段检查。
 - S1 样本行序不可交换（首/中部 r_q 中位约 0.66、尾部约 6.43），Φ 的 val（前 65,536 个样本）是空间偏倚子集，phi_val=0.3640 只作监控量解释。
 - S1 实际 n=262,145（options 写 262,144；逐 bin max(1,round) 取整，S1 WEIGHTS CHECK PASS）；审计以实际数组为准。
 - `plummer_sphere.draw_from_sphere` 方位角用全局 np.random（种子分层违规），T3 前必须修复；1D CDF 采样为 1024 点梯形＋插值，离散精度待校准。
@@ -38,4 +40,4 @@ innerA λ=1：旧项目 dpjax-phase1（07d8ee01，已归档）训练 run `2b32eb
 
 ## 下一步
 
-唯一优先：派发 **T1（Agent A）**——control score 数值链审计与共享缓存（先吞吐试点，后申请全量）。解析侧 T2/T3 mock 校准可并行开发（本地 CPU）。触发证据：control 外区异常锚点（69.5 kpc 谱峰、约 22 倍残差方差）存在，但其 score 链从未被审计。成本候选见上，等待逐段授权。
+唯一优先：派发 **T1（Agent A）**——control score 数值链审计与共享缓存（先吞吐试点，后申请全量）。解析侧 T2/T3 mock 校准可并行开发（本地 CPU）；T3 卡新增『逐点真势单位标定＋主轴系梯度估计误差定量』作为 A5 前置小项。触发证据：control 外区异常锚点（69.5 kpc 谱峰、约 22 倍残差方差）存在，但其 score 链从未被审计。成本候选见上，等待逐段授权。
