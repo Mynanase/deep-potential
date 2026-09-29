@@ -15,6 +15,8 @@ Run from the repo root:  JAX_PLATFORMS=cpu python -m pytest tests/ -q
 import sys
 from pathlib import Path
 
+import json
+
 import numpy as np
 import pytest
 
@@ -446,3 +448,51 @@ def test_population_velocity_std(tmp_path):
         f.create_dataset("eta", data=eta)
     np.testing.assert_allclose(nsc.population_velocity_std(str(p)),
                                np.std(vel, axis=0), rtol=1e-12)
+
+def test_cache_points_only_smoke(tmp_path):
+    """End-to-end points-only build against synthetic population + control
+    layout: catches runtime name errors and contract breaks in build_cache
+    without touching the real model (run ed679735 finding: a constant typo
+    in the pilot branch only surfaced on the server)."""
+    import h5py
+    n = 400
+    rng = np.random.default_rng(21)
+    pop = tmp_path / "pop.h5"
+    with h5py.File(pop, "w") as f:
+        f.create_dataset("eta", data=rng.normal(size=(n, 6)))
+        f.create_dataset("particle_id", data=np.arange(n, dtype=np.int64))
+        f.create_dataset("source_index", data=np.arange(n, dtype=np.int64))
+        f.create_dataset("mass", data=np.ones(n))
+        f.create_dataset("weights", data=np.ones(n))
+    control_repo = tmp_path / "control_repo"
+    run_dir = control_repo / "runs" / "orx"
+    (run_dir / "models").mkdir(parents=True)
+    ckpt = run_dir / "models" / "model.eqx"
+    ckpt.write_bytes(b"fake-checkpoint")
+    (control_repo / "scripts").mkdir(parents=True)
+    for rel in adc.MODEL_CODE_FILES:
+        p = control_repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# synthetic control snapshot file")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "schema": "dpjax.nf-score-audit.t0-manifest.v1",
+        "control": {"checkpoints_sha256": {"models/model.eqx": adc.sha256_file(ckpt)},
+                    "source_commit": "synthetic", "training_run": "synthetic",
+                    "single_flow_pair": True},
+        "population": {"file": str(pop), "n": n},
+    }))
+    out = tmp_path / "out"
+    nsc.build_cache(str(control_repo), str(run_dir), str(manifest),
+                    str(pop), str(out), stage="pilot",
+                    heldout_x64_rows=0, points_only=True)
+    assert (out / "manifest.json").exists()
+    m = json.loads((out / "manifest.json").read_text())
+    assert m["schema"] == nsc.CACHE_SCHEMA
+    assert set(m["point_order_sha256"]) == {"heldout", "velocity_probes", "spatial_grid"}
+    assert (out / "points_heldout_pilot.h5").exists()
+    assert (out / "points_velocity_probes_pilot.h5").exists()
+    assert (out / "points_spatial_grid_pilot.h5").exists()
+    with h5py.File(out / "points_velocity_probes_pilot.h5", "r") as f:
+        assert f["eta"].shape == (2 * 16 * 8, 6)
+        assert f.attrs["point_order_sha256"] == m["point_order_sha256"]["velocity_probes"]

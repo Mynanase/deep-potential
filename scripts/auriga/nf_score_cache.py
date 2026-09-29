@@ -248,7 +248,7 @@ def build_cache(control_repo, control_run_dir, manifest_path, population,
     probes = velocity_probes(sigma_vel,
                              shells=PILOT_PROBE_SHELLS if pilot else None,
                              n_vel=PILOT_PROBE_VELS if pilot else None)
-    grid = spatial_grid(radii=PILOT_GRID_RADII_KPC if pilot else None,
+    grid = spatial_grid(radii=PILOT_GRID_RADII if pilot else None,
                         n_dirs=PILOT_GRID_DIRS if pilot else None)
     print(f"[t1.cache:{stage}] heldout={len(heldout['eta'])} probes={len(probes['eta'])} "
           f"grid={len(grid['q'])} sigma_vel={sigma_vel.tolist()}")
