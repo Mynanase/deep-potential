@@ -496,3 +496,88 @@ def test_cache_points_only_smoke(tmp_path):
     with h5py.File(out / "points_velocity_probes_pilot.h5", "r") as f:
         assert f["eta"].shape == (2 * 16 * 8, 6)
         assert f.attrs["point_order_sha256"] == m["point_order_sha256"]["velocity_probes"]
+
+def test_cache_full_pilot_smoke_on_tiny_models(tmp_path):
+    """Full pilot build_cache against tiny locally saved models laid out
+    exactly like the control snapshot (flow-21 + flow_pos_only-10 +
+    potential-10, metadata.json, manifest hashes).  Exercises every
+    remaining runtime path -- heldout f32/x64, probes, Phi grid products,
+    the phi FD spot check, throughput sweep, metrics and manifest -- so
+    call-site bugs fail here instead of on the GPU (run 1fcb8ef5 class)."""
+    import shutil
+    import h5py
+    import jax
+    import jax.numpy as jnp
+    import equinox as eqx
+    from flow_ot_flow_matching_conditional import ConditionalPhaseSpaceFlow
+    import potential as potential_mod
+
+    control_repo = tmp_path / "control_repo"
+    run_dir = control_repo / "runs" / "orx"
+    flow_dir = run_dir / "models" / "df" / "flow"
+    phi_dir = run_dir / "models" / "Phi"
+    flow_dir.mkdir(parents=True)
+    phi_dir.mkdir(parents=True)
+    shutil.copytree(REPO / "scripts", control_repo / "scripts",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+
+    vf_params = {"type": "MLP", "width": 16, "depth": 2}
+    flow = ConditionalPhaseSpaceFlow(
+        key=jax.random.key(0), data_mean=jnp.zeros(6), data_std=jnp.ones(6),
+        spatial_vf_params=dict(vf_params), conditional_vf_params=dict(vf_params),
+        model_dir=str(flow_dir), checkpoint_index=21)
+    flow.save("flow")
+    eqx.tree_at(lambda m: m.checkpoint_index, flow, 10).save("flow_pos_only")
+
+    phi_params = {"type": "MLP", "width": 16, "depth": 2, "scale": None}
+    phi_model = potential_mod.PotentialModel(
+        key=jax.random.key(0), model_dir=str(phi_dir), phi_params=phi_params,
+        checkpoint_index=10)
+    phi_model.save()
+
+    n = 4000
+    rng = np.random.default_rng(22)
+    pop = tmp_path / "pop.h5"
+    with h5py.File(pop, "w") as f:
+        f.create_dataset("eta", data=rng.normal(size=(n, 6)) * 0.5)
+        f.create_dataset("particle_id", data=np.arange(n, dtype=np.int64))
+        f.create_dataset("source_index", data=np.arange(n, dtype=np.int64))
+        f.create_dataset("mass", data=np.ones(n))
+        f.create_dataset("weights", data=np.ones(n))
+
+    def sha(rel):
+        return adc.sha256_file(run_dir / rel)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({
+        "schema": "dpjax.nf-score-audit.t0-manifest.v1",
+        "control": {"checkpoints_sha256": {
+            "models/df/flow/flow-21_model.eqx": sha("models/df/flow/flow-21_model.eqx"),
+            "models/df/flow/flow_pos_only-10_model.eqx": sha("models/df/flow/flow_pos_only-10_model.eqx"),
+            "models/Phi/potential-10_model.eqx": sha("models/Phi/potential-10_model.eqx")},
+            "source_commit": "tiny-test", "training_run": "tiny-test",
+            "single_flow_pair": True},
+        "population": {"file": str(pop), "n": n}}))
+    audit_json = tmp_path / "audit.json"
+    audit_json.write_text(json.dumps({"gates": {"all_ok": True}}))
+
+    out = tmp_path / "out"
+    metrics = nsc.build_cache(str(control_repo), str(run_dir), str(manifest),
+                              str(pop), str(out), stage="pilot", batch=64,
+                                                            heldout_x64_rows=16, pilot_rows=64,
+                                                            audit_json=str(audit_json))
+    assert metrics["n_points"] == {"heldout": 64, "velocity_probes": 256,
+                                   "spatial_grid": 256}
+    m = json.loads((out / "manifest.json").read_text())
+    assert m["certification"]["certified"] is True
+    assert m["audit"]["gates"]["all_ok"] is True
+    import h5py as h5
+    with h5.File(out / "arrays_spatial_grid_pilot.h5", "r") as f:
+        assert f["grad_phi_f32"].shape == (256, 3)
+        np.testing.assert_allclose(f["acceleration_f32"][:], -f["grad_phi_f32"][:],
+                                   rtol=0, atol=0)
+        assert np.all(np.isfinite(f["laplacian_f64"][:]))
+    with h5.File(out / "arrays_velocity_probes_pilot.h5", "r") as f:
+        assert f["score_x64strict"].shape == (256, 6)
+        assert np.all(np.isfinite(f["importance_weight_raw"][:]))
+    assert "throughput_sweep_f32" in metrics["timing_s"]
+    assert metrics["phi_fd_spot_check"]["grad_ok"] is True

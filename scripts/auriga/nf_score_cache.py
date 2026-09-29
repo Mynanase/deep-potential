@@ -432,11 +432,14 @@ def lnp_clip(x):
 
 def phi_products(phi_model, q, dtype, batch):
     """phi, grad_q phi and exact-trace laplacian, vmapped from the control
-    snapshot's potential.calc_phi_derivatives (production implementation)."""
+    snapshot's potential.calc_phi_derivatives (production implementation).
+    The model is captured in a closure: passing the eqx module through the
+    jit boundary as an argument fails on its function-valued leaves
+    (net.activation; run 1fcb8ef5 finding)."""
     import jax
     import jax.numpy as jnp
     from potential import calc_phi_derivatives
-    vf = jax.jit(jax.vmap(calc_phi_derivatives, in_axes=(None, 0)))
+    vf = jax.vmap(calc_phi_derivatives, in_axes=(None, 0))
 
     def fn(chunk):
         return vf(phi_model, chunk)
@@ -454,10 +457,14 @@ def phi_products(phi_model, q, dtype, batch):
 def phi_values(phi_model, q, dtype, batch):
     import jax
     import jax.numpy as jnp
-    vf = jax.jit(jax.vmap(phi_model))
+    vf = jax.vmap(phi_model)
+
+    def fn(chunk):
+        return vf(chunk)
+    fn = jax.jit(fn)
     outs = []
     for i in range(0, len(q), batch):
-        outs.append(np.asarray(vf(jnp.asarray(q[i:i + batch], dtype=dtype))))
+        outs.append(np.asarray(fn(jnp.asarray(q[i:i + batch], dtype=dtype))))
     return np.concatenate(outs, axis=0)
 
 
@@ -471,7 +478,9 @@ def phi_fd_spot_check(phi_model, q, n_points=8, steps=(1e-2, 3e-3, 1e-3)):
     rows = adc.stratified_rows_by_radius(q, n_points)
     report = {"steps": list(steps), "grad_median_rel": [], "lap_median_rel": []}
     with adc._x64(True):
-        scalar = jax.jit(phi_model)
+        def _scalar(x):
+            return phi_model(x)
+        scalar = jax.jit(_scalar)
         ad = []
         for i in rows:
             g, lap = calc_phi_derivatives(phi_model, jnp.asarray(q[i]))
