@@ -224,7 +224,7 @@ def build_cache(control_repo, control_run_dir, manifest_path, population,
     t_start = time.time()
 
     manifest = adc.load_t0_manifest(manifest_path)
-    prov = adc.verify_control_hashes(manifest, control_run_dir)
+    prov = adc.verify_control_hashes(manifest, control_run_dir, control_repo)
     code_hashes = adc.model_code_hashes(control_repo)
     pop_sha = adc.sha256_file(population)
 

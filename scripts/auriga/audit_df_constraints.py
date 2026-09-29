@@ -329,16 +329,23 @@ def load_t0_manifest(path):
     return manifest
 
 
-def verify_control_hashes(manifest, control_run_dir):
+def verify_control_hashes(manifest, control_run_dir, control_repo=None):
     """Re-hash every file pinned in t0-manifest.json and fail loudly on any
     mismatch (T1 stop condition).  Returns the provenance dict for the
-    audit/cache manifests."""
+    audit/cache manifests.
+
+    Pinned keys are relative to the control run artifacts dir, except the
+    options.json entry which the manifest stores relative to the snapshot
+    repo root (run 56b8c01a finding); each key resolves against the run dir
+    first, then the repo root."""
     control_run_dir = Path(control_run_dir)
+    bases = [control_run_dir] + ([Path(control_repo)] if control_repo else [])
     prov = {}
     for rel, frozen_sha in manifest["control"]["checkpoints_sha256"].items():
-        path = control_run_dir / rel
-        if not path.exists():
-            raise RuntimeError(f"pinned control file missing: {path}")
+        path = next((b / rel for b in bases if (b / rel).exists()), None)
+        if path is None:
+            raise RuntimeError(f"pinned control file missing: {rel} "
+                               f"(looked under {[str(b) for b in bases]})")
         sha = sha256_file(path)
         if sha != frozen_sha:
             raise RuntimeError(
@@ -513,7 +520,7 @@ def score_chain_audit(control_repo, control_run_dir, manifest_path, out_dir,
     t0 = time.time()
 
     manifest = load_t0_manifest(manifest_path)
-    prov = verify_control_hashes(manifest, control_run_dir)
+    prov = verify_control_hashes(manifest, control_run_dir, control_repo)
     code_hashes = model_code_hashes(control_repo)
 
     if smoke:
