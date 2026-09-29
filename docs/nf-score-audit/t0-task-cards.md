@@ -28,6 +28,6 @@
 - **输入**：t0-manifest（无 mock NF；**逐点真势存在**（`true_potential_assets`）、**无逐点加速度块**；**mock 参数已在 T0 冻结**：参考实现＝`0c7e23f` Plummer 体系，a=6.8 kpc、N_mock=1,619,615、检测区三带 ±25% 密度匹配，见 `mock_design`）；共享速度点定义（与 T1 卡协调）。
 - **允许执行**：仅本地 CPU；不训练；Auriga 逐点真势的只读核验（经批准的只读 ssh 或服务器导出的少量数组）。
 - **文件归属**：`scripts/plummer/plummer_sphere.py`（修复 draw_from_sphere 的 rng 违规并加测试）、新 `scripts/plummer/plummer_oracle.py`（解析 score/真加速度/质量＋oracle 输入接口）＋ 解析测试；局部力求解放 `scripts/auriga/local_force_inversion.py`（α 约定）。
-- **必做**：从 `0c7e23f` 移植生成器与解析 score 源并**按冻结参数重新生成 mock 样本**（纯 CPU、带完整 lineage attrs；legacy `plummer_n*.h5` 禁用）；验证解析分带份额 vs 冻结值在 ±25% 容差内（二项噪声＋采样器离散误差单列）；r-cut/选择变体必须用选择后 DF 的 score（s_sel=s+∇log S）；采样器离散精度与 RNG 修复；g=∇φ 到 α=−∇φ 转换测试；秩亏不给稳定力认证；mean(E)=0 但投影偏差的反例；能量依赖反例；单位与符号；**A5 前置小项**＝逐点真势单位标定（对单极模型/已知 M_total，消 `acceleration_unit=unknown`）＋主轴系局部梯度估计的误差定量（外区稀疏重点检查）。
+- **必做**：从 `0c7e23f` 移植生成器与解析 score 源并**按冻结参数重新生成 mock 样本**（纯 CPU、带完整 lineage attrs；legacy `plummer_n*.h5` 禁用）；验证解析分带份额 vs 冻结值在 ±25% 容差内（二项噪声＋采样器离散误差单列）；**不使用 r-cut／选择变体**：完整 Plummer 数据，oracle score 恒为完整解析 score，无选择修正；采样器离散精度与 RNG 修复；g=∇φ 到 α=−∇φ 转换测试；秩亏不给稳定力认证；mean(E)=0 但投影偏差的反例；能量依赖反例；单位与符号；**A5 前置小项**＝逐点真势单位标定（对单极模型/已知 M_total，消 `acceleration_unit=unknown`）＋主轴系局部梯度估计的误差定量（外区稀疏重点检查）。
 - **交付**：O0/O1 测试证据 ＋ 局部四组合框架（NF 接口留给 T1 缓存）＋ 支持图数据；A5 可行性结论（条件可行/阻断）。
 - **停止条件**：oracle 公式/单位失败即阻断 T4 前置；α* 梯度估计误差未定量前不得用于 A5 或任何真力对照；不扩大为 Auriga 真力声明。
