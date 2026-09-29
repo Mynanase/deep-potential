@@ -1,0 +1,41 @@
+# T0 执行记录：来源盘点与执行契约（NF score audit 线）
+
+冻结日期 2026-09-30。方案：`docs/nf-score-audit-plan.md`（v1，commit e0edb21，节点 45b0446d）。
+机读 manifest：`t0-manifest.json`；任务卡：`t0-task-cards.md`（均在本目录）。
+本轮为只读盘点：未训练、未启动任何服务器诊断、未改动任何冻结分支与用户脏文件（各 worktree 状态已核对）。
+
+## 任务 / 状态
+
+**完成**。三层状态：代码＝仅新增本文档三件套，无代码改动；数值＝无新计算，全部结论来自只读核验（run 日志、服务器文件、HDF5 attrs、sha256）；科学＝T0 契约本身，不包含任何 score/力/密度的科学判断。
+
+## 被检验对象（control，唯一）
+
+innerA λ=1：旧项目 dpjax-phase1（07d8ee01，已归档）训练 run `2b32eb04-d8bf-4c03-a3a9-98d0f0db1192`（节点 9788e6de），源码 `orx/inner-band-fix-a-radius-balanced-prior-grid` @ `5f76faa`（run 记录 commit，非当前 HEAD）。服务器工件目录与部署件 sha256 见 manifest：空间流 `flow_pos_only-10` + 条件速度流 `flow-21` + Φ `potential-10`，**单 flow 对，无 ensemble**。锚点：dM 带 1.25/5.95/8.76/8.14%（run 313e0cc7）；f_hi<10/<5 = 10.7%/2.8% vs truth 8.8%/2.3%（run e4d4db5d）；残差谱峰 69.5 kpc、模型残差方差 ~22× truth（run e66ac2dd）。
+
+## 三个明确结论
+
+1. **合格确认集：无。** clean-smooth 前 25% 行（404,903 粒子）未进梯度更新、未用于 checkpoint 选择（固定 256 epoch 末点部署），但 w1024/FlowMatching 架构、S1 配额、innerA 设计经 phase-1/2 在重叠总体上的比较选定，清洗规则（union registry）也在全总体上设计；s11 文件是同成员重洗牌，去除团块与 all-mass 是不同总体。本轮 Auriga Stein 检验只能作探索性；独立确认需要新设计（如其他 snapshot），不能用现有任何划分回溯恢复。
+2. **完整真加速度：无。** 粒子真值产品（sha256 e02379fa…，两处 run 快照副本一致）只含密度 rho3d 96³/rho_r 240/sigma_slab 480² 与势的球单极 phi_sphere_mean(24)、方向散布 phi_dirs(24,2048)、切片 phi_slice(240²)——无非球 3D 势场。分辨率口径：不小于 10 kpc 定量、小于 5 kpc 诊断。附录 A5 弱动力学分解不可做；Auriga 力侧只做可辨识性/敏感性/与 Φ 的一致性。
+3. **兼容 mock NF：无。** 全树无任何 Plummer mock 上训练的 NF；`mock_dust.py` 是无关的 HEALPix 尘埃 mock。归档分支 `codex/standalone-run-architecture`（0c7e23f）有历史 Plummer oracle 代码可参考。T4 需新建 mock DF 训练节点并单独申请预算。
+
+## 契约冻结摘要（全文见 manifest）
+
+- 坐标 q=x/L（L=10 kpc）、p=v/V（V=100 km/s）；score 对输入 (q,p) 求导；**α=−∇qφ**（旧 `local_force_svd` 的 g=∇φ 必须显式转换）。
+- 分层：q 边界 [0.1,0.2,1,2,3,4.5,6,7]（= S1 radial_alloc 边界，已核一致）；报告带 2–10/10–30/30–50/50–70 kpc 由成员分层直接聚合（30–50 = [3,4.5)+[4.5,5)）。
+- 点集候选：heldout＝clean-smooth 前 404,903 行（PID 保留，探索资格）；velocity_probes＝7 壳×16 角向×96 共享速度（proposal/权重 T1 卡冻结）；spatial_grid＝Sobol 角向固定半径（2:3:30 ∪ 30:5:70 kpc，2048 向量/半径）+ 谱用独立 3D 网格，与训练 q_grid 无关。
+- 种子：既有 0/0/1/2 不动；新增诊断层候选 probes=3、bootstrap=4、mock=5。
+- 容差：科学容差 **TBD**（参考尺度＝control 锚点，不以显著性倒推）；数值预算候选约为目标效应 10%（floored-rel 中位<1%/p99<5%、FD 相邻双步长稳定、ODE 默认-严格差<0.5%），T1 验证可实现后方采用。
+- 开销（本轮）：无训练；服务器动作一律走编排＋已提交 runner；T1 吞吐试点候选不超过 2048 点/单卡/30 min，全量缓存候选不超过 2 h/单卡，均待派发时授权；T2/T3 解析部分仅本地 CPU。
+- 持久化：`runs/nf-score-audit/<stage>/`（manifest/points/arrays/metrics/review/figures）；**每个缓存必须绑 hash**——已确认 control 的 df_gradients.h5 attrs 为空，正是方案 4.2 针对的真实缺口。
+
+## 发现与限制
+
+- **control 模型从未做过数值 score 链审计**：audit_df_constraints 只审过 2026-09-15 旧 baseline；T1 是全新证据，不是复算。
+- S1 样本行序不可交换（首/中部 r_q 中位约 0.66、尾部约 6.43），Φ 的 val（前 65,536 个样本）是空间偏倚子集，phi_val=0.3640 只作监控量解释。
+- S1 实际 n=262,145（options 写 262,144；逐 bin max(1,round) 取整，S1 WEIGHTS CHECK PASS）；审计以实际数组为准。
+- `plummer_sphere.draw_from_sphere` 方位角用全局 np.random（种子分层违规），T3 前必须修复；1D CDF 采样为 1024 点梯形＋插值，离散精度待校准。
+- 限制：真值侧谱收敛正式判据未过（不小于 10 kpc 定量、小于 5 kpc 诊断）；run 快照工件在服务器 `.orx/runs/` 下未做异地备份，T1 起的重要缓存建议登记 sha256 于本仓库 manifest。
+
+## 下一步
+
+唯一优先：派发 **T1（Agent A）**——control score 数值链审计与共享缓存（先吞吐试点，后申请全量）。解析侧 T2/T3 mock 校准可并行开发（本地 CPU）。触发证据：control 外区异常锚点（69.5 kpc 谱峰、约 22 倍残差方差）存在，但其 score 链从未被审计。成本候选见上，等待逐段授权。

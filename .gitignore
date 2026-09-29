@@ -140,6 +140,7 @@ misc/
 *.json
 !scripts/auriga/options*.json
 !scripts/auriga/numerical_checks*.json
+!docs/nf-score-audit/*.json
 
 # Checkpoints
 checkpoints/
