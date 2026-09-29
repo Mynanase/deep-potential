@@ -30,7 +30,10 @@ test -f "$MANIFEST"          || { echo "[t1.runner] missing t0 manifest $MANIFES
 test -f scripts/auriga/audit_df_constraints.py || { echo "[t1.runner] missing audit script"; exit 1; }
 test -f scripts/auriga/nf_score_cache.py       || { echo "[t1.runner] missing cache script"; exit 1; }
 
-GPU=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | awk -F", " '$2 < 1000 {print $1; exit}')
+# buffer the full query first: awk's early exit would SIGPIPE nvidia-smi
+# and pipefail would abort the runner (run cb9885ee, exit 141)
+GPU_TABLE=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits)
+GPU=$(printf '%s\n' "$GPU_TABLE" | awk -F", " '$2 < 1000 {print $1; exit}')
 if [ -z "$GPU" ]; then GPU=0; fi
 echo "[t1.runner] stage=$STAGE gpu=$GPU out=$OUT audit_budget=$AUDIT_BUDGET_S cache_budget=$CACHE_BUDGET_S"
 nvidia-smi --query-gpu=index,name,memory.used,utilization.gpu --format=csv
@@ -76,4 +79,3 @@ print("phi_fd grad_ok/lap_ok:", m["phi_fd_spot_check"].get("grad_ok"),
 print("extrapolation:", json.dumps(m.get("extrapolation", {}), indent=1))
 EOF
 echo "[t1.runner] done"
-
