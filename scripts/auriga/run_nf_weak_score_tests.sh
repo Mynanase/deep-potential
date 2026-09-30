@@ -16,10 +16,22 @@ cd "$(dirname "$0")/../.."
 
 STAGE_FILE=scripts/auriga/nf_weak_score_stage.txt
 OUT=runs/nf-score-audit/t2-weak-score
-CACHE_DIR="${WEAK_SCORE_CACHE_DIR:-runs/nf-score-audit/t1-cache-local}"
+CACHE_PATH_FILE=scripts/auriga/nf_weak_score_cache_path.txt
 CAL_BUDGET_S=7200
 REAL_BUDGET_S=3600
 REQUIREMENTS=scripts/auriga/requirements-weak-score.txt
+
+# cache location: env override > committed path file (absolute path to the
+# local read-only copy of the certified T1 products) > relative default
+if [ -z "${WEAK_SCORE_CACHE_DIR:-}" ]; then
+  if [ -f "$CACHE_PATH_FILE" ]; then
+    CACHE_DIR=$(tr -d "[:space:]" < "$CACHE_PATH_FILE")
+  else
+    CACHE_DIR=runs/nf-score-audit/t1-cache-local
+  fi
+else
+  CACHE_DIR="$WEAK_SCORE_CACHE_DIR"
+fi
 
 STAGE=$(tr -d "[:space:]" < "$STAGE_FILE")
 case "$STAGE" in
