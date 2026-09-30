@@ -14,12 +14,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-PY="${WEAK_SCORE_PY:-.venv/bin/python}"
 STAGE_FILE=scripts/auriga/nf_weak_score_stage.txt
 OUT=runs/nf-score-audit/t2-weak-score
 CACHE_DIR="${WEAK_SCORE_CACHE_DIR:-runs/nf-score-audit/t1-cache-local}"
 CAL_BUDGET_S=7200
 REAL_BUDGET_S=3600
+REQUIREMENTS=scripts/auriga/requirements-weak-score.txt
 
 STAGE=$(tr -d "[:space:]" < "$STAGE_FILE")
 case "$STAGE" in
@@ -27,8 +27,22 @@ case "$STAGE" in
   *) echo "[t2.runner] unknown stage '$STAGE' in $STAGE_FILE (expected calibrate|full)"; exit 2 ;;
 esac
 
-test -x "$PY" || { echo "[t2.runner] missing python $PY"; exit 1; }
 test -f scripts/auriga/nf_weak_score_tests.py || { echo "[t2.runner] missing script"; exit 1; }
+
+# self-contained CPU environment (the orchestration snapshot carries no venv);
+# pinned numpy/scipy/h5py only - the weak-score script never imports jax
+if [ -z "${WEAK_SCORE_PY:-}" ]; then
+  PY=.venv-weak/bin/python
+  if [ ! -x "$PY" ]; then
+    echo "[t2.runner] building pinned venv from $REQUIREMENTS"
+    python3 -m venv .venv-weak
+    .venv-weak/bin/pip install --quiet --upgrade pip
+    .venv-weak/bin/pip install --quiet -r "$REQUIREMENTS"
+  fi
+else
+  PY="$WEAK_SCORE_PY"
+fi
+test -x "$PY" || { echo "[t2.runner] missing python $PY"; exit 1; }
 
 export JAX_PLATFORMS=cpu XLA_PYTHON_CLIENT_PREALLOCATE=false
 mkdir -p "$OUT"
