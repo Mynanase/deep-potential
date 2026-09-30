@@ -1,0 +1,34 @@
+{
+  "schema": "dpjax.nf-score-audit.t1-cache-registry.v1",
+  "frozen_date": "2026-09-30",
+  "run": "f7f2c973-5a1b-4330-ba72-286526b9e3d2",
+  "commit": "8948905",
+  "node": "45b0446d-0406-4606-8894-574c2a5ddff5",
+  "pilot_run": "47a26c96-d59a-4377-ba5a-edc1f78585d7",
+  "server_dir": "/home/qiutao/.orx/runs/f7f2c973-5a1b-4330-ba72-286526b9e3d2/repo/runs/nf-score-audit/t1-cache",
+  "certification": {"certified": true, "note": "audit gates all_ok in the same run (8/8)"},
+  "point_order_sha256": {
+    "heldout": "357c26eab57d1a4dfd698ecaf34bac1402abd2ab1f2b7e6aad498b66b8b12c52",
+    "velocity_probes": "e46d5cb2c74fa9767cfc4f21f455f7e09dde5ee342e23edfc0bc308d951ffdab",
+    "spatial_grid": "8cdb2334d9102e2294069a9884ec67648959c1eae5331cb15e116c4408959726"
+  },
+  "files_sha256": {
+    "manifest.json": "15e94df7ee9453577228d62cb686ae172b1dbf27e8b806223872b86ccb8389d8",
+    "metrics.json": "f623ccc5be83b46f18eecccb33e397800f9f18b7ca3a49a7a4290dd9abec3153",
+    "audit_score_chain.json": "0c27bc1a2f17aa463ccdee4cf46a54414d636dbe0a9e0e5db99312dbdc0b32a3",
+    "audit_score_chain.npz": "a281f1bdf9fc95a674f0818fd0c2bba04abef0310581756636534ac48f2e3163",
+    "points_heldout.h5": "83a20cb49d56c48d53ecce99942a6f79aaa78e74d29df53e2cf6887642bb9cbe",
+    "points_velocity_probes.h5": "84cf6ad2fac3c18cd9abe18700e719b14ba83d52cc09b3310c7d6199be898c36",
+    "points_spatial_grid.h5": "6a155b2e8de2db9535c232ebf3bb2372d065d2c1a9555032a5a80aa0b662a4e8",
+    "arrays_heldout.h5": "99f25bfd042c8713233bcbae6641d0b3fd157ac5488760f18210e26ac7d72e3b",
+    "arrays_velocity_probes.h5": "b6a62bc1327769d7a7e6a1e4708091363ec2e53b98134bfcc483cb7b448d038a",
+    "arrays_spatial_grid.h5": "2896db1be7ca93df8ece872e5befd7926f394fc28190d91881d96a9fad32c9af"
+  },
+  "control_checkpoints_sha256": {
+    "models/df/flow/flow_pos_only-10_model.eqx": "8537fc9bc3ca1b47997dc24195b324f78627204df8c65ded2367bbe35404b4d8",
+    "models/df/flow/flow-21_model.eqx": "6120b651d921feef3e57d75b2cbdc8331c72e94ce4722bf8091bce95c31cfd5c",
+    "models/Phi/potential-10_model.eqx": "2fac6efb1769318d6f90b53d8f25473c63c03f6cfb62b0e6bf55a73b19a37c30",
+    "runs/orx/options.json": "198146d5edc41d0832597558a6ba10e1031378d97e42bc8c8173390c55ac745b"
+  }
+}
+
