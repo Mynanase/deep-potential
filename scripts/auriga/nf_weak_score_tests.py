@@ -582,17 +582,25 @@ def calibrate(out_dir, n_replicates=N_REPLICATES):
             s["max_abs_mean_z"] = float(np.max(np.abs(z_rep[i].mean(axis=0))))
             crit_half = float(np.quantile(maxT_rep[i, :half], 0.95))
             s["fpr_maxT_splithalf_0.05"] = float(np.mean(maxT_rep[i, half:] > crit_half))
+            famq_max = Q_rep[i].max(axis=1)
+            crit_famq = float(np.quantile(famq_max[:half], 0.95))
+            s["fpr_familyQ_empirical_0.05"] = float(np.mean(famq_max[half:] > crit_famq))
             s["fpr_familyQ_chi2_0.05"] = float(
                 np.mean(np.any(Q_rep[i] > crit_chi2[0.05], axis=1)))
+            s["mean_family_Q"] = Q_rep[i].mean(axis=0).tolist()
             s["coverage_95_mean"] = float(np.mean(np.abs(z_rep[i]) <= crit_z[0.05]))
         if a["kind"] in ("inject", "pressure"):
             col = _matched_column(a["family"])
             s["power_matched_0.05"] = float(np.mean(np.abs(z_rep[i, :, col]) > crit_z[0.05]))
             jnull = arm_idx["null"]
             crit_null = float(np.quantile(maxT_rep[jnull, :half], 0.95))
+            famq_null = Q_rep[jnull].max(axis=1)
+            crit_famq_null = float(np.quantile(famq_null[:half], 0.95))
             s["power_joint_maxT_0.05"] = float(np.mean(maxT_rep[i] > crit_null))
             s["power_joint_familyQ_0.05"] = float(
                 np.mean(np.any(Q_rep[i] > crit_chi2[0.05], axis=1)))
+            s["power_joint_familyQ_emp_0.05"] = float(
+                np.mean(Q_rep[i].max(axis=1) > crit_famq_null))
             pred = {"S": a["eps"] * e_s[a["m"]], "V1": a["eps"] * e_v1,
                     "V2": a["eps"] * e_w, "NG": None}[a["family"]]
             if pred is not None:
@@ -639,7 +647,8 @@ def calibrate(out_dir, n_replicates=N_REPLICATES):
              for n in null_names)
     g2 = all(0.02 <= summaries[n]["fpr_per_stat_mean_0.05"] <= 0.10 for n in null_names)
     g3 = all(0.015 <= summaries[n]["fpr_maxT_splithalf_0.05"] <= 0.12
-             and 0.015 <= summaries[n]["fpr_familyQ_chi2_0.05"] <= 0.12 for n in null_names)
+             and 0.015 <= summaries[n]["fpr_familyQ_empirical_0.05"] <= 0.12
+             for n in null_names)
     g4 = all(summaries[n]["coverage_95_mean"] >= 0.90 for n in null_names)
     s_hi, s_lo = summaries["S_m0_e2"], summaries["S_m0_e0.25"]
     g5 = (s_hi["power_matched_0.05"] >= 0.90) and (s_lo["power_matched_0.05"] <= 0.60)
@@ -669,6 +678,11 @@ def calibrate(out_dir, n_replicates=N_REPLICATES):
         "arms": summaries,
         "resampling_sensitivity": sens,
         "gates": gates,
+        "joint_reference_note": "nominal chi2_21 family-Q is ANTI-CONSERVATIVE at "
+                                "these settings (calibration FPR ~2.3-2.6x nominal); the "
+                                "gated joint procedure uses split-half empirical critical "
+                                "values (mock) and bootstrap critical values (real stage); "
+                                "chi2 FPRs are retained as diagnostics",
         "runtime_s": time.time() - t_start,
         "auriga_status": "real-sample estimates gated on local certified T1 cache "
                          "(see real stage); all Auriga results exploratory",
@@ -682,7 +696,8 @@ def calibrate(out_dir, n_replicates=N_REPLICATES):
     for name in null_names:
         s = summaries[name]
         print(f"[t2.cal] null {name}: FPRuv {s['fpr_per_stat_mean_0.05']:.3f} "
-              f"maxT {s['fpr_maxT_splithalf_0.05']:.3f} famQ {s['fpr_familyQ_chi2_0.05']:.3f} "
+              f"maxT {s['fpr_maxT_splithalf_0.05']:.3f} famQemp {s['fpr_familyQ_empirical_0.05']:.3f} "
+              f"famQchi2 {s['fpr_familyQ_chi2_0.05']:.3f} "
               f"cov95 {s['coverage_95_mean']:.3f} bias {s['max_abs_mean_z']:.3f}")
     print(f"[t2.cal] S_m0 power @0.25/1/2 eps_ref: "
           f"{summaries['S_m0_e0.25']['power_matched_0.05']:.2f}/"
@@ -773,6 +788,18 @@ def real_estimate(cache_dir, registry_path, out_dir, n_bootstrap=N_BOOTSTRAP):
         maxt_p[scheme] = float(np.mean(np.max(np.abs(bt - bt.mean(axis=0, keepdims=True))
                                                / np.maximum(bt.std(axis=0, ddof=1), 1e-300),
                                                axis=1) >= np.max(stat)))
+    famq_boot_p = {}
+    for scheme, bt in boot.items():
+        centered = bt - bt.mean(axis=0, keepdims=True)
+        per_family = []
+        for f in range(3):
+            sl = slice(f * N_FAMILY, (f + 1) * N_FAMILY)
+            cf = np.ascontiguousarray(cov[sl, sl])
+            shrunk = (1.0 - SHRINKAGE) * cf + SHRINKAGE * np.diag(np.diag(cf))
+            inv = np.linalg.inv(shrunk)
+            qb = np.einsum("bi,ij,bj->b", centered[:, sl], inv, centered[:, sl])
+            per_family.append(float(np.mean(qb >= Q[f])))
+        famq_boot_p[scheme] = per_family
     crit_chi2 = float(chi2.ppf(0.95, N_FAMILY))
 
     bands = {"window_all": (W_LO, W_HI), "band_30_45": (3.0, 4.5),
@@ -817,11 +844,14 @@ def real_estimate(cache_dir, registry_path, out_dir, n_bootstrap=N_BOOTSTRAP):
         "p_univariate_normal": p_uni.tolist(),
         "family_Q": Q.tolist(),
         "family_Q_p_chi2": [float(chi2.sf(q, N_FAMILY)) for q in Q],
+        "family_Q_p_bootstrap": famq_boot_p,
         "maxT_p_values": maxt_p,
         "discovery_rule": "pre-registered: flag if min bootstrap maxT p < 0.05 "
-                          "AND at least one family Q exceeds the chi2_21 95% quantile",
+                          "AND min bootstrap family-Q p < 0.05 (chi2_21 nominal retained "
+                          "as diagnostic only: calibration showed it anticonservative)",
         "discovery": discovery,
-        "flagged": bool(min(maxt_p.values()) < 0.05 and Q[0] > crit_chi2),
+        "flagged": bool(min(maxt_p.values()) < 0.05
+                        and min(min(v) for v in famq_boot_p.values()) < 0.05),
         "bands": {k: {"n": v["n"], "n_eff": v["n_eff"],
                       "max_abs_z": float(np.max(np.abs(v["z"]))),
                       "t": v["t"].tolist(), "se": v["se"].tolist(),

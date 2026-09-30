@@ -79,7 +79,8 @@ m = json.load(open(out + "/metrics.json"))
 print("gates:", json.dumps(m["gates"], sort_keys=True))
 null = m["arms"]["null"]
 print("null FPR univariate/maxT/familyQ:", round(null["fpr_per_stat_mean_0.05"], 3),
-      round(null["fpr_maxT_splithalf_0.05"], 3), round(null["fpr_familyQ_chi2_0.05"], 3))
+      round(null["fpr_maxT_splithalf_0.05"], 3), round(null["fpr_familyQ_empirical_0.05"], 3),
+      "(chi2 nominal:", str(round(null["fpr_familyQ_chi2_0.05"], 3)), "- diagnostic)")
 print("S_m0 power @0.25/1/2 eps_ref:",
       round(m["arms"]["S_m0_e0.25"]["power_matched_0.05"], 2),
       round(m["arms"]["S_m0_e1"]["power_matched_0.05"], 2),

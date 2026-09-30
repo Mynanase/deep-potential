@@ -189,6 +189,44 @@ def test_real_stage_refuses_hash_mismatch_and_skips_when_absent(tmp_path):
         t2.real_estimate(cache, tmp_path / "reg.json", tmp_path / "out")
 
 
+def test_real_stage_end_to_end_on_synthetic_cache(tmp_path):
+    import h5py
+    rng = np.random.default_rng(31)
+    n = 4000
+    r = rng.uniform(3.0, 7.0, n)
+    direction = rng.standard_normal((n, 3))
+    direction /= np.linalg.norm(direction, axis=1, keepdims=True)
+    q = r[:, None] * direction
+    p = 0.4 * rng.standard_normal((n, 3))
+    z = np.concatenate([q, p], axis=1)
+    ids = np.arange(n, dtype=np.int64)
+    weights = np.exp(0.2 * rng.standard_normal(n))
+    weights /= weights.mean()
+    order = t2.point_order_hash("heldout", ids, z)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with h5py.File(cache / "points_heldout.h5", "w") as f:
+        f.attrs["point_order_sha256"] = order
+        for key, val in [("particle_id", ids), ("eta", z), ("weights", weights)]:
+            f.create_dataset(key, data=val)
+    with h5py.File(cache / "arrays_heldout.h5", "w") as f:
+        f.attrs["point_order_sha256"] = order
+        f.create_dataset("score_f32", data=t2.mock_score(z))
+    reg = {"files_sha256": {
+               "points_heldout.h5": t2.sha256_file(cache / "points_heldout.h5"),
+               "arrays_heldout.h5": t2.sha256_file(cache / "arrays_heldout.h5")},
+           "point_order_sha256": {"heldout": order},
+           "run": "synthetic", "commit": "synthetic"}
+    (tmp_path / "reg.json").write_text(json.dumps(reg))
+    metrics = t2.real_estimate(cache, tmp_path / "reg.json", tmp_path / "out", n_bootstrap=120)
+    assert metrics is not None
+    assert metrics["grade"].startswith("EXPLORATORY")
+    assert metrics["n_window"] == n
+    assert len(metrics["t"]) == t2.K_ALL
+    assert set(metrics["maxT_p_values"]) == {"iid", "angular_cluster", "radial_block"}
+    assert len(metrics["family_Q_p_bootstrap"]) == 3
+
+
 def test_point_order_hash_matches_t1_canonical_form():
     ids = np.array([3, 1, 2], dtype=np.int64)
     eta = np.array([[0.5, 0.0, 0.0, 0.1, 0.0, 0.0]], dtype=np.float64)
