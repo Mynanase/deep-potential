@@ -440,11 +440,17 @@ def bootstrap_t(G, weights, n_boot, rng, cluster_ids=None):
 
 
 def maxT_from_bootstrap(boot_t, t_obs):
-    """Centered bootstrap max|t|/se critical values and two-sided p-value."""
+    """Centered bootstrap max|z| null distribution and the observed statistic.
+
+    Null-imposed reference: z_boot = |bt - mean(bt)|/sd(bt).  The observed
+    statistic is the distance of t_obs from the NULL VALUE 0 in the same
+    metric: |t_obs|/sd(bt) -- never the distance from the bootstrap mean
+    (that is ~0 by construction and would make the test vacuous).
+    """
     centered = boot_t - boot_t.mean(axis=0, keepdims=True)
     sd = np.maximum(centered.std(axis=0, ddof=1), 1e-300)
     zboot = np.abs(centered / sd)
-    stat = np.abs(t_obs - boot_t.mean(axis=0)) / sd
+    stat = np.abs(t_obs) / sd
     return zboot, stat
 
 
@@ -789,6 +795,10 @@ def real_estimate(cache_dir, registry_path, out_dir, n_bootstrap=N_BOOTSTRAP):
                                                / np.maximum(bt.std(axis=0, ddof=1), 1e-300),
                                                axis=1) >= np.max(stat)))
     famq_boot_p = {}
+    n_excl_null = {}
+    for scheme, bt in boot.items():
+        lo95b, hi95b = np.quantile(bt, 0.025, axis=0), np.quantile(bt, 0.975, axis=0)
+        n_excl_null[scheme] = int(np.sum(~((lo95b <= 0.0) & (hi95b >= 0.0))))
     for scheme, bt in boot.items():
         centered = bt - bt.mean(axis=0, keepdims=True)
         per_family = []
@@ -845,6 +855,7 @@ def real_estimate(cache_dir, registry_path, out_dir, n_bootstrap=N_BOOTSTRAP):
         "family_Q": Q.tolist(),
         "family_Q_p_chi2": [float(chi2.sf(q, N_FAMILY)) for q in Q],
         "family_Q_p_bootstrap": famq_boot_p,
+        "n_columns_excluding_null_95": n_excl_null,
         "maxT_p_values": maxt_p,
         "discovery_rule": "pre-registered: flag if min bootstrap maxT p < 0.05 "
                           "AND min bootstrap family-Q p < 0.05 (chi2_21 nominal retained "

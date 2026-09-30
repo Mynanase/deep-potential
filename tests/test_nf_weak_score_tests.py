@@ -174,6 +174,24 @@ def test_bootstrap_iid_matches_direct_resampling():
     assert np.allclose(bt.std(axis=0), expected_sd, rtol=0.15)
 
 
+def test_maxT_statistic_is_distance_from_null_not_from_bootstrap_mean():
+    rng = np.random.default_rng(28)
+    n_boot, k = 4000, 5
+    boot = rng.standard_normal((n_boot, k)) * 0.01
+    t_null = np.zeros(k)
+    t_far = np.full(k, 0.03)  # 3 sd from the null value
+    _, stat_null = t2.maxT_from_bootstrap(boot, t_null)
+    _, stat_far = t2.maxT_from_bootstrap(boot, t_far)
+    zboot, _ = t2.maxT_from_bootstrap(boot, t_null)
+    crit = np.quantile(np.max(zboot, axis=1), 0.95)
+    # regression: the observed statistic must be |t|/sd (null value 0), not
+    # |t - mean(boot)|/sd -- the vacuous form that produced p = 1.0 on real data
+    assert np.max(stat_null) < 0.5
+    assert np.max(stat_far) > 2.8
+    assert np.max(stat_far) > crit
+    assert np.max(stat_null) < crit
+
+
 def test_real_stage_refuses_hash_mismatch_and_skips_when_absent(tmp_path):
     assert t2.real_estimate(tmp_path / "empty", tmp_path / "reg.json",
                             tmp_path / "out") is None
