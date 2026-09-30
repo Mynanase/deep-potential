@@ -50,7 +50,7 @@ echo "[t2.runner] stage=$STAGE py=$PY out=$OUT"
 
 echo "[t2.runner] === calibration (gates enforced) ==="
 set +e
-timeout "$CAL_BUDGET_S" "$PY" -u scripts/auriga/nf_weak_score_tests.py calibrate --out-dir "$OUT"
+"$PY" -u scripts/auriga/nf_weak_score_tests.py calibrate --out-dir "$OUT" --budget-s "$CAL_BUDGET_S"
 RC=$?
 set -e
 if [ "$RC" -ne 0 ]; then
@@ -61,8 +61,8 @@ fi
 if [ "$STAGE" = "full" ]; then
   echo "[t2.runner] === exploratory real-heldout stage (gated on certified T1 cache) ==="
   set +e
-  timeout "$REAL_BUDGET_S" "$PY" -u scripts/auriga/nf_weak_score_tests.py real \
-    --cache-dir "$CACHE_DIR" --out-dir "$OUT"
+  "$PY" -u scripts/auriga/nf_weak_score_tests.py real \
+    --cache-dir "$CACHE_DIR" --out-dir "$OUT" --budget-s "$REAL_BUDGET_S"
   RC=$?
   set -e
   if [ "$RC" -ne 0 ]; then

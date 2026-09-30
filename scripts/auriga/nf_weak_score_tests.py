@@ -47,6 +47,7 @@ model loading, no training, no server access.
 import argparse
 import hashlib
 import json
+import signal
 import time
 from pathlib import Path
 
@@ -697,6 +698,17 @@ def calibrate(out_dir, n_replicates=N_REPLICATES):
 # real-sample stage (EXPLORATORY; requires the certified T1 cache locally)
 # ---------------------------------------------------------------------------
 
+def _budget_alarm(budget_s, what):
+    """Portable wall-clock budget (macOS has no GNU timeout)."""
+    def handler(signum, frame):
+        raise TimeoutError(f"{what} exceeded budget of {budget_s}s")
+    signal.signal(signal.SIGALRM, handler)
+    signal.alarm(int(budget_s))
+
+
+def _clear_alarm():
+    signal.alarm(0)
+
 def real_estimate(cache_dir, registry_path, out_dir, n_bootstrap=N_BOOTSTRAP):
     import h5py
     from scipy.stats import chi2, norm
@@ -851,23 +863,33 @@ def main():
     p_cal = sub.add_parser("calibrate", help="mock calibration with gates")
     p_cal.add_argument("--out-dir", default="runs/nf-score-audit/t2-weak-score")
     p_cal.add_argument("--replicates", type=int, default=N_REPLICATES)
+    p_cal.add_argument("--budget-s", type=int, default=7200)
     p_real = sub.add_parser("real", help="exploratory real-heldout estimates "
                           "(skipped cleanly if the certified cache is not local)")
     p_real.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
     p_real.add_argument("--registry", default=T1_REGISTRY)
     p_real.add_argument("--out-dir", default="runs/nf-score-audit/t2-weak-score")
     p_real.add_argument("--bootstrap", type=int, default=N_BOOTSTRAP)
+    p_real.add_argument("--budget-s", type=int, default=3600)
     sub.add_parser("library", help="print the frozen test-library summary")
     args = parser.parse_args()
     if args.cmd == "library":
         print(json.dumps(library_summary(), indent=1))
         return 0
     if args.cmd == "calibrate":
-        metrics = calibrate(args.out_dir, n_replicates=args.replicates)
+        _budget_alarm(args.budget_s, "calibration")
+        try:
+            metrics = calibrate(args.out_dir, n_replicates=args.replicates)
+        finally:
+            _clear_alarm()
         return 0 if metrics["gates"]["all_ok"] else 3
-    metrics = real_estimate(args.cache_dir, args.registry, args.out_dir,
-                            n_bootstrap=args.bootstrap)
-    return 0 if metrics is not None else 0
+    _budget_alarm(args.budget_s, "real stage")
+    try:
+        metrics = real_estimate(args.cache_dir, args.registry, args.out_dir,
+                                n_bootstrap=args.bootstrap)
+    finally:
+        _clear_alarm()
+    return 0
 
 
 if __name__ == "__main__":
