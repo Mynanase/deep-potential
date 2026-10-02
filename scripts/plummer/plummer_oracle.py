@@ -162,7 +162,6 @@ def point_potential_unit_calibration(q: np.ndarray, phi_dimless: np.ndarray) -> 
     monopole = oracle_mass(eta) / np.maximum(r_q, 1.0e-15)
     # Calibrate with an explicit negative monopole basis: phi = c * (-M/r).
     coefficient = -np.dot(monopole, phi - np.mean(phi)) / np.dot(monopole, monopole - np.mean(monopole))
-    coefficient = np.linalg.lstsq(design, phi, rcond=None)[0][1]
     return {
         "potential_point_unit_dimless_per_code": float(coefficient),
         "potential_physical_unit_kms2": V_KMS**2 * float(coefficient),
