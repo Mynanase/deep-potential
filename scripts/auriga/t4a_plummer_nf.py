@@ -81,6 +81,10 @@ def load_training_options() -> dict:
     return {key: value for key, value in options.items() if key != "benchmarking_r0"}
 
 def train_conditional_nf(mock_path: Path, flow_dir: Path) -> dict:
+    if (flow_dir / "metadata.json").exists() and max(flow_dir.glob("flow-[0-9]*_loss.json"), key=lambda p: p.stat().st_mtime).exists():
+        model, history = fit_all.load_flow(flow_dir, checkpoint_index=-1, load_history=True)
+        return {"model": model, "history": history, "history_path": None,
+                "elapsed_s": 0.0, "options": load_training_options(), "reused_existing_training": True}
     with h5py.File(mock_path, "r") as handle: eta = np.asarray(handle["eta"], dtype=np.float32)
     data = {"eta": eta, "weights": np.ones(len(eta), dtype=np.float32)}; options = load_training_options(); started = time.time()
     model, history = fit_all.train_flow_conditional(data, str(flow_dir), **options)

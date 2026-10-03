@@ -17,6 +17,11 @@ test -x "$PY" || { echo "[t4a.runner] missing python $PY"; exit 2; }
 test -f "$MOCK_SRC" || { echo "[t4a.runner] missing frozen T3 mock $MOCK_SRC"; exit 2; }
 mkdir -p "$(dirname "$MOCK")"
 if [[ ! -f "$MOCK" ]]; then cp "$MOCK_SRC" "$MOCK"; fi
+TRAIN_SNAP=/home/qiutao/.orx/runs/dac804e7-9cac-490f-9771-5dfa998624da/repo/runs/nf-score-audit/t4a/nf
+if [[ -f "$TRAIN_SNAP/metadata.json" ]]; then
+  mkdir -p runs/nf-score-audit/t4a
+  cp -a "$TRAIN_SNAP" runs/nf-score-audit/t4a/
+fi
 "$PY" -m pytest tests/test_t4a_plummer_nf.py -q
 "$PY" -u scripts/auriga/t4a_plummer_nf.py \
   --mock "$MOCK" \
