@@ -78,7 +78,7 @@ def load_training_options() -> dict:
     for key in ("spatial_flow_opts", "conditional_velocity_flow_opts"):
         if options[key]["n_epochs"] != 256 or options[key]["batch_size"] != 4096: raise RuntimeError(f"refusing non-control epochs/batch size in {key}")
         if options[key]["vector_field_opts"] != {"type": "MLP", "width": 1024, "depth": 3}: raise RuntimeError(f"refusing non-w1024 vector field in {key}")
-    return options
+    return {key: value for key, value in options.items() if key != "benchmarking_r0"}
 
 def train_conditional_nf(mock_path: Path, flow_dir: Path) -> dict:
     with h5py.File(mock_path, "r") as handle: eta = np.asarray(handle["eta"], dtype=np.float32)
