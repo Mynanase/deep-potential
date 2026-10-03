@@ -26,7 +26,7 @@ class VelocityField(nn.Module):
 
     @nn.compact
     def __call__(self, t, x):
-        values = jnp.concatenate((jnp.atleast_1d(t.astype(x.dtype)), x))
+        values = jnp.concatenate((jnp.atleast_1d(t.astype(x[0].dtype)), x))
         for width in self.hidden_sizes:
             values = nn.tanh(nn.Dense(width)(values))
         return nn.Dense(self.dim, kernel_init=nn.initializers.zeros, bias_init=nn.initializers.zeros)(values)
