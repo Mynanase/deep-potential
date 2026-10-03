@@ -1,388 +1,195 @@
 #!/usr/bin/env python
-"""Train and qualify a full-data Plummer mock FFJORD for the score audit."""
-
+"""Train and qualify the project conditional NF on the frozen Plummer mock."""
 from __future__ import annotations
-
 import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-
 import h5py
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
 
-REPO = Path(__file__).resolve()
-while REPO.name and not (REPO / "scripts" / "auriga").is_dir() and REPO.parent != REPO:
-    REPO = REPO.parent
-sys.path.insert(0, str(REPO))
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "scripts" / "plummer"))
 sys.path.insert(0, str(REPO / "scripts" / "auriga"))
-
-from dpjax.flows.api import build_flow, init_flow, log_prob_apply, score_apply  # noqa: E402
-from dpjax.flows.ffjord import MockFFJORD, MockFFJORDConfig  # noqa: E402
-from dpjax.normalization import Normalizer, fit_normalizer  # noqa: E402
-from experiments.workflows.optimizers import build_optimizer  # noqa: E402
-from experiments.workflows.tree import count_parameters  # noqa: E402
+import fit_all  # noqa: E402
+import audit_df_constraints as adc  # noqa: E402
+from flow_ot_flow_matching_conditional import ConditionalPhaseSpaceFlow  # noqa: E402
 from plummer_oracle import (  # noqa: E402
-    A_KPC, DETECTION_BANDS_KPC, L_KPC, MOCK_SEED, N_MOCK, V_KMS,
-    B_CODE, analytic_band_fractions, make_oracle, oracle_score, write_mock,
+    A_KPC, B_CODE, DETECTION_BANDS_KPC, L_KPC, MOCK_SEED, N_MOCK, V_KMS,
+    analytic_band_fractions, oracle_score,
 )
 
-SCHEMA = "dpjax.nf-score-audit.t4a-mock-nf.v1"
-FLOW_CONFIG = {
-    "type": "ffjord",
-    "dim": 6,
-    "ffjord": {
-        "hidden_sizes": [256, 256, 256],
-        "n_blocks": 3,
-        "solver": "tsit5",
-        "rtol": 1e-4,
-        "atol": 1e-5,
-        "trace": "exact",
-    },
-}
-FLOW_SEED = 4
-SPLIT_SEED = 6
-DETECTION_TOLERANCE = 0.25
+SCHEMA = "dpjax.nf-score-audit.t4a-conditional-nf.v1"
+FROZEN_MOCK_SHA256 = "7e01175d5e3fc85d7ceddcd8e825dd2298018a31096414174b7d406e073e503d"
 UNITS = {
-    "eta": "dimensionless [q, p]",
-    "q": "x / 10 kpc",
-    "p": "v / 100 km/s",
-    "score": "grad_eta log f",
-    "normalizer": "affine training standardization; scores converted to input coordinates",
+    "eta": "dimensionless [q, p]", "q": "x / 10 kpc", "p": "v / 100 km/s",
+    "score": "grad_eta log f(q,p)", "log_prob": "log f(q,p) in input eta coordinates",
+    "flow_factorization": "log f(q,p)=log n(q)+log P(p|q)",
+    "selection": "none", "r_cut": "none",
 }
-
-
-def _log_prob_single(self, row):
-    from dpjax.flows.ffjord import log_prob_single
-    return log_prob_single(self, row)
-
-
-def _strict_flow(model, params):
-    """Return a model clone evaluated with strict ODE tolerances."""
-    from dataclasses import replace
-    strict_model = MockFFJORD(replace(model.cfg, rtol=1e-7, atol=1e-8))
-    with jax.enable_x64():
-        strict_params = jax.tree_util.tree_map(lambda x: x.astype(jnp.float64), params)
-    return strict_model, strict_params
-
+MODEL_CODE_FILES = [
+    "scripts/fit_all.py", "scripts/flow_matching_conditional.py",
+    "scripts/flow_ot_flow_matching_conditional.py", "scripts/flow_vector_fields.py",
+    "scripts/utils.py", "scripts/auriga/t4a_plummer_nf.py",
+]
 
 def sha256_file(path: Path) -> str:
-    hh = hashlib.sha256()
+    digest = hashlib.sha256()
     with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            hh.update(block)
-    return hh.hexdigest()
-
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 def verify_mock(path: Path) -> dict:
-    """Verify immutable full-data mock lineage and density gates."""
     with h5py.File(path, "r") as handle:
-        required = {"eta", "radius_kpc", "detection_band"}
-        if not required.issubset(handle.keys()):
-            raise RuntimeError(f"mock datasets missing: {sorted(required - set(handle.keys()))}")
-        eta = np.asarray(handle["eta"], dtype=np.float32)
-        attrs = dict(handle.attrs)
-    expected = {
-        "schema": "dpjax.plummer-oracle.t3.v1",
-        "reference_implementation_commit": "0c7e23f",
-        "selection": "none",
-        "r_cut": "none",
-        "a_kpc": A_KPC,
-        "n_mock": N_MOCK,
-        "seed": MOCK_SEED,
-        "length_scale_kpc": L_KPC,
-        "velocity_scale_kms": V_KMS,
-    }
+        keys = set(handle.keys()); eta = np.asarray(handle["eta"], dtype=np.float32); attrs = dict(handle.attrs)
+    if not {"eta", "radius_kpc", "detection_band"}.issubset(keys): raise RuntimeError("frozen mock datasets are incomplete")
+    expected = {"schema": "dpjax.plummer-oracle.t3.v1", "reference_implementation_commit": "0c7e23f",
+        "selection": "none", "r_cut": "none", "a_kpc": A_KPC, "b_code": B_CODE,
+        "n_mock": N_MOCK, "seed": MOCK_SEED, "length_scale_kpc": L_KPC, "velocity_scale_kms": V_KMS}
     for key, value in expected.items():
-        actual = attrs.get(key)
-        if isinstance(value, str):
-            matches = str(actual) == value
-        else:
-            matches = np.asarray(actual) == value
-        if not bool(np.all(matches)):
-            raise RuntimeError(f"mock lineage mismatch for {key}: {actual!r} != {value!r}")
-    if eta.shape != (N_MOCK, 6) or not np.all(np.isfinite(eta)):
-        raise RuntimeError("mock eta shape/finite check failed")
+        actual = attrs.get(key); matches = str(actual) == value if isinstance(value, str) else np.asarray(actual) == value
+        if not bool(np.all(matches)): raise RuntimeError(f"mock lineage mismatch: {key}={actual!r}, expected {value!r}")
+    file_hash = sha256_file(path)
+    if file_hash != FROZEN_MOCK_SHA256: raise RuntimeError(f"mock SHA256 mismatch: {file_hash} != {FROZEN_MOCK_SHA256}")
+    if eta.shape != (N_MOCK, 6) or not np.all(np.isfinite(eta)): raise RuntimeError("mock eta shape/finite gate failed")
     radius_kpc = np.linalg.norm(eta[:, :3], axis=1) * L_KPC
-    fractions = []
-    counts = []
-    for lo, hi in DETECTION_BANDS_KPC:
-        count = int(np.count_nonzero((radius_kpc >= lo) & (radius_kpc < hi)))
-        counts.append(count)
-        fractions.append(count / N_MOCK)
-    analytic = analytic_band_fractions(A_KPC)
-    rel_analytic = (np.asarray(fractions) - analytic) / analytic
-    if not np.all(np.abs(rel_analytic) <= 0.006):
-        raise RuntimeError(f"mock-vs-analytic density gate failed: {rel_analytic.tolist()}")
-    return {
-        "path": str(path),
-        "sha256": sha256_file(path),
-        "eta_sha256": hashlib.sha256(np.ascontiguousarray(eta).tobytes()).hexdigest(),
-        "n": int(len(eta)),
-        "selection": "none",
-        "r_cut": "none",
-        "detection_band_counts": counts,
-        "detection_band_fractions": fractions,
-        "analytic_detection_band_fractions": analytic.tolist(),
-        "relative_residual_vs_analytic": rel_analytic.tolist(),
-    }
+    counts = np.asarray([np.count_nonzero((radius_kpc >= lo) & (radius_kpc < hi)) for lo, hi in DETECTION_BANDS_KPC])
+    fractions = counts / N_MOCK; analytic = analytic_band_fractions(A_KPC); analytic_rel = (fractions - analytic) / analytic
+    if not np.all(np.abs(analytic_rel) <= 0.006): raise RuntimeError(f"mock density gate failed: {analytic_rel.tolist()}")
+    return {"path": str(path), "sha256": file_hash, "eta_sha256": hashlib.sha256(np.ascontiguousarray(eta).tobytes()).hexdigest(),
+        "n": N_MOCK, "selection": "none", "r_cut": "none", "detection_band_counts": counts.tolist(),
+        "detection_band_fractions": fractions.tolist(), "analytic_detection_band_fractions": analytic.tolist(),
+        "relative_residual_vs_analytic": analytic_rel.tolist()}
 
+def load_training_options() -> dict:
+    options = json.loads((REPO / "scripts/auriga/options.json").read_text())["df"]
+    expected = {"training_method": "FlowMatching", "seed": 0, "validation_frac": 0.25,
+        "time_scheduler_type": "uniform", "checkpoint_frequency_epochs": 25}
+    for key, value in expected.items():
+        if options.get(key) != value: raise RuntimeError(f"refusing non-control DF option {key}={options.get(key)!r}")
+    for key in ("spatial_flow_opts", "conditional_velocity_flow_opts"):
+        if options[key]["n_epochs"] != 256 or options[key]["batch_size"] != 4096: raise RuntimeError(f"refusing non-control epochs/batch size in {key}")
+        if options[key]["vector_field_opts"] != {"type": "MLP", "width": 1024, "depth": 3}: raise RuntimeError(f"refusing non-w1024 vector field in {key}")
+    return options
 
-def train(eta, normalizer, run_dir: Path, epochs: int, batch_size: int,
-          max_batches_per_epoch: int | None, seed: int = FLOW_SEED):
-    """Train the full population with a deterministic random split."""
-    model = build_flow(FLOW_CONFIG)
-    params = init_flow(model, jax.random.key(seed), FLOW_CONFIG)
-    eta_std = normalizer.transform(eta)
-    n_val = int(len(eta) * 0.1)
-    order = np.random.default_rng(SPLIT_SEED).permutation(len(eta))
-    val_rows, train_rows = order[:n_val], order[n_val:]
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        build_optimizer("radam", optax.warmup_cosine_decay_schedule(
-            0.0, 3e-3, max(1, int(0.1 * epochs * (max_batches_per_epoch or 1))),
-            max(2, epochs * (max_batches_per_epoch or 1)), 1e-4)),
-    )
-    opt_state = optimizer.init(params)
+def train_conditional_nf(mock_path: Path, flow_dir: Path) -> dict:
+    with h5py.File(mock_path, "r") as handle: eta = np.asarray(handle["eta"], dtype=np.float32)
+    data = {"eta": eta, "weights": np.ones(len(eta), dtype=np.float32)}; options = load_training_options(); started = time.time()
+    model, history = fit_all.train_flow_conditional(data, str(flow_dir), **options)
+    history_path = max(flow_dir.glob("flow-*_loss.json"), key=lambda p: p.stat().st_mtime)
+    return {"model": model, "history": history, "history_path": history_path, "elapsed_s": time.time() - started, "options": options}
 
-    @jax.jit
-    def eval_batch(p, rows):
-        return jnp.mean(-log_prob_apply(model, p, rows))
+def checkpoint_index(path: Path) -> int:
+    match = re.search(r"-(\d+)_model.eqx$", path.name)
+    if match is None: raise RuntimeError(f"cannot parse checkpoint index from {path}")
+    return int(match.group(1))
 
-    @jax.jit
-    def train_step(p, state, rows_std, rows_weight):
-        def loss(q):
-            log_prob = log_prob_apply(model, q, rows_std)
-            return jnp.mean(-log_prob)
-        loss_value, grads = jax.value_and_grad(loss)(p)
-        updates, state2 = optimizer.update(grads, state, p)
-        p2 = optax.apply_updates(p, updates)
-        return p2, state2, loss_value
+def load_and_bind_model(flow_dir: Path):
+    model, history = fit_all.load_flow(flow_dir, checkpoint_index=-1, load_history=True)
+    spatial_path = max(flow_dir.glob("flow_pos_only-*_model.eqx"), key=checkpoint_index)
+    combined_path = max(flow_dir.glob("flow-[0-9]*_model.eqx"), key=checkpoint_index)
+    spatial_ref, spatial_history = ConditionalPhaseSpaceFlow.load(flow_dir, load_index=checkpoint_index(spatial_path), load_prefix="flow_pos_only", load_history=True)
+    integrity = adc.flow_pair_integrity(model, spatial_ref)
+    if not integrity["bitwise_identical"]: raise RuntimeError(f"flow-pair integrity failed: {integrity}")
+    return model, history, {"spatial": spatial_path, "combined": combined_path, "spatial_history": spatial_history, "integrity": integrity}
 
-    metrics_path = run_dir / "metrics.csv"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    with open(metrics_path, "w", newline="") as handle:
-        handle.write("step,epoch,loss,val_loss\n")
-        rng = np.random.default_rng(seed)
-        step = 0
-        for epoch in range(epochs):
-            shuffled = train_rows[rng.permutation(len(train_rows))]
-            batch_starts = range(0, len(shuffled) - batch_size + 1, batch_size)
-            if max_batches_per_epoch is not None:
-                batch_starts = list(batch_starts)[:max_batches_per_epoch]
-            for start in batch_starts:
-                rows = eta_std[shuffled[start:start + batch_size]]
-                params, opt_state, loss_value = train_step(params, opt_state, rows, None)
-                if step % 50 == 0:
-                    val_sample = eta_std[val_rows[:2048]]
-                    val_loss = float(jax.device_get(eval_batch(params, val_sample)))
-                    loss_scalar = float(jax.device_get(loss_value))
-                    handle.write(f"{step},{epoch},{loss_scalar:.9g},{val_loss:.9g}\n")
-                    handle.flush()
-                step += 1
-    checkpoint = run_dir / "final.mpck"
-    save(checkpoint, {"params": params, "step": step, "schema": SCHEMA})
-    return {
-        "model": model,
-        "params": params,
-        "normalizer": normalizer,
-        "checkpoint": checkpoint,
-        "parameter_count": count_parameters(params),
-        "final_step": step,
-        "train_rows": len(train_rows),
-        "val_rows": len(val_rows),
-        "split_seed": SPLIT_SEED,
-        "flow_seed": seed,
-    }
+def fixed_probe_rows(eta): return adc.stratified_rows_by_radius(eta, 4096)
 
+def evaluate_flow(flow, rows, strict=False, batch=256):
+    source = adc._with_ode_tolerance(flow, 1e-7, 1e-8) if strict else flow
+    with adc._x64(strict):
+        fn = adc._grad_lnf_fn(source); lnf, score = adc.eval_batched(fn, jnp.asarray(rows), batch=batch)
+    return lnf, score
 
-def finite_difference_score(model, params, rows, step=1e-3):
-    """Central FD check of the cached score in input eta coordinates."""
-    rows = np.asarray(rows, dtype=np.float64)
-    out = np.empty_like(rows)
-    for i, row in enumerate(rows):
-        for component in range(6):
-            plus, minus = row.copy(), row.copy()
-            plus[component] += step
-            minus[component] -= step
-            lp_plus = float(jax.device_get(log_prob_apply(model, params, jnp.asarray(plus[None], dtype=params_dtype(params)))[0]))
-            lp_minus = float(jax.device_get(log_prob_apply(model, params, jnp.asarray(minus[None], dtype=params_dtype(params)))[0]))
-            out[i, component] = (lp_plus - lp_minus) / (2 * step)
-    return out
+def finite_difference_scores(flow_strict, rows, step=1e-4):
+    output = np.empty((len(rows), 6), dtype=np.float64); scalar = adc._lnf_fn_scalar(flow_strict)
+    with adc._x64(True):
+        for i, row in enumerate(rows):
+            output[i] = adc.central_fd_grad(lambda x: float(np.asarray(scalar(jnp.asarray(x)))), np.asarray(row, dtype=np.float64), step)
+    return output
 
+def relative_error(estimate, reference, floor): return np.abs(estimate - reference) / np.maximum(np.abs(reference), floor)
 
-def params_dtype(params):
-    leaves = jax.tree_util.tree_leaves(params)
-    return leaves[0].dtype if leaves else jnp.float32
+def analytic_ln_prob(eta):
+    normalization = np.log(24.0 * np.sqrt(2.0) / (7.0 * np.pi ** 3)) - 3.0 * np.log(B_CODE) - np.log(np.sqrt(1.0 / B_CODE))
+    relative_energy = 1.0 / np.sqrt(B_CODE ** 2 + np.sum(eta[:, :3] ** 2, axis=1)) - 0.5 * np.sum(eta[:, 3:] ** 2, axis=1)
+    return normalization + 3.5 * np.log(np.maximum(relative_energy, 1e-30))
 
+def compact_history(history):
+    return {key: {"first": values[0], "middle": values[len(values)//2], "final": values[-1], "n": len(values)} for key, values in history.items() if isinstance(values, list) and values}
 
-def analytic_log_prob(eta):
-    import math
-    sphere = make_oracle()
-    unit_log_norm = math.log(float(sphere.unit_plummer.df_norm))
-    log_rescale = math.log(float(sphere.df_rescale))
-    q, p = eta[:, :3], eta[:, 3:]
-    relative_energy = 1.0 / np.sqrt(B_CODE**2 + np.sum(q * q, axis=1)) - 0.5 * np.sum(p * p, axis=1)
-    return unit_log_norm + log_rescale + 3.5 * np.log(np.maximum(relative_energy, 1e-30))
-
-
-def qualification(model, params, normalizer, eta, mock_info, training_info, cache_dir: Path):
-    """Evaluate fixed points and write a T1-compatible hash-bound cache."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    probe = select_fixed_probes(eta)
-    rows = eta[probe]
-    rows_std = normalizer.transform(rows)
-    log_prob_f32, score_std_f32 = evaluate(model, params, rows_std, np.float32)
-    with jax.enable_x64():
-        strict_model, strict_params = _strict_flow(model, params)
-        log_prob_f64, score_std_f64 = evaluate(strict_model, strict_params, rows_std, np.float64)
-    analytic = oracle_score(rows.astype(np.float64))
-    score_f32 = score_std_f32 / normalizer.std[None, :]
-    score_f64 = score_std_f64 / normalizer.std[None, :]
-    precision_scale = np.percentile(np.abs(score_f64), 50, axis=0)
-    precision_rel = np.abs(score_f32 - score_f64) / np.maximum(np.abs(score_f64), precision_scale)
-    fit_scale = np.percentile(np.abs(analytic), 50, axis=0)
-    fit_rel = np.abs(score_f64 - analytic) / np.maximum(np.abs(analytic), fit_scale)
-    analytic_lp = analytic_log_prob(rows.astype(np.float64))
-    log_prob_abs_error = np.abs(log_prob_f64 - analytic_lp)
-    fd = finite_difference_score(strict_model, strict_params, rows[:8], step=1e-4)
-    fd_rel = np.abs(fd - score_f64[:8]) / np.maximum(np.abs(score_f64[:8]), fit_scale)
-
-    point_hash = hashlib.sha256()
-    point_hash.update(b"t4a_fixed_probes")
-    point_hash.update(np.asarray(probe, dtype=np.int64).tobytes())
-    point_hash.update(np.asarray(rows, dtype=np.float64).tobytes())
-    point_hash = point_hash.hexdigest()
-    points_path = cache_dir / "points_fixed_probes.h5"
-    write_h5(points_path, {"source_row": probe, "eta": rows}, {
-        "schema": SCHEMA, "point_order_sha256": point_hash, "units": json.dumps(UNITS)})
-    arrays_path = cache_dir / "arrays_fixed_probes.h5"
-    write_h5(arrays_path, {
-        "eta": rows, "lnf_f32": log_prob_f32, "score_f32": score_f32,
-        "lnf_x64strict": log_prob_f64, "score_x64strict": score_f64,
-        "analytic_score": analytic,
-        "analytic_log_prob": analytic_lp,
-    }, {
-        "schema": SCHEMA, "point_order_sha256": point_hash,
-        "precision": "f32 default ODE and f64 strict ODE",
-        "ode": json.dumps({"default": {"solver": "Tsit5", "rtol": 1e-4, "atol": 1e-5}, "strict": {"solver": "Tsit5", "rtol": 1e-7, "atol": 1e-8}}),
-        "units": json.dumps(UNITS),
-    })
-    checkpoint = training_info["checkpoint"]
-    manifest = {
-        "schema": SCHEMA,
-        "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "mock": mock_info,
-        "flow": {
-            "architecture": FLOW_CONFIG,
-            "seed": FLOW_SEED,
-            "split_seed": SPLIT_SEED,
-            "train_rows": training_info["train_rows"],
-            "val_rows": training_info["val_rows"],
-            "parameter_count": training_info["parameter_count"],
-            "final_step": training_info["final_step"],
-            "checkpoint": {"path": str(checkpoint), "sha256": sha256_file(checkpoint)},
-            "normalizer_mean": normalizer.mean.tolist(),
-            "normalizer_std": normalizer.std.tolist(),
-        },
+def qualify(mock_info, flow_dir: Path, cache_dir: Path) -> dict:
+    flow, history, checkpoints = load_and_bind_model(flow_dir)
+    with h5py.File(mock_info["path"], "r") as handle: eta = np.asarray(handle["eta"], dtype=np.float32)
+    rows_idx = fixed_probe_rows(eta); rows = eta[rows_idx].astype(np.float64)
+    lnf32, score32 = evaluate_flow(flow, rows, strict=False); lnf64, score64 = evaluate_flow(flow, rows, strict=True)
+    flow_strict = adc._with_ode_tolerance(flow, 1e-7, 1e-8); fd = finite_difference_scores(flow_strict, rows[:8])
+    vg_pos, vg_vel = adc._split_fns(flow)
+    with adc._x64(False):
+        ln_pos, grad_pos = adc.eval_batched(vg_pos, jnp.asarray(rows, dtype=jnp.float32), batch=256)
+        ln_vel, grad_vel = adc.eval_batched(vg_vel, jnp.asarray(rows, dtype=jnp.float32), batch=256)
+    split_score = adc.combine_split_grads(grad_pos, grad_vel)
+    split_identity = relative_error(split_score, score32, np.percentile(np.abs(score32), 50, axis=0))
+    split_log_identity = np.abs(ln_pos + ln_vel - lnf32); analytic_score = oracle_score(rows); analytic_log_prob = analytic_ln_prob(rows)
+    score_floor = np.percentile(np.abs(analytic_score), 50, axis=0)
+    precision_rel = relative_error(score32, score64, np.percentile(np.abs(score64), 50, axis=0))
+    fit_rel = relative_error(score64, analytic_score, score_floor); fd_rel = relative_error(fd, score64[:8], score_floor)
+    log_prob_error = np.abs(lnf64 - analytic_log_prob); point_hash = adc.point_order_hash("t4a_fixed_probes", rows_idx, rows)
+    cache_dir.mkdir(parents=True, exist_ok=True); points_path = cache_dir / "points_fixed_probes.h5"; arrays_path = cache_dir / "arrays_fixed_probes.h5"
+    write_h5(points_path, {"source_row": rows_idx, "eta": rows}, {"schema": SCHEMA, "point_set": "fixed_probes", "point_order_sha256": point_hash, "units": json.dumps(UNITS), "mock_sha256": mock_info["sha256"]})
+    write_h5(arrays_path, {"eta": rows, "lnf_f32": lnf32, "score_f32": score32, "lnf_x64strict": lnf64,
+        "score_x64strict": score64, "analytic_ln_prob": analytic_log_prob, "analytic_score": analytic_score},
+        {"schema": SCHEMA, "point_set": "fixed_probes", "point_order_sha256": point_hash,
+         "precision": "f32 default ODE and f64 strict ODE", "ode": json.dumps({"default": {"solver": "Tsit5", "rtol": 1e-4, "atol": 1e-5}, "strict": {"solver": "Tsit5", "rtol": 1e-7, "atol": 1e-8}}), "units": json.dumps(UNITS)})
+    checkpoint_hashes = {name: {"path": str(path), "sha256": sha256_file(path)} for name, path in checkpoints.items() if isinstance(path, Path)}
+    code_hashes = {rel: sha256_file(REPO / rel) for rel in MODEL_CODE_FILES}
+    gates = {"mock_lineage": True, "full_data": True, "density": True,
+        "finite": bool(np.all(np.isfinite(score32)) and np.all(np.isfinite(score64))), "flow_pair_bitwise": bool(checkpoints["integrity"]["bitwise_identical"]),
+        "precision_score_median_rel": float(np.median(precision_rel)), "precision_score_p99_rel": float(np.percentile(precision_rel, 99)),
+        "fd_score_median_rel": float(np.median(fd_rel)), "fd_score_p99_rel": float(np.percentile(fd_rel, 99)),
+        "split_score_median_rel": float(np.median(split_identity)), "split_score_max_abs": float(np.max(np.abs(split_score - score32))),
+        "split_log_prob_max_abs": float(np.max(split_log_identity)), "score_fit_median_rel": float(np.median(fit_rel)),
+        "score_fit_p99_rel": float(np.percentile(fit_rel, 99)), "log_prob_fit_median_abs": float(np.median(log_prob_error)),
+        "log_prob_fit_p99_abs": float(np.percentile(log_prob_error, 99))}
+    manifest = {"schema": SCHEMA, "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(), "mock": mock_info,
+        "model": {"kind": "project ConditionalPhaseSpaceFlow (spatial + conditional velocity)", "factorization": "log n(q) + log P(p|q)",
+                  "training_options": load_training_options(), "checkpoint_sha256": checkpoint_hashes,
+                  "model_code_sha256": code_hashes, "flow_pair_integrity": checkpoints["integrity"], "final_history": compact_history(history)},
         "points": {"path": str(points_path), "sha256": sha256_file(points_path), "point_order_sha256": point_hash},
         "arrays": {"path": str(arrays_path), "sha256": sha256_file(arrays_path), "point_order_sha256": point_hash},
-        "gates": {
-            "mock_lineage": True,
-            "full_data": bool(mock_info["n"] == N_MOCK and mock_info["selection"] == "none"),
-            "density": True,
-            "finite": bool(np.all(np.isfinite(score_f32)) and np.all(np.isfinite(score_f64))),
-            "precision_score_median_rel": float(np.median(precision_rel)),
-            "precision_score_p99_rel": float(np.percentile(precision_rel, 99)),
-            "fd_score_median_rel": float(np.median(fd_rel)),
-            "fd_score_p99_rel": float(np.percentile(fd_rel, 99)),
-            "score_fit_median_rel": float(np.median(fit_rel)),
-            "score_fit_p99_rel": float(np.percentile(fit_rel, 99)),
-            "log_prob_fit_median_abs": float(np.median(log_prob_abs_error)),
-            "log_prob_fit_p99_abs": float(np.percentile(log_prob_abs_error, 99)),
-        },
-        "units": UNITS,
-    }
-    manifest_path = cache_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
+        "numerics": {"ode": {"default": {"solver": "Tsit5", "rtol": 1e-4, "atol": 1e-5}, "strict": {"solver": "Tsit5", "rtol": 1e-7, "atol": 1e-8}}, "trace": "exact production path; no Hutchinson estimator"},
+        "gates": gates, "units": UNITS}
+    gates["all_ok"] = bool(all(gates[key] for key in ("mock_lineage", "full_data", "density", "finite", "flow_pair_bitwise"))
+        and gates["precision_score_median_rel"] < 0.01 and gates["precision_score_p99_rel"] < 0.05
+        and gates["fd_score_median_rel"] < 0.05 and gates["fd_score_p99_rel"] < 0.20
+        and gates["split_score_median_rel"] < 1e-6 and gates["split_score_max_abs"] < 1e-4
+        and gates["split_log_prob_max_abs"] < 1e-4 and gates["score_fit_median_rel"] < 0.25 and gates["score_fit_p99_rel"] < 1.0)
+    (cache_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
     return manifest
-
-
-def select_fixed_probes(eta):
-    radius = np.linalg.norm(eta[:, :3], axis=1)
-    order = np.argsort(radius, kind="stable")
-    return order[np.linspace(0, len(order) - 1, 4096).round().astype(int)]
-
-
-def evaluate(model, params, rows_std, dtype):
-    rows = jnp.asarray(rows_std, dtype=dtype)
-    log_prob, score = [], []
-    for start in range(0, len(rows), 256):
-        batch = rows[start:start + 256]
-        lp = log_prob_apply(model, params, batch)
-        def single(row):
-            return log_prob_apply(model, params, row[None])[0]
-        score.append(jax.vmap(jax.grad(single))(batch))
-        log_prob.append(lp)
-    return (np.concatenate([np.asarray(x) for x in log_prob]),
-            np.concatenate([np.asarray(x) for x in score]))
-
 
 def write_h5(path: Path, arrays: dict, attrs: dict) -> str:
     tmp = path.with_suffix(path.suffix + ".tmp")
     with h5py.File(tmp, "w") as handle:
-        for key, value in attrs.items():
-            handle.attrs[key] = value
-        for key, value in arrays.items():
-            handle.create_dataset(key, data=value, compression="gzip", compression_opts=4)
-    tmp.rename(path)
-    return sha256_file(path)
-
+        for key, value in attrs.items(): handle.attrs[key] = value
+        for key, value in arrays.items(): handle.create_dataset(key, data=value, compression="gzip", compression_opts=4)
+    tmp.rename(path); return sha256_file(path)
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mock", type=Path, required=True)
-    parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--cache-dir", type=Path, required=True)
-    parser.add_argument("--epochs", type=int, default=32)
-    parser.add_argument("--batch-size", type=int, default=8192)
-    parser.add_argument("--max-batches-per-epoch", type=int, default=None)
-    args = parser.parse_args()
-    started = time.time()
-    if not args.mock.exists():
-        write_mock(args.mock)
-    mock_info = verify_mock(args.mock)
-    with h5py.File(args.mock, "r") as handle:
-        eta = np.asarray(handle["eta"], dtype=np.float32)
-    normalizer = fit_normalizer(eta)
-    training = train(eta, normalizer, args.run_dir, args.epochs, args.batch_size, args.max_batches_per_epoch)
-    manifest = qualification(training["model"], training["params"], normalizer, eta, mock_info, training, args.cache_dir)
-    gates = manifest["gates"]
-    gates["all_ok"] = bool(
-        gates["mock_lineage"] and gates["full_data"] and gates["density"]
-        and gates["finite"] and gates["precision_score_median_rel"] < 0.05
-        and gates["precision_score_p99_rel"] < 0.20 and gates["fd_score_median_rel"] < 0.05
-        and gates["fd_score_p99_rel"] < 0.20 and gates["score_fit_median_rel"] < 0.25
-        and gates["score_fit_p99_rel"] < 1.0
-    )
-    manifest["elapsed_s"] = time.time() - started
+    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mock", type=Path, required=True)
+    parser.add_argument("--run-dir", type=Path, required=True); parser.add_argument("--cache-dir", type=Path, required=True)
+    args = parser.parse_args(); started = time.time(); mock_info = verify_mock(args.mock)
+    training = train_conditional_nf(args.mock, args.run_dir); manifest = qualify(mock_info, args.run_dir, args.cache_dir)
+    manifest["training_elapsed_s"] = training["elapsed_s"]; manifest["elapsed_s"] = time.time() - started
     (args.cache_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
-    print("[t4a.summary] " + json.dumps({
-        "mock_sha256": mock_info["sha256"], "checkpoint_sha256": manifest["flow"]["checkpoint"]["sha256"],
-        "final_step": training["final_step"], "gates": gates}, indent=2))
-    if not gates["all_ok"]:
-        return 2
-    return 0
+    print("[t4a.summary] " + json.dumps({"mock_sha256": mock_info["sha256"], "checkpoints": manifest["model"]["checkpoint_sha256"], "gates": manifest["gates"], "elapsed_s": manifest["elapsed_s"]}, indent=2))
+    return 0 if manifest["gates"]["all_ok"] else 2
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__": raise SystemExit(main())
