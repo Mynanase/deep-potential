@@ -134,7 +134,7 @@ def qualify(mock_info, flow_dir: Path, cache_dir: Path) -> dict:
     flow_strict = adc._with_ode_tolerance(flow, 1e-7, 1e-8); fd = finite_difference_scores(flow_strict, rows[:8])
     vg_pos, vg_vel = adc._split_fns(flow)
     with adc._x64(False):
-        ln_pos, grad_pos = adc.eval_batched(vg_pos, jnp.asarray(rows, dtype=jnp.float32), batch=256)
+        ln_pos, grad_pos = adc.eval_batched(vg_pos, jnp.asarray(rows[:, :3], dtype=jnp.float32), batch=256)
         ln_vel, grad_vel = adc.eval_batched(vg_vel, jnp.asarray(rows, dtype=jnp.float32), batch=256)
     split_score = adc.combine_split_grads(grad_pos, grad_vel)
     split_identity = relative_error(split_score, score32, np.percentile(np.abs(score32), 50, axis=0))
