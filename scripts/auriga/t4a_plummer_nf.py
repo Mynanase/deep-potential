@@ -122,6 +122,10 @@ def finite_difference_scores(flow_strict, rows, step=1e-4):
 
 def relative_error(estimate, reference, floor): return np.abs(estimate - reference) / np.maximum(np.abs(reference), floor)
 
+def point_order_hash(name, ids, eta):
+    digest = hashlib.sha256(); digest.update(name.encode()); digest.update(np.asarray(ids, dtype=np.int64).tobytes()); digest.update(np.asarray(eta, dtype=np.float64).tobytes())
+    return digest.hexdigest()
+
 def analytic_ln_prob(eta):
     normalization = np.log(24.0 * np.sqrt(2.0) / (7.0 * np.pi ** 3)) - 3.0 * np.log(B_CODE) - np.log(np.sqrt(1.0 / B_CODE))
     relative_energy = 1.0 / np.sqrt(B_CODE ** 2 + np.sum(eta[:, :3] ** 2, axis=1)) - 0.5 * np.sum(eta[:, 3:] ** 2, axis=1)
@@ -146,7 +150,7 @@ def qualify(mock_info, flow_dir: Path, cache_dir: Path) -> dict:
     score_floor = np.percentile(np.abs(analytic_score), 50, axis=0)
     precision_rel = relative_error(score32, score64, np.percentile(np.abs(score64), 50, axis=0))
     fit_rel = relative_error(score64, analytic_score, score_floor); fd_rel = relative_error(fd, score64[:8], score_floor)
-    log_prob_error = np.abs(lnf64 - analytic_log_prob); point_hash = adc.point_order_hash("t4a_fixed_probes", rows_idx, rows)
+    log_prob_error = np.abs(lnf64 - analytic_log_prob); point_hash = point_order_hash("t4a_fixed_probes", rows_idx, rows)
     cache_dir.mkdir(parents=True, exist_ok=True); points_path = cache_dir / "points_fixed_probes.h5"; arrays_path = cache_dir / "arrays_fixed_probes.h5"
     write_h5(points_path, {"source_row": rows_idx, "eta": rows}, {"schema": SCHEMA, "point_set": "fixed_probes", "point_order_sha256": point_hash, "units": json.dumps(UNITS), "mock_sha256": mock_info["sha256"]})
     write_h5(arrays_path, {"eta": rows, "lnf_f32": lnf32, "score_f32": score32, "lnf_x64strict": lnf64,
