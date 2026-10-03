@@ -1,3 +1,5 @@
+> 历史记录：保留当时的路径、命令和结论，仅供回溯。当前项目入口见 [README](../../README.md)。
+
 # 组会汇报讲稿：从恒星相空间快照推断星系引力势
 
 **项目**：dpjax / deep-potential × Auriga Halo12

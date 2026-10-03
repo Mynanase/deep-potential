@@ -1,3 +1,5 @@
+> 历史记录：保留当时的路径、命令和结论，仅供回溯。当前项目入口见 [README](../../README.md)。
+
 # Phase-1 阶段总结（dpjax × Auriga Halo12，orx 时代）
 
 **区间**：2026-09-17（orx 导入，baseline `codex/upstream-sync-2026-09-12`）→ 2026-09-22

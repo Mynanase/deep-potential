@@ -156,3 +156,7 @@ halo12_package.tar.gz
 
 # Research notes (private, moved from flow-diff)
 .note/
+
+# Local paper caches and Finder metadata
+.arc/
+.DS_Store

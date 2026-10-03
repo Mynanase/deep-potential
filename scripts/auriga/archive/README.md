@@ -3,7 +3,7 @@
 **定位变化**:本目录前身是 `keep/`(Phase-1 长期保留诊断)。2026-09-22 绘图层
 重构后,活跃资产已提升到 `scripts/` 通用层与 `scripts/auriga/truth_products.py`,
 本目录成为**纯归档**:不再接入任何流程,保留出处与替代者,可随时按 git 历史或
-本表追溯。原 keep 清单见 `docs/phase2-premerge-survey.md` §D(历史账,不改写)。
+本表追溯。原 keep 清单见 `docs/history/phase2-premerge-survey.md` §D(历史账,不改写)。
 
 ## 退役→替代 映射(2026-09-22 重构)
 

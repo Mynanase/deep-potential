@@ -1,3 +1,5 @@
+> 历史记录：保留当时的路径、命令和结论，仅供回溯。当前项目入口见 [README](../../README.md)。
+
 # 分支说明(Branch Landscape)
 
 维护日期:2026-09-17。所有实验分支均从 `master@c8bc5f7`(上游 README "code is now mostly JAX")分出。
