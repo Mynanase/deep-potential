@@ -1,7 +1,6 @@
-# Auriga Halo12
+# Auriga / Plummer scripts
 
-当前配置、运行入口和源码导航见仓库 [README](../../README.md)。
-生产命令由 OpenResearch 管理，配置在 [options.json](options.json)。
-
-2026-09 的迁移过程、手动运行示例和当时的验证记录保存在
-[历史迁移文档](../../docs/history/halo12-migration-20260912.md)，仅供回溯。
+当前入口见仓库 [README](../../README.md)，结果与待解决问题见 [进展](../../docs/progress.md)。
+参数以代码和 `options.json` 为准；按任务选择 runner。
+T1/T2 的旧 manifest 与 cache registry 保存在 `docs/history/nf-score-audit/`，仅用于历史回放。
+旧操作手册保存在 [history](../../docs/history/halo12-migration-20260912.md)，不作为每次任务的执行清单。

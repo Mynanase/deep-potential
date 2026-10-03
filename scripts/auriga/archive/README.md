@@ -38,3 +38,9 @@
 
 **共同改动**:keep→archive 目录名变更(深度不变,REPO/parents 路径无需改);
 自 `auriga/` 根移入的 5 件已把 `parents[1..2]` 修正为归档深度,保持原地可编译。
+
+## 已结束研究阶段的 runner
+
+`run_nf_score_cache.sh`、`run_nf_weak_score_tests.sh`、`run_round1_osc_adjudication.sh`、
+`run_resolution_convergence.sh` 是旧阶段的命令记录，不在当前流程中调用；其路径与输入反映当时快照。
+可复用的计算实现仍在 `scripts/auriga/`。当前任务入口见根 README 与 `docs/progress.md`。

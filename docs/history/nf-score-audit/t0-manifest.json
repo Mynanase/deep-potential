@@ -1,0 +1,379 @@
+{
+  "schema": "dpjax.nf-score-audit.t0-manifest.v1",
+  "frozen_date": "2026-09-30",
+  "corrected_date": "2026-09-30 (conclusion 2 rewritten after user flagged per-particle potential in raw data; verified same day)",
+  "plan": {
+    "doc": "docs/nf-score-audit-plan.md",
+    "commit": "e0edb21",
+    "experiment_node": "45b0446d-0406-4606-8894-574c2a5ddff5",
+    "branch": "orx/outer-region-nf-score-chain-audit-line"
+  },
+  "control": {
+    "name": "innerA lambda=1 (Phase-2 control)",
+    "archived_project": "dpjax-phase1 07d8ee01-e05b-4bc1-a17a-ebfd5cf76b56",
+    "training_run": "2b32eb04-d8bf-4c03-a3a9-98d0f0db1192",
+    "experiment_node": "9788e6de (old project)",
+    "source_commit": "5f76faa",
+    "source_branch": "orx/inner-band-fix-a-radius-balanced-prior-grid",
+    "server_run_dir": "/home/qiutao/.orx/runs/2b32eb04-d8bf-4c03-a3a9-98d0f0db1192/repo/runs/orx",
+    "single_flow_pair": true,
+    "checkpoints_sha256": {
+      "models/df/flow/flow_pos_only-10_model.eqx": "8537fc9bc3ca1b47997dc24195b324f78627204df8c65ded2367bbe35404b4d8",
+      "models/df/flow/flow-21_model.eqx": "6120b651d921feef3e57d75b2cbdc8331c72e94ce4722bf8091bce95c31cfd5c",
+      "models/Phi/potential-10_model.eqx": "2fac6efb1769318d6f90b53d8f25473c63c03f6cfb62b0e6bf55a73b19a37c30",
+      "runs/orx/options.json": "198146d5edc41d0832597558a6ba10e1031378d97e42bc8c8173390c55ac745b"
+    },
+    "deployed_checkpoint_rule": "fixed 256-epoch cosine schedule, final checkpoint deployed (no early stopping, no best-val selection)",
+    "anchors": {
+      "dm_band_rel_err_pct": {
+        "2-10": 1.25,
+        "10-30": 5.95,
+        "30-50": 8.76,
+        "50-70": 8.14,
+        "run": "313e0cc7-0b36-44df-bc6b-3ace349cebf5"
+      },
+      "f_hi_pct": {
+        "truth_lt10": 8.8,
+        "truth_lt5": 2.3,
+        "innerA_lt10": 10.7,
+        "innerA_lt5": 2.8,
+        "run": "e4d4db5d-9993-49c6-ab3d-3b9090c35520"
+      },
+      "round1_spectrum": {
+        "residual_peak_kpc": 69.5,
+        "model_residual_variance_ratio_vs_truth": 22,
+        "run": "e66ac2dd-9a53-4a2f-bddb-9b8cfb77b47f"
+      },
+      "negativity_sobol_band_pct": {
+        "2-10": 1.9,
+        "10-30": 2.4,
+        "30-70": 2.3,
+        "run": "2b32eb04-d8bf-4c03-a3a9-98d0f0db1192"
+      }
+    }
+  },
+  "population": {
+    "file": "/localdisk/kosmos/my-deep-potential/data/auriga/halo12-clean-smooth.h5",
+    "n": 1619615,
+    "keys": [
+      "eta",
+      "mass",
+      "particle_id",
+      "source_index",
+      "weights"
+    ],
+    "attrs": {
+      "shuffle_seed": 0,
+      "weighting": "mass",
+      "train_r_max_kpc": 75,
+      "phi_r_min_kpc": 1,
+      "phi_r_max_kpc": 70,
+      "length_scale_kpc": 10,
+      "velocity_scale_kms": 100,
+      "cleaning_registry_set": "union",
+      "cleaning_removed_count": 33354,
+      "cleaning_removed_fraction": 0.020178236857436527,
+      "cleaning_registry_sha256": "98faa41e6345de1bb8fb07cc8ba9ebdbc4d6cd389850194f0c6ca384e1ffc9bf",
+      "source_file": "halo12_all_mass_clean_outer_clump_smooth.h5",
+      "frame": "principal-axis Tiv_star, phi0=-40deg"
+    },
+    "eta_domain": {
+      "r_in_q": 0.1,
+      "r_out_q": 7,
+      "phi_training_domain_kpc": [
+        1,
+        70
+      ]
+    }
+  },
+  "true_potential_assets": {
+    "clean_smooth_source_potential": {
+      "file": "/localdisk/kosmos/my-deep-potential/data/auriga/halo12_all_mass_clean_outer_clump_smooth.h5",
+      "dataset": "potential",
+      "dtype": "float32",
+      "n": 1619615,
+      "join": "particle_id",
+      "carried_into_training_file": false,
+      "note": "prepare_data.py drops the column when producing halo12-clean-smooth.h5"
+    },
+    "raw_star_source": {
+      "file": "/localdisk/kosmos/my-deep-potential/data/halo_12_stars.hdf5",
+      "dataset": "PartType4/Potential",
+      "dtype": "float64",
+      "n": 1652969
+    },
+    "raw_snapshot": {
+      "dir": "/localdisk/kosmos/my-deep-potential/data/halo12_raw/snapdir_127",
+      "n_files": 8,
+      "potential_blocks": ["PartType0", "PartType1", "PartType4"],
+      "acceleration_blocks": "NONE in snapshot output (verified block lists)"
+    },
+    "unit_status": "UNVERIFIED - halo12_all_mass.h5 attrs carry acceleration_unit=unknown; calibrate against a monopole model / known M_total and the starframe transform before audit use; potential is a scalar (frame-rotation invariant) but gradients must be taken in the principal-axis frame; use differences/gradients, not the simulation absolute zero point",
+    "implication": "point-sample true potential (total matter, simulation-softened) exists at every clean-smooth particle; a 3D field product does not exist; alpha*(q) requires local gradient estimation from point samples with error propagation (sparse outer region = hardest case). Plan appendix A5 upgrades from unavailable to CONDITIONALLY feasible after unit calibration + gradient-error quantification."
+  },
+  "mock_design": {
+    "reference_implementation": "codex/standalone-run-architecture @ 0c7e23f (commit object readable in THIS repo; branch ref lives in the archived dpjax-phase1 repo). Provides: experiments/datasets/plummer.py + experiments/gendata_plummer.py (pure-CPU generator with train/test split), experiments/workflows/score_sources.py (FLOW vs PLUMMER_ANALYTIC score-source switch at the training entry - the exact P00/P11 pattern), configs/runs/plummer_full_oracle.yaml (Phi reuses flow support/normalizer; the pattern to port), configs/models/df/plummer_ffjord_v1.yaml, tests/test_plummer.py + tests/test_score_sources.py. Port this machinery; do not invent a new mock framework. The legacy plummer_rcut_{cut,full}.yaml configs are NOT ported - this line uses full data only.",
+    "legacy_data_disqualified": "server data/plummer_n*.h5 carry eta only with NO attrs/lineage (e.g. plummer_n524288_rcut1.0_train.h5 actually holds 336299 rows) - reference only, never valid inputs; regenerate under this contract with recorded lineage",
+    "density_matching": {
+      "requirement": "detection region q in [3,7] (30-70 kpc): mock band mass fractions match clean-smooth measured fractions within 25% per band, so per-band counts and number densities match at equal N",
+      "auriga_reference": {
+        "source": "control run 2b32eb04 log, S1 pool masses (verified 2026-09-30)",
+        "bands_kpc": [[30, 45], [45, 60], [60, 70]],
+        "mass_fractions": [0.032, 0.0175, 0.0058],
+        "number_densities_per_kpc3_at_N_1619615": [0.193, 0.0542, 0.0177],
+        "weighting": "mass-weighted (the DF target); equal-mass mock makes number fractions = mass fractions; Auriga number-vs-mass fractions differ slightly by band (documented, not refitted)"
+      },
+      "frozen_params": {
+        "a_kpc": 6.8,
+        "b_code_units": 0.68,
+        "N_mock": 1619615,
+        "fit": "single-parameter Plummer fit: band fraction = m(r2/a)-m(r1/a), m(x)=x^3/(1+x^2)^{3/2}, equal relative weights over the three detection bands",
+        "predicted_fractions": [0.0391, 0.01434, 0.00497],
+        "residuals_rel": [0.222, -0.181, -0.143],
+        "tolerance": "|rel resid| <= 0.25 per detection band (analytic); regenerated histograms must verify within tolerance after binomial noise and sampler discretization"
+      },
+      "inner_region_note": "at a=6.8 the same Plummer mismatches inner bands badly (1-2 kpc -86%, 10-20 kpc +43%, 20-30 kpc +70%): the mock is an analog of the DETECTION REGION ONLY, never a global Auriga profile; all transferability claims are region-limited",
+      "support_note": "the full mock naturally spans beyond q=7 (~1.4% of mass) and below q=0.1 (~0.3%); those particles REMAIN in the DF population and DF training. The Phi stage keeps the production domain convention (1-70 kpc) as a property of the potential-training contract, NOT a data cut; the T4 card declares the constraint-pool edges explicitly"
+    },
+    "rcut_excluded": "r-cut/selection variants are EXCLUDED from this line (user decision 2026-09-30): the mock is the FULL Plummer sphere - no radial cut, no selection function; the oracle score is always the full-Plummer analytic score and no selection correction applies",
+    "self_consistency_caveat": "the mock is a self-consistent Plummer (Phi from its own mass); Auriga's potential is total-matter dominated (M_total/M_star ~ 8.7), so velocity scales at fixed r differ - documented limitation; never transfer absolute error bounds from Plummer to Auriga"
+  },
+  "splits_and_selection": {
+    "df_split": {
+      "rule": "utils.split_data: val = FIRST int(0.25*n) rows of seed-0 shuffled file",
+      "n_val": 404903,
+      "n_train": 1214712,
+      "role": "monitoring only"
+    },
+    "df_selection_history": "no early stopping / no best-val checkpoint; BUT architecture (w1024, FlowMatching), S1 quotas, innerA prior design were chosen via phase-1/2 comparisons on the overlapping population (halo12-clean.h5 capacity runs, inner-band adjudications); cleaning rules (union registry incl. smooth65/84) designed on the full population",
+    "phi_split": {
+      "rule": "first int(0.25*n_samples) of S1 flow samples",
+      "n_samples": 262145,
+      "n_val": 65536,
+      "caveat": "S1 row order non-exchangeable (first/mid median r_q ~ 0.66, last ~ 6.43) so phi_val is a spatially biased subset, not a representative validation estimand"
+    },
+    "s1_sampling": {
+      "seed": 1,
+      "n_actual": 262145,
+      "n_options": 262144,
+      "note": "per-bin max(1,round) rounding; S1 WEIGHTS CHECK PASS",
+      "radial_bin_edges_q": [
+        0.1,
+        0.2,
+        1,
+        2,
+        3,
+        4.5,
+        6,
+        7
+      ],
+      "quotas": [
+        41943,
+        104858,
+        52429,
+        18350,
+        13107,
+        20972,
+        10486
+      ],
+      "importance_weights": {
+        "mean": 1,
+        "min": 0.1442,
+        "max": 1.398
+      }
+    },
+    "df_gradients_h5": {
+      "path": "runs/orx/data/df_gradients.h5 (control run dir)",
+      "keys": [
+        "dlnf_deta",
+        "dlnp_deta",
+        "eta",
+        "importance_weights",
+        "lnf",
+        "lnp",
+        "radial_bin_counts",
+        "radial_bin_edges",
+        "radial_bin_masses"
+      ],
+      "attrs": "EMPTY - cache lineage contract of plan section 4.2 is a real gap"
+    }
+  },
+  "conclusions": {
+    "qualified_confirmation_set": "NONE. clean-smooth val split (first 404903 rows) never entered gradient updates and was not used for checkpoint selection, but model-family/hyperparameter/S1/innerA choices and cleaning rules were developed on the overlapping population; halo12-clean-smooth-s11.h5 is the same membership reshuffled; removed-clump and all-mass populations are a different target. Auriga Stein tests are exploratory-grade in round 1.",
+    "true_potential_and_acceleration": "POINT-SAMPLE TRUE POTENTIAL EXISTS; NO PER-PARTICLE ACCELERATION; NO 3D FIELD PRODUCT. (1) clean-smooth source halo12_all_mass_clean_outer_clump_smooth.h5 carries per-particle potential (n=1619615, join by particle_id); raw snapshot snapdir_127 has Potential blocks for PartType0/1/4 and NO Acceleration block. (2) The 96^3 truth product (sha256 e02379fa96a5c0fd621e4327cdd661c703ca82d183a6ddd4c099e7f4c8cb407a, copies in run snapshots 313e0cc7/e66ac2dd) was built from positions+masses only: density grids + spherical monopole phi_sphere_mean(24) + phi_dirs(24,2048) + phi_slice(240x240). (3) Non-spherical true-potential information is therefore available AT PARTICLE POSITIONS, but reading alpha*(q) needs local gradient estimation with error propagation (outer sparse region = hardest case), and units are unverified (adapter says acceleration_unit=unknown). Appendix A5 conditionally feasible; Auriga force-side primary conclusions remain identifiability/sensitivity/Phi-consistency; grid-truth resolution policy >= 10 kpc quantitative / < 5 kpc diagnostic unchanged.",
+    "compatible_mock_nf": "NO USABLE TRAINED MOCK NF. Legacy server files plummer_n*.h5 are eta-only without lineage (see mock_design.legacy_data_disqualified) and no mock checkpoints are pinned anywhere; mock_dust.py is an unrelated HEALPix dust mock. However the reference implementation line at 0c7e23f provides the generator, analytic-score source switch, oracle/rcut configs and tests to port. T4 still requires a NEW mock DF training node with explicit budget."
+  },
+  "reuse_inventory": [
+    {
+      "entry": "scripts/auriga/audit_df_constraints.py",
+      "status": "adapt",
+      "reason": "bound to 2026-09-15 runs/halo12-baseline df_gradients and engineering thresholds; method (same-point score, FD scan, ODE tolerance, local SVD) reusable; add alpha=-grad phi conversion, fixed probes, weighted projection, stratification"
+    },
+    {
+      "entry": "tests/test_df_constraint_audit.py",
+      "status": "adapt",
+      "reason": "extend to weighted solution, sign, rank deficiency, absorbable projection, new cache contract"
+    },
+    {
+      "entry": "scripts/auriga/df_phase1_data_audit.py",
+      "status": "adapt",
+      "reason": "bound to halo12-clean.h5 and 5 capacity runs; redo membership/leakage logic on clean-smooth via particle_id"
+    },
+    {
+      "entry": "scripts/auriga/df_phase1_model_eval.py + df_phase1_metrics.py",
+      "status": "adapt",
+      "reason": "NLL / velocity moments / W1 screening; adapt checkpoint paths and population to control run dir"
+    },
+    {
+      "entry": "scripts/auriga/df_phase1_outer_confirm.py (+_w128val)",
+      "status": "adapt",
+      "reason": "outer-bin conditional-draw confirmation protocol on clean-val; secondary-set logic reusable"
+    },
+    {
+      "entry": "scripts/flow_sampling.py",
+      "status": "reuse+adapt",
+      "reason": "score machinery reusable; control is a single flow pair (ensemble branch unused); add fixed-point evaluation mode and hash-logged precision"
+    },
+    {
+      "entry": "scripts/flow_ot_flow_matching_conditional.py",
+      "status": "reuse",
+      "reason": "log_prob = log P(x) + log P(v|x) complete"
+    },
+    {
+      "entry": "scripts/plummer/plummer_sphere.py",
+      "status": "adapt+fix",
+      "reason": "draw_from_sphere uses global np.random for azimuth while polar uses rng (seed-layer violation); 1D CDF sampler is trapezoid+interp n=1024 (discretization to calibrate); no oracle input interface"
+    },
+    {
+      "entry": "scripts/fit_all.py + scripts/potential.py",
+      "status": "reuse",
+      "reason": "T4 training entry; add controlled score input, do not fork the training loop"
+    },
+    {
+      "entry": "scripts/auriga/validate_enclosed_mass.py + truth_products.py + plot_pt_*",
+      "status": "reuse",
+      "reason": "Auriga adjudication; truth grids lineage-cached; read from pinned run snapshot paths with sha256"
+    },
+    {
+      "entry": "halo12_all_mass_clean_outer_clump_smooth.h5 potential column (join by particle_id)",
+      "status": "reuse-after-calibration",
+      "reason": "point-sample true potential for the exact clean-smooth population; unit calibration + principal-axis gradient estimation required before audit use (T3 A5 precondition)"
+    },
+    {
+      "entry": "0c7e23f experiments/{datasets/plummer.py,gendata_plummer.py,workflows/score_sources.py} + configs/runs/plummer_*.yaml + tests/test_{plummer,score_sources}.py",
+      "status": "port",
+      "reason": "mock generator (pure CPU, train/test split), FLOW-vs-PLUMMER_ANALYTIC score switch (the P00/P11 entry pattern), oracle/r-cut run configs, analytic tests; port onto this branch with density-matched params from mock_design"
+    },
+    {
+      "entry": "server data/plummer_n*.h5 legacy sample files",
+      "status": "reference-only",
+      "reason": "eta arrays with NO attrs/lineage and row counts inconsistent with filenames; disqualified as inputs, regenerate under the mock_design contract"
+    },
+    {
+      "entry": "scripts/auriga/numerical_checks_20260913.json",
+      "status": "reference",
+      "reason": "historical smoke/pilot FD max-abs ~3e-4 and harmonic CBE units test; not a control-model audit"
+    },
+    {
+      "entry": "run e66ac2dd spectrum products + run b6420956 convergence record",
+      "status": "reuse",
+      "reason": "scale references: lambda bands, truth noise fractions, lambda_reliable=nan"
+    }
+  ],
+  "gaps": [
+    "control model has NEVER had a numerical score-chain audit (audit_df_constraints ran only on the 2026-09-15 old baseline); T1 is genuinely new evidence",
+    "df_gradients.h5 carries no attrs/lineage; every new cache must bind model/code/point/precision hashes per plan 4.2",
+    "no qualified confirmation set, no per-particle acceleration block (alpha* needs calibrated gradient estimation from point-sample potential), no mock NF (see conclusions)"
+  ],
+  "point_sets": {
+    "heldout": {
+      "source": "clean-smooth rows [0, 404903)",
+      "identity": "particle_id",
+      "weights": "mass",
+      "qualification": "exploratory"
+    },
+    "velocity_probes_candidate": {
+      "shells_q": [
+        0.1,
+        0.2,
+        1,
+        2,
+        3,
+        4.5,
+        6,
+        7
+      ],
+      "angular_positions_per_shell": 16,
+      "shared_velocities": 96,
+      "proposal_and_weights": "freeze in T1 card after throughput probe"
+    },
+    "spatial_grid_candidate": {
+      "sobol_radii_kpc": "2:3:30 union 30:5:70 (control Sobol convention)",
+      "n_dirs_per_radius": 2048,
+      "spectrum_grid": "independent 3D grid, window/grid convergence declared",
+      "relation_to_training_grid": "independent (training q_grid resamples every epoch)"
+    },
+    "paired_constraints_t4": "frozen at T4 card"
+  },
+  "stratification": {
+    "edges_q": [
+      0.1,
+      0.2,
+      1,
+      2,
+      3,
+      4.5,
+      6,
+      7
+    ],
+    "reporting_bands_kpc": [
+      [
+        2,
+        10
+      ],
+      [
+        10,
+        30
+      ],
+      [
+        30,
+        50
+      ],
+      [
+        50,
+        70
+      ]
+    ],
+    "mapping_rule": "bands aggregate member strata directly; 30-50 kpc = q[3,4.5) + q[4.5,5)"
+  },
+  "seeds": {
+    "frozen": {
+      "data": 0,
+      "df": 0,
+      "score_sampling": 1,
+      "phi": 2
+    },
+    "new_diagnostic_candidates": {
+      "velocity_probes": 3,
+      "bootstrap_resample": 4,
+      "mock_sampling": 5
+    }
+  },
+  "tolerances": {
+    "scientific": "TBD (user decision); reference scales = control anchors in this manifest",
+    "numerical_candidates_provisional": {
+      "stored_vs_recompute_floored_rel": "median < 1%, p99 < 5%, floor = per-component median |dlnf|",
+      "fd_plateau": "at least 2 adjacent step sizes within 2x of plateau error",
+      "ode_tolerance": "default-vs-strict median rel diff < 0.5%",
+      "rationale": "about 10% of the smallest scientific effect scale intended for detection; must be validated as achievable in T1 before adoption"
+    }
+  },
+  "budget_scope_this_round": {
+    "training": "none",
+    "server_diagnostics": "only via orchestration with committed runner and explicit per-stage authorization",
+    "t1_throughput_probe_candidate": "<= 2048 points, 1 GPU, <= 30 min",
+    "t1_full_cache_candidate": "<= 2 h, 1 GPU",
+    "t2_t3_analytic": "local CPU only"
+  },
+  "campaign_layout": "runs/nf-score-audit/<stage>/{manifest.json, points.h5, arrays.h5, metrics.json, review.md, figures/}"
+}

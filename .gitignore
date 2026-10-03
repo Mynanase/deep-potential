@@ -140,6 +140,7 @@ misc/
 *.json
 !scripts/auriga/options*.json
 !scripts/auriga/numerical_checks*.json
+!docs/history/nf-score-audit/*.json
 
 # Checkpoints
 checkpoints/
@@ -160,3 +161,7 @@ halo12_package.tar.gz
 # Local paper caches and Finder metadata
 .arc/
 .DS_Store
+
+# OpenResearch generates these per session; they are not project source.
+.openresearch/
+.agents/skills/

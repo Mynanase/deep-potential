@@ -35,8 +35,23 @@ sys.path.insert(0, str(HERE.parent))
 from validate_enclosed_mass import (  # noqa: E402
     G_KPC_KMS2_MSUN, load_truth, truth_delta_mass, sobol_directions,
     m_flux_at_radius, rho_from_phi)
-from plot_particle_truth_2d import load_phi_f32  # noqa: E402
 import orx_figstyle as ofs  # noqa: E402
+
+
+def load_phi_f32(run_dir):
+    # Ported inline from the phase-1 plot_particle_truth_2d helper (that
+    # module is not on the phase-2 baseline): latest Phi checkpoint in
+    # float32, x64 state restored around the load.
+    import jax
+    import fit_all
+    prev = bool(jax.config.jax_enable_x64)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        model = fit_all.load_potential(Path(run_dir) / "models" / "Phi",
+                                       checkpoint_index=-1)
+        return model.phi_model
+    finally:
+        jax.config.update("jax_enable_x64", prev)
 
 L_KPC, V_KMS = 10.0, 100.0
 MODELS = ("base", "S1", "gridprior", "innerA", "lambda0p1", "lambda10")
@@ -64,6 +79,13 @@ def main():
     ap.add_argument("--n-dirs", type=int, default=2048)
     ap.add_argument("--sobol-seed", type=int, default=20260917)
     args = ap.parse_args()
+
+    global MODELS, COLOR
+    MODELS = tuple(spec.split("=", 1)[0] for spec in args.model)
+    COLOR.update({"oscpair": "red", "snceiling": "cyan", "anneal": "green"})
+    missing = [l for l in MODELS if l not in COLOR]
+    if missing:
+        raise SystemExit(f"no palette key for model label(s): {missing}")
 
     import jax
     jax.config.update("jax_enable_x64", True)

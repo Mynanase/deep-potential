@@ -1,12 +1,10 @@
-# Agent notes — dpjax-phase2
+# Working notes — dpjax-phase2
 
-This is an OpenResearch project. Use the installed `orx` guide for experiment
-orchestration; its workflow does not need another copy here.
+从 README.md 和 docs/progress.md 了解当前状态，再阅读本次任务相关源码。
+旧实验分支和 docs/history/ 是按需查阅的证据，不是执行清单。
 
-Use `README.md` to orient, then read the source relevant to the current task.
-Historical documents are reference material, not a checklist for every task.
-
-- Production uses host `gpu` and `/home/qiutao/miniforge3/envs/dp-jax/bin/python`; keep that environment intact. Set `JAX_PLATFORMS=cuda` for production (`cpu` locally) and `XLA_PYTHON_CLIENT_PREALLOCATE=false`.
-- Preserve source data and completed run artifacts. `.note/` is private: do not read, commit, or disclose it.
-- Simulation truth is evaluation-only. Preserve signed densities and negative-density diagnostics.
-- Follow nearby code and keep changes direct. Run checks relevant to the change; numerical, loss, or sampling changes need analytic tests and the CPU test suite.
+- 围绕一个研究问题顺序推进，沿用附近的线性研究脚本风格；不额外设计协调角色、任务卡体系或通用框架。
+- 验证与改动相称：公式和单位用小解析对照，数据选择检查实际输入，普通脚本直接运行相关入口。不默认每次提交全套测试，也不重复给已记录的源码计算 hash。
+- orx 用于运行提交快照、启动任务和读取日志；同一工作区持续修改，不为每次修复反复切分支。科研对比保持输入和设置一致。
+- GPU 主机是 gpu，解释器为 /home/qiutao/miniforge3/envs/dp-jax/bin/python；保留已有环境，不自动安装或升级依赖。JAX 显式使用 cuda（本地 cpu），关闭预分配。
+- 保留源数据、已完成结果和实验提交。模拟真值只用于评估，保留负密度；.note/ 是私有笔记，不读取、提交或披露。
