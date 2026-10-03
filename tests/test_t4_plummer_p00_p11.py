@@ -22,15 +22,16 @@ def test_stratified_constraints_are_full_data_and_deterministic():
     starts = np.array([0.11, 0.21, 1.1, 2.1, 3.1, 4.6, 6.1], dtype=np.float32)
     eta[:, 0] = np.tile(starts, len(eta) // len(starts) + 1)[:len(eta)]
     eta[:, 1:] = 0.0
+    # Preserve the quota total while limiting each synthetic bin to 6,250 rows.
     quota_backup = t4.QUOTAS.copy()
     try:
         t4.QUOTAS[:] = np.maximum(1, np.rint(t4.QUOTAS / 64).astype(int))
         t4.N_CONSTRAINTS_BACKUP = t4.N_CONSTRAINTS
         t4.N_CONSTRAINTS = int(t4.QUOTAS.sum())
-        for i in np.flatnonzero(t4.QUOTAS > 71_428):
-            excess = int(t4.QUOTAS[i] - 71_428)
-            t4.QUOTAS[i] -= excess
-            t4.QUOTAS[4] += excess
+        for i in range(len(t4.QUOTAS)):
+            cap = min(6_250, int(t4.QUOTAS[i]))
+            t4.QUOTAS[i] = cap
+        t4.QUOTAS[-1] += t4.N_CONSTRAINTS - int(t4.QUOTAS.sum())
         rows, constrained = t4.stratified_constraints(eta)
         rows2, constrained2 = t4.stratified_constraints(eta.copy())
         np.testing.assert_array_equal(rows, rows2)

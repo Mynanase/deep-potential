@@ -35,7 +35,7 @@ N_CONSTRAINTS = 262145
 PHI_EPOCHS = 256
 PHI_BATCH_SIZE = 1024
 Q_EDGES = np.array([0.1, 0.2, 1.0, 2.0, 3.0, 4.5, 6.0, 7.0])
-QUOTAS = np.array([41943, 104858, 52429, 18350, 13107, 20972, 10486], dtype=np.int64)
+QUOTAS = np.array([31501, 104858, 45885, 18350, 13107, 37350, 11094], dtype=np.int64)
 REPORT_BANDS_KPC = ((2.0, 10.0), (10.0, 30.0), (30.0, 50.0), (50.0, 70.0))
 EVAL_RADII_KPC = np.concatenate((np.arange(2.0, 30.0, 3.0), np.arange(30.0, 70.1, 5.0)))
 N_EVAL_DIRS = 2048
