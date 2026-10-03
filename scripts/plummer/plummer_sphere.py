@@ -71,7 +71,9 @@ def draw_from_sphere(n, rng=None):
     """
     if rng is None:
         rng = np.random.default_rng()
-    phi = np.random.uniform(0., 2*np.pi, size=n)
+    # Every random draw must come from the caller-supplied generator so that
+    # data generation remains reproducible under the frozen seed-layer rules.
+    phi = rng.uniform(0., 2*np.pi, size=n)
     theta = np.arccos(rng.uniform(-1., 1., size=n))
     x = np.sin(theta) * np.cos(phi)
     y = np.sin(theta) * np.sin(phi)
@@ -85,11 +87,11 @@ class UnitPlummerSphere:
     with G = M = a = 1.
     """
 
-    def __init__(self, r_max=None):
+    def __init__(self, r_max=None, speed_grid_n=1000):
         self._v_sampler = get_1d_sampler(
             lambda v: v**2 * (1 - v**2 / 2)**(7/2),
             0., np.sqrt(2.)-1.e-8,
-            n=1000
+            n=speed_grid_n
         )
         self.df_norm = 24*jnp.sqrt(2.) / (7*jnp.pi**3)
         self.r_max = r_max
