@@ -188,7 +188,6 @@ def train(eta, normalizer, run_dir: Path, epochs: int, batch_size: int,
                     loss_scalar = float(jax.device_get(loss_value))
                     handle.write(f"{step},{epoch},{loss_scalar:.9g},{val_loss:.9g}\n")
                     handle.flush()
-        print(f"[t4a.train] step={step} epoch={epoch} loss={loss_scalar:.6g} val_loss={val_loss:.6g}", flush=True)
                 step += 1
     checkpoint = run_dir / "final.mpck"
     save(checkpoint, {"params": params, "step": step, "schema": SCHEMA})
