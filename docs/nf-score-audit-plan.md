@@ -1,3 +1,5 @@
+<!-- Deprecated: retained only for audit provenance. Current entry point:
+     docs/nf-score-audit-v2.md. -->
 <!-- Frozen research-line protocol. Body is the user-authored plan v1 (2026-09-30),
      intake-reviewed read-only at snapshot 668c6e42bd746c7e20ddf9378223305ff25d27f0;
      see Appendix C for the review record. Execution authorization is per task card. -->

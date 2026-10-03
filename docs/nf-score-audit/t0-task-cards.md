@@ -1,3 +1,5 @@
+<!-- Deprecated: retained only for audit provenance. Current entry point:
+     docs/nf-score-audit-v2.md. -->
 # T0 任务卡：A / B / C（派发时逐张复制；未列出的训练与后续阶段不在授权范围）
 
 通用：执行说明 `docs/nf-score-audit-plan.md` 第 1–4 节 ＋ 对应任务卡 ＋ 必要附录；交接格式见其第 6 节；上游输入以 `t0-manifest.json` 为准；交付写入 `runs/nf-score-audit/<stage>/` 并同步登记 manifest。
