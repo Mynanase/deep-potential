@@ -2,8 +2,9 @@
 
 用 conditional Flow Matching 拟合相空间分布，再通过稳态 CBE 推断引力势。
 这是持续研究的工作仓库；主线是 `codex/phase2-baseline-2026-09-22`。
-已合入最近的 NF 审计、Plummer oracle 和 T4 基础实现；T4 系列实验在冻结的 orx 分支上，
-收线报告归档于 [docs/reports/](reports/t4-plummer-p00-p11-paired-phi/t4-report.md)。
+已合入最近的 NF 审计、Plummer oracle 和 T4 基础实现；T4 系列与 Halo12 均匀约束消融的代码在冻结的 orx 分支上，
+收线报告归档于 [docs/reports/t4-plummer-p00-p11-paired-phi/t4-report.md](reports/t4-plummer-p00-p11-paired-phi/t4-report.md)（T4 系列）与
+[docs/reports/halo12-uniform-constraint-ablation/report.md](reports/halo12-uniform-constraint-ablation/report.md)（Halo12 消融）。
 
 ## 从这里开始
 
@@ -28,6 +29,7 @@
 | Plummer 解析 oracle / 局部力 | [plummer_oracle.py](scripts/plummer/plummer_oracle.py)、[local_force_inversion.py](scripts/auriga/local_force_inversion.py) |
 | Plummer conditional NF | [t4a_plummer_nf.py](scripts/auriga/t4a_plummer_nf.py)、[T4a runner](scripts/auriga/run_t4a_plummer_mock_nf.sh) |
 | P00/P11 Phi 对比 | [t4_plummer_p00_p11.py](scripts/auriga/t4_plummer_p00_p11.py)、[T4 runner](scripts/auriga/run_t4_plummer_p00_p11.sh) |
+| Halo12 均匀约束消融 | 冻结分支 `orx/halo12-uniform-volume-df-constraint-ablation-2`（runner + options-uniform.json + uniform_volume 采样模式） |
 | 真值与质量评估 | [truth_products.py](scripts/auriga/truth_products.py)、[validate_enclosed_mass.py](scripts/auriga/validate_enclosed_mass.py) |
 | 直接绘图 | [plot_potential_2d.py](scripts/plot_potential_2d.py)、[plot_radial_marginals.py](scripts/plot_radial_marginals.py)、[plot_enclosed_mass.py](scripts/plot_enclosed_mass.py) |
 

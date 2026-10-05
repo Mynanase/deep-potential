@@ -1,9 +1,11 @@
 # 近期研究状态（2026-10-05）
 
-当前问题：T4 Plummer 线已收线。外区负密度完成三层根因分解；NF 外区精度的两类加权修复（loss 级、采样级）均已否证；
-下一步转向容量/参数化方向或把外区 score 偏差进误差预算，并把采样消融迁移到 Auriga。
-完整报告与图归档在 [docs/reports/t4-plummer-p00-p11-paired-phi/t4-report.md](reports/t4-plummer-p00-p11-paired-phi/t4-report.md)，
-源 artifacts 目录为 `t4-plummer-p00-p11-paired-phi/`（含随图保存的绘图脚本；repo 归档只收报告、数据与图）。
+当前问题：T4 Plummer 线与 Halo12 均匀约束消融均已收线。外区负密度三层根因完成；NF 外区精度的两类加权修复
+（loss 级、采样级）均否证；Halo12 上体积均匀约束反向恶化外区（约束重分配×score 偏差交互）。
+下一步候选：外区 score 质量（容量/径向参数化）、偏差进误差预算、或半径平衡约束的中间设计。
+T4 报告：[docs/reports/t4-plummer-p00-p11-paired-phi/t4-report.md](reports/t4-plummer-p00-p11-paired-phi/t4-report.md)；
+Halo12 消融报告：[docs/reports/halo12-uniform-constraint-ablation/report.md](reports/halo12-uniform-constraint-ablation/report.md)；
+源 artifacts 目录为 `t4-plummer-p00-p11-paired-phi/` 与 `halo12-uniform-constraint-ablation/`（repo 归档只收报告、数据与图）。
 
 ## 已收线的结论（全部有 run 证据，报告内有 run/commit 对照）
 
@@ -23,14 +25,21 @@
    且带系统方向（60-70 kpc s_p 低估 ~25%，本轮新增 signed-bias 读数）。
 6. **拖尾发现**（重采样节点首次启动时）：mock 无 radial cut（拖尾至 r≈8105 kpc），未截断 |q|²+1 的加权质量 68.7% 落在 r>70 kpc——
    9e27e5ec 的 loss 加权目标实际被拖尾支配，其否证范围应表述为“未截断的 |q|²+1 权重不可行”（该节点已补记）。
+7. **Halo12 均匀约束消融否证**（节点 `fe48bffb`，run `49af3bb9`，与冻结 control `2b32eb04` 同码配对）：
+   固定 score 源/网络/预算/先验只换约束采样为体积均匀+无权重，外区 dM 8.8→13.4%、8.1→20.8%，外区负密度
+   2.3%→12.7%（峰值 60 kpc 壳层），内区负密度清零但内区 dM 1.25→37.4%、总质量低估 20%——体积均匀把 92% 约束
+   质量堆到 score 最差的外区，放大而非消除偏差；control 的质量加权+S1 权重实为对 score 偏差的隐性正则。
+   Plummer“均匀清零”依赖完美 score，不可迁移。
 
 ## 下一步
 
-- **NF 外区精度**：|q|²+1 族加权在 loss 级与采样级双否证后，剩余方向是容量/径向参数化（径向特征化、更宽/更长训练）、
-  spatial 边缘非 NF 参数化，或接受外区 score 偏差进误差预算（signed-bias 读数表明误差有方向，可按径向偏置建模）；
-  更陡/定向权重与“转移+加预算”未测。`sample_weights` 库入口保留，可直接用于后续训练采样实验。
-- **Auriga 迁移**：第一优先做 Halo12 control 采样消融（约束改体积均匀/半径平衡 + 去质量权重，同预算重跑 Phi）——
-  这是 T4 已坐实的采样设计伪影通道，与 NF 训练加权无关；NF 外区 score 偏差按上一条处理。
+- **NF 外区精度（Plummer+Halo12 共同瓶颈）**：|q|²+1 族加权在 loss 级与采样级双否证，Halo12 均匀约束又证明
+  约束重分配不能修复外区（score 偏差被放大）；剩余方向是容量/径向参数化、spatial 边缘非 NF 参数化，
+  或外区 score 偏差进误差预算（signed-bias 读数表明误差有方向，可按径向偏置建模）。
+- **Halo12 约束设计**：control 的质量加权+S1+权重可重表述为对 score 偏差的隐性正则；内区负密度（1.9–2.4%）
+  可用重分配压掉但体积均匀的代价（内区 dM 37%）不可接受；半径平衡+无权重的中间设计（内区 ~43% 留驻）
+  未测，是自然后续；判读框架沿用双指标（dM + 负密度）与峰值壳层定位。`sample_weights`/`uniform_volume`
+  两个库入口保留可复用。
 
 ## 已有证据
 
@@ -45,6 +54,7 @@
 | T4 均匀约束 1M | `1460a815` / `e149191` | 结论 2 规模项 + 结论 3 方差通道排除。 |
 | T4a 半径加权重训 | `10df043b` `a398bc7a` `226ed465` / `67cea34` | 结论 4+6，节点已冻结；未截断权重不可行，截断版由子节点检验。 |
 | T4a batch 重采样 | `308c5b75` / `287ba5f` | 结论 5+6，节点 `bceded5c` 已冻结；首个 run `da6a60b0` 因未截断权重取消。 |
+| Halo12 均匀约束消融 | `49af3bb9` / `382e84d` | 体积均匀反向恶化外区（dM 8.8→13.4%、8.1→20.8%；负密度 2.3%→12.7%），内区清零但质量尺度崩（37% dM）；节点 `fe48bffb` 冻结。 |
 
 T4a 训练 checkpoint 来自 `dac804e7`；资格 run 只复用已完成训练修复下游计算，不当作重新训练。
 
@@ -59,7 +69,9 @@ T4a 训练 checkpoint 来自 `dac804e7`；资格 run 只复用已完成训练修
 
 T4 系列代码在实验分支 `orx/t4-plummer-p00-versus-p11-paired-phi-2` → `orx/t4-paired-figures-and-significance-stats`
 → `orx/t4-uniform-volume-constraints-ablation` → `orx/t4-uniform-constraints-at-1m-points`
-→ `orx/t4a-radius-reweighted-nf-retrain-with-score-corr` → `orx/t4a-conditional-flow-gumbel-top-k-radius-resampl`
+→ `orx/t4a-radius-reweighted-nf-retrain-with-score-corr` → `orx/t4a-conditional-flow-gumbel-top-k-radius-resampl`；
+Halo12 均匀约束消融在根节点另一子分支 `orx/halo12-uniform-volume-df-constraint-ablation-2`（节点 fe48bffb，已冻结；
+同谱系作废节点 29c2746c 保留归档记录）。
 （节点链 bbe6566d → 8486e2dc → c4d2ce46 → 86b324ac → 9e27e5ec → bceded5c，前四个已收线，末两个按否定性结论冻结）。
 `scripts/auriga/plot_t4_slices.py` 按约定留在 worktree，未入主线；切片图随 artifacts 报告保留。
 运行日志用 `orx logs <run-id>` 查询；本地 CPU run、服务器 checkpoint、项目 artifacts 保持原路径。
