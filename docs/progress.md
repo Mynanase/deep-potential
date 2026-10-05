@@ -1,7 +1,7 @@
 # 近期研究状态（2026-10-05）
 
-当前问题：T4 Plummer 线已收线。外区负密度完成三层根因分解，损失加权改善 NF 外区精度被三次否证；
-下一步是 conditional 流的采样级重采样（已设计未实施），以及把采样消融迁移到 Auriga。
+当前问题：T4 Plummer 线已收线。外区负密度完成三层根因分解；NF 外区精度的两类加权修复（loss 级、采样级）均已否证；
+下一步转向容量/参数化方向或把外区 score 偏差进误差预算，并把采样消融迁移到 Auriga。
 完整报告与图归档在 [docs/reports/t4-plummer-p00-p11-paired-phi/t4-report.md](reports/t4-plummer-p00-p11-paired-phi/t4-report.md)，
 源 artifacts 目录为 `t4-plummer-p00-p11-paired-phi/`（含随图保存的绘图脚本；repo 归档只收报告、数据与图）。
 
@@ -17,15 +17,20 @@
    score 误差相同（4.5%→17.6% 随半径单调），误差是半径的光滑函数、无记忆，排除“生成点落在未处”解释。
 4. **损失级加权否证**（节点 `9e27e5ec` 按否定性结论冻结）：joint 加权把 spatial 目标变成重尾 w·p(q)，训练崩溃；
    conditional-only 加权不提升外区样本到达率，w² 梯度噪声主导，s_p 全域劣化（内区 3.6%→84%、外区 12.8%→115%）。**reweighting ≠ resampling**。
+5. **采样级重采样否证**（节点 `bceded5c`，run `308c5b75`）：conditional 流每 batch 按 p∝w(q)=min(|q|²+1, 50) Gumbel-top-k 抽样
+   （纯转移、同预算；库入口 train_flow_matching_model 加可选 sample_weights，默认 None 主线不变），外区负密度不动（47.4→48.6%、45.6→48.0%），
+   远外区 force 误差翻倍（10.6→18.4%），仅 10-30 kpc 小赚；30-50 kpc（到达 ×3.8、无拖尾邻接）同样无改善——外区条件速度误差不是到达率问题，
+   且带系统方向（60-70 kpc s_p 低估 ~25%，本轮新增 signed-bias 读数）。
+6. **拖尾发现**（重采样节点首次启动时）：mock 无 radial cut（拖尾至 r≈8105 kpc），未截断 |q|²+1 的加权质量 68.7% 落在 r>70 kpc——
+   9e27e5ec 的 loss 加权目标实际被拖尾支配，其否证范围应表述为“未截断的 |q|²+1 权重不可行”（该节点已补记）。
 
 ## 下一步
 
-- **重采样子节点**（已设计，未实施）：conditional 流训练 batch 索引按 p∝w(q) 的 Gumbel-top-k 抽样，
-  库入口加可选参数 `sample_weights=None` 保持主线行为不变；spatial 流不加权、无需 score 校正、
-  val 保持原分布与单位权重。qualify 增加分半径 signed bias（区分系统偏移与拟合容量重分配）与分 s_q/s_p 幅度。
-  先跑纯转移版（同预算同步数）拿内外区 trade-off 斜率；若要求全域不退，再评估“转移+加预算”。
-- **Auriga 迁移**：第一优先做 Halo12 control 采样消融（约束改体积均匀/半径平衡 + 去质量权重，同预算重跑 Phi）；
-  NF 外区 score 偏差或走重采样/容量路线，或作为已知系统误差进 Auriga 归因误差预算。
+- **NF 外区精度**：|q|²+1 族加权在 loss 级与采样级双否证后，剩余方向是容量/径向参数化（径向特征化、更宽/更长训练）、
+  spatial 边缘非 NF 参数化，或接受外区 score 偏差进误差预算（signed-bias 读数表明误差有方向，可按径向偏置建模）；
+  更陡/定向权重与“转移+加预算”未测。`sample_weights` 库入口保留，可直接用于后续训练采样实验。
+- **Auriga 迁移**：第一优先做 Halo12 control 采样消融（约束改体积均匀/半径平衡 + 去质量权重，同预算重跑 Phi）——
+  这是 T4 已坐实的采样设计伪影通道，与 NF 训练加权无关；NF 外区 score 偏差按上一条处理。
 
 ## 已有证据
 
@@ -38,7 +43,8 @@
 | T4 P00/P11 配对 | `6b9d2d11` / `12b9106` | 结论 1；每臂单次训练，种子方差未覆盖（效应量 vs CI 宽度余量两个量级）。 |
 | T4 体积均匀采样消融 | `8e935d0e` / `cd2d805` | 结论 2；内区 2–10 kpc 力中位升至 0.65%（体积均匀下点数仅 ~0.3%，信息量转移）。 |
 | T4 均匀约束 1M | `1460a815` / `e149191` | 结论 2 规模项 + 结论 3 方差通道排除。 |
-| T4a 半径加权重训 | `10df043b` `a398bc7a` `226ed465` / `67cea34` | 结论 4，节点已冻结；否定性结论不可原地翻案，后续走子节点。 |
+| T4a 半径加权重训 | `10df043b` `a398bc7a` `226ed465` / `67cea34` | 结论 4+6，节点已冻结；未截断权重不可行，截断版由子节点检验。 |
+| T4a batch 重采样 | `308c5b75` / `287ba5f` | 结论 5+6，节点 `bceded5c` 已冻结；首个 run `da6a60b0` 因未截断权重取消。 |
 
 T4a 训练 checkpoint 来自 `dac804e7`；资格 run 只复用已完成训练修复下游计算，不当作重新训练。
 
@@ -53,7 +59,8 @@ T4a 训练 checkpoint 来自 `dac804e7`；资格 run 只复用已完成训练修
 
 T4 系列代码在实验分支 `orx/t4-plummer-p00-versus-p11-paired-phi-2` → `orx/t4-paired-figures-and-significance-stats`
 → `orx/t4-uniform-volume-constraints-ablation` → `orx/t4-uniform-constraints-at-1m-points`
-→ `orx/t4a-radius-reweighted-nf-retrain-with-score-corr`（节点链 bbe6566d → 8486e2dc → c4d2ce46 → 86b324ac → 9e27e5ec，前四个已收线，末节点按否定性结论冻结）。
+→ `orx/t4a-radius-reweighted-nf-retrain-with-score-corr` → `orx/t4a-conditional-flow-gumbel-top-k-radius-resampl`
+（节点链 bbe6566d → 8486e2dc → c4d2ce46 → 86b324ac → 9e27e5ec → bceded5c，前四个已收线，末两个按否定性结论冻结）。
 `scripts/auriga/plot_t4_slices.py` 按约定留在 worktree，未入主线；切片图随 artifacts 报告保留。
 运行日志用 `orx logs <run-id>` 查询；本地 CPU run、服务器 checkpoint、项目 artifacts 保持原路径。
 重开会话时带上当前问题、相关代码和所需输入即可；完成一次判断后更新本页。
